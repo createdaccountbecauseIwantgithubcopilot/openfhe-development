@@ -866,7 +866,7 @@ public:
     * @return true on success
     */
     template <typename ST>
-    static bool DeserializeEvalAutomorphismKey(std::ostream& ser, const ST& sertype, const std::string& keyTag,
+    static bool DeserializeEvalAutomorphismKey(std::istream& ser, const ST& sertype, const std::string& keyTag,
                                                const std::vector<uint32_t>& indexList) {
         if (indexList.empty())
             OPENFHE_THROW("indexList may not be empty");
@@ -884,8 +884,8 @@ public:
         // create a new map with evalkeys for the specified indices
         std::map<uint32_t, EvalKey<Element>> newMap;
         for (const uint32_t indx : indexList) {
-            const auto& key = keyMapIt->find(indx);
-            if (key == keyMapIt->end()) {
+            const auto& key = keyMapIt->second->find(indx);
+            if (key == keyMapIt->second->end()) {
                 OPENFHE_THROW("No automorphism key generated for index [" + std::to_string(indx) + "] within keyTag [" +
                               keyTag + "].");
             }
@@ -896,6 +896,58 @@ public:
             std::make_shared<std::map<uint32_t, EvalKey<Element>>>(newMap), keyTag);
 
         return true;
+    }
+
+    /**
+    * @brief Serializes bootstrap EvalAutomorphism keys associated with the given key tag
+    *
+    * @param ser stream to serialize to
+    * @param sertype type of serialization
+    * @param cc crypto context
+    * @param keyTag secret key tag
+    * @param slots number of slots for which the bootstrapping is performed
+    */
+    template <typename ST>
+    static bool SerializeEvalBootstrapKey(std::ostream& ser, const ST& sertype, const CryptoContext<Element>& cc,
+                                          const std::string& keyTag, uint32_t slots) {
+        const auto indexList = cc->GetScheme()->EvalBootstrapKeyMapIndices(cc, slots);
+        std::map<std::string, std::shared_ptr<std::map<uint32_t, EvalKey<Element>>>> keyMap = {
+            {keyTag, CryptoContextImpl<Element>::GetPartialEvalAutomorphismKeyMapPtr(keyTag, indexList)}};
+
+        Serial::Serialize(keyMap, ser, sertype);
+
+        return true;
+    }
+    /**
+    * @brief Deserializes bootstrap EvalAutomorphism keys for an array of specific indices associated with the given keyTag
+    *
+    * @param ser stream to deserialize from
+    * @param sertype type of serialization
+    * @param keyTag secret key tag
+    * @param indexList array of specific indices to deserialize keys for
+    * @return true on success
+    */
+    template <typename ST>
+    static bool DeserializeEvalBootstrapKey(std::istream& ser, const ST& sertype, const std::string& keyTag,
+                                            const std::vector<uint32_t>& indexList) {
+        return CryptoContextImpl<Element>::DeserializeEvalAutomorphismKey(ser, sertype, keyTag, indexList);
+    }
+
+    /**
+    * @brief Deserializes bootstrap EvalAutomorphism keys derived from the given crypto context, key tag, and slots count
+    *
+    * @param ser stream to deserialize from
+    * @param sertype type of serialization
+    * @param cc crypto context
+    * @param keyTag secret key tag
+    * @param slots number of slots for which the bootstrapping was performed
+    * @return true on success
+    */
+    template <typename ST>
+    static bool DeserializeEvalBootstrapKey(std::istream& ser, const ST& sertype, const CryptoContext<Element>& cc,
+                                            const std::string& keyTag, uint32_t slots) {
+        const auto indexList = cc->GetScheme()->EvalBootstrapKeyMapIndices(cc, slots);
+        return CryptoContextImpl<Element>::DeserializeEvalAutomorphismKey(ser, sertype, keyTag, indexList);
     }
 
     /**
