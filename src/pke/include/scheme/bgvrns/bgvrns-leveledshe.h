@@ -44,7 +44,7 @@ namespace lbcrypto {
 
 class LeveledSHEBGVRNS : public LeveledSHERNS {
 public:
-    virtual ~LeveledSHEBGVRNS() = default;
+    ~LeveledSHEBGVRNS() override = default;
 
     /////////////////////////////////////
     // AUTOMORPHISM

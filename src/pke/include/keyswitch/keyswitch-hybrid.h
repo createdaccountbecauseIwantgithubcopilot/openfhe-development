@@ -62,15 +62,10 @@ namespace lbcrypto {
     Uses a mix of BV and GHS keyswitching for efficient key-switching
  */
 class KeySwitchHYBRID : public KeySwitchRNS {
-    using ParmType = typename DCRTPoly::Params;
-    using DugType  = typename DCRTPoly::DugType;
-    using DggType  = typename DCRTPoly::DggType;
-    using TugType  = typename DCRTPoly::TugType;
-
 public:
     KeySwitchHYBRID() = default;
 
-    virtual ~KeySwitchHYBRID() = default;
+    ~KeySwitchHYBRID() override = default;
 
     EvalKey<DCRTPoly> KeySwitchGenInternal(const PrivateKey<DCRTPoly> oldPrivateKey,
                                            const PrivateKey<DCRTPoly> newPrivateKey) const override;

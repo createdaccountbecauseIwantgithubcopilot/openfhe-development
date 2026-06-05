@@ -135,7 +135,7 @@ private:
     using TugType  = typename DCRTPoly::TugType;
 
 public:
-    virtual ~FHECKKSRNS() = default;
+    ~FHECKKSRNS() override = default;
 
     //------------------------------------------------------------------------------
     // Bootstrap Wrapper

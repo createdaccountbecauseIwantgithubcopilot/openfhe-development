@@ -49,7 +49,7 @@ namespace lbcrypto {
  */
 class LeveledSHERNS : public LeveledSHEBase<DCRTPoly> {
 public:
-    virtual ~LeveledSHERNS() = default;
+    ~LeveledSHERNS() override = default;
 
     /////////////////////////////////////////
     // SHE NEGATION

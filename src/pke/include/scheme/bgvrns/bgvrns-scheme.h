@@ -52,7 +52,7 @@ public:
         this->m_ParamsGen = std::make_shared<ParameterGenerationBGVRNS>();
     }
 
-    virtual ~SchemeBGVRNS() {}
+    ~SchemeBGVRNS() override = default;
 
     bool operator==(const SchemeBase<DCRTPoly>& sch) const override {
         return (typeid(sch) == typeid(SchemeBGVRNS));

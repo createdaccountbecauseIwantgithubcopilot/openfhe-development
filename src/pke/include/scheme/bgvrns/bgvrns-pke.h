@@ -43,14 +43,8 @@
 namespace lbcrypto {
 
 class PKEBGVRNS : public PKERNS {
-    using ParmType = typename DCRTPoly::Params;
-    using IntType  = typename DCRTPoly::Integer;
-    using DugType  = typename DCRTPoly::DugType;
-    using DggType  = typename DCRTPoly::DggType;
-    using TugType  = typename DCRTPoly::TugType;
-
 public:
-    virtual ~PKEBGVRNS() {}
+    ~PKEBGVRNS() override = default;
 
     /**
    * Method for decrypting plaintext using LBC

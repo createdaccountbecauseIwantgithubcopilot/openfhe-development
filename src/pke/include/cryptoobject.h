@@ -68,17 +68,9 @@ public:
 
     virtual ~CryptoObject() = default;
 
-    CryptoObject& operator=(const CryptoObject& rhs) {
-        m_context = rhs.m_context;
-        m_keyTag  = rhs.m_keyTag;
-        return *this;
-    }
+    CryptoObject& operator=(const CryptoObject& rhs) = default;
 
-    CryptoObject& operator=(CryptoObject&& rhs) noexcept {
-        m_context = std::move(rhs.m_context);
-        m_keyTag  = std::move(rhs.m_keyTag);
-        return *this;
-    }
+    CryptoObject& operator=(CryptoObject&& rhs) noexcept = default;
 
     bool operator==(const CryptoObject& rhs) const {
         return m_context.get() == rhs.m_context.get() && m_keyTag == rhs.m_keyTag;

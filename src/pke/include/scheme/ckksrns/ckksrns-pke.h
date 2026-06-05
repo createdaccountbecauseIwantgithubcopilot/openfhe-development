@@ -43,14 +43,8 @@
 namespace lbcrypto {
 
 class PKECKKSRNS : public PKERNS {
-    using ParmType = typename DCRTPoly::Params;
-    using IntType  = typename DCRTPoly::Integer;
-    using DugType  = typename DCRTPoly::DugType;
-    using DggType  = typename DCRTPoly::DggType;
-    using TugType  = typename DCRTPoly::TugType;
-
 public:
-    virtual ~PKECKKSRNS() = default;
+    ~PKECKKSRNS() override = default;
 
     /**
    * Method for decrypting plaintext with noise flooding

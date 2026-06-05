@@ -63,7 +63,7 @@ class SchemeRNS : public SchemeBase<DCRTPoly> {
 public:
     SchemeRNS() = default;
 
-    virtual ~SchemeRNS() = default;
+    ~SchemeRNS() override = default;
 
     void SetKeySwitchingTechnique(KeySwitchTechnique ksTech) {
         if (ksTech == BV) {

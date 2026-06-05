@@ -80,13 +80,14 @@ class KeyPair;
  */
 template <class Element>
 class MultipartyBase {
+    constexpr static std::string_view NOT_SUPPORTED_ERROR = "This function is not supported";
+
+protected:
     using ParmType = typename Element::Params;
     using IntType  = typename Element::Integer;
     using DugType  = typename Element::DugType;
     using DggType  = typename Element::DggType;
     using TugType  = typename Element::TugType;
-
-    constexpr static std::string_view NOT_SUPPORTED_ERROR = "This function is not supported";
 
 public:
     virtual ~MultipartyBase() = default;

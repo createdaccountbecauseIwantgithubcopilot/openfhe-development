@@ -118,7 +118,7 @@ public:
     /**
    * Destructor
    */
-    virtual ~CiphertextImpl() = default;
+    ~CiphertextImpl() override = default;
 
     /**
    * Assignment Operator.

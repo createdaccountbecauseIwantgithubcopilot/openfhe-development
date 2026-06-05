@@ -52,7 +52,7 @@ public:
     /**
    * Default constructor
    */
-    Metadata() {}
+    Metadata() = default;
 
     /**
    * Copy constructor
@@ -64,7 +64,7 @@ public:
     /**
    * Destructor
    */
-    virtual ~Metadata() {}
+    virtual ~Metadata() = default;
 
     /**
    * This method creates a copy of the Metadata object

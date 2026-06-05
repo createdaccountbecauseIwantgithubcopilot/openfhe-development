@@ -78,7 +78,7 @@ struct BGVNoiseEstimates {
 
 class ParameterGenerationBGVRNS : public ParameterGenerationRNS {
 public:
-    virtual ~ParameterGenerationBGVRNS() {}
+    ~ParameterGenerationBGVRNS() override = default;
 
     /*
    * Method that generates parameters for the BGV RNS scheme.

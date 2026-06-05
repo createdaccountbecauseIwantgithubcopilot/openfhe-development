@@ -44,7 +44,7 @@ namespace lbcrypto {
 
 class FHEBFVRNS : public FHERNS {
 public:
-    virtual ~FHEBFVRNS() {}
+    ~FHEBFVRNS() override = default;
 
     /////////////////////////////////////
     // SERIALIZATION

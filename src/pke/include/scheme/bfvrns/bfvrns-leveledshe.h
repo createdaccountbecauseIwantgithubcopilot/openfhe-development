@@ -47,9 +47,7 @@ namespace lbcrypto {
 
 class LeveledSHEBFVRNS : public LeveledSHERNS {
 public:
-    virtual ~LeveledSHEBFVRNS() = default;
-
-    using LeveledSHERNS::EvalAddInPlace;
+    ~LeveledSHEBFVRNS() override = default;
 
     /**
    * Virtual function to define the interface for homomorphic addition of
@@ -58,10 +56,9 @@ public:
    * @param ciphertext the input ciphertext.
    * @param plaintext the input plaintext.
    */
+    using LeveledSHERNS::EvalAddInPlace;  // bring the inherited overload set back into scope
     void EvalAddInPlace(Ciphertext<DCRTPoly>& ciphertext, ConstPlaintext& plaintext) const override;
 
-    using LeveledSHERNS::EvalSubInPlace;
-
     /**
    * Virtual function to define the interface for homomorphic addition of
    * ciphertexts.
@@ -69,13 +66,8 @@ public:
    * @param ciphertext the input ciphertext.
    * @param plaintext the input plaintext.
    */
+    using LeveledSHERNS::EvalSubInPlace;  // bring the inherited overload set back into scope
     void EvalSubInPlace(Ciphertext<DCRTPoly>& ciphertext, ConstPlaintext& plaintext) const override;
-
-    using LeveledSHERNS::EvalMult;
-    using LeveledSHERNS::EvalMultInPlace;
-
-    using LeveledSHERNS::EvalSquare;
-    using LeveledSHERNS::EvalSquareInPlace;
 
     /**
    * Virtual function to define the interface for multiplicative homomorphic
@@ -85,23 +77,22 @@ public:
    * @param ciphertext2 the input ciphertext.
    * @return the new ciphertext.
    */
+    using LeveledSHERNS::EvalMult;  // bring the inherited overload set back into scope
     Ciphertext<DCRTPoly> EvalMult(ConstCiphertext<DCRTPoly>& ciphertext1,
                                   ConstCiphertext<DCRTPoly>& ciphertext2) const override;
-
-    Ciphertext<DCRTPoly> EvalSquare(ConstCiphertext<DCRTPoly>& ciphertext) const override;
-
     Ciphertext<DCRTPoly> EvalMult(ConstCiphertext<DCRTPoly>& ciphertext1, ConstCiphertext<DCRTPoly>& ciphertext2,
                                   const EvalKey<DCRTPoly> evalKey) const override;
-
+    using LeveledSHERNS::EvalMultInPlace;  // bring the inherited overload set back into scope
     void EvalMultInPlace(Ciphertext<DCRTPoly>& ciphertext1, ConstCiphertext<DCRTPoly>& ciphertext2,
                          const EvalKey<DCRTPoly> evalKey) const override;
+    void EvalMultCoreInPlace(Ciphertext<DCRTPoly>& ciphertext, NativeInteger scalar) const;
 
+    using LeveledSHERNS::EvalSquare;  // bring the inherited overload set back into scope
+    Ciphertext<DCRTPoly> EvalSquare(ConstCiphertext<DCRTPoly>& ciphertext) const override;
     Ciphertext<DCRTPoly> EvalSquare(ConstCiphertext<DCRTPoly>& ciphertext,
                                     const EvalKey<DCRTPoly> evalKey) const override;
-
+    using LeveledSHERNS::EvalSquareInPlace;  // bring the inherited overload set back into scope
     void EvalSquareInPlace(Ciphertext<DCRTPoly>& ciphertext1, const EvalKey<DCRTPoly> evalKey) const override;
-
-    void EvalMultCoreInPlace(Ciphertext<DCRTPoly>& ciphertext, NativeInteger scalar) const;
 
     // We do not need to support LeveledSHEBFVRNS::Eval*Mutable(InPlace) as no automated adjustment of ciphertexts is
     // typically done in BFV. These functions throw an exception if called

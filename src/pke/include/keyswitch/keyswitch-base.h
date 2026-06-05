@@ -59,7 +59,11 @@ namespace lbcrypto {
  */
 template <class Element>
 class KeySwitchBase {
+protected:
     using ParmType = typename Element::Params;
+    using DugType  = typename Element::DugType;
+    using DggType  = typename Element::DggType;
+    using TugType  = typename Element::TugType;
 
     constexpr static std::string_view NOT_SUPPORTED_ERROR = "This function is not supported";
 

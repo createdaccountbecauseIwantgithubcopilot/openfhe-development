@@ -44,7 +44,7 @@ namespace lbcrypto {
 
 class PREBFVRNS : public PRERNS {
 public:
-    virtual ~PREBFVRNS() {}
+    ~PREBFVRNS() override = default;
 
     /////////////////////////////////////
     // SERIALIZATION

@@ -44,7 +44,7 @@ namespace lbcrypto {
 
 class AdvancedSHEBFVRNS : public AdvancedSHERNS {
 public:
-    virtual ~AdvancedSHEBFVRNS() {}
+    ~AdvancedSHEBFVRNS() override = default;
 
     /////////////////////////////////////
     // SERIALIZATION

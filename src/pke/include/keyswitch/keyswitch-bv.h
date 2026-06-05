@@ -54,15 +54,10 @@ namespace lbcrypto {
  * Requires the computation of a quadratic number of NTTs.
  */
 class KeySwitchBV : public KeySwitchRNS {
-    using ParmType = typename DCRTPoly::Params;
-    using DugType  = typename DCRTPoly::DugType;
-    using DggType  = typename DCRTPoly::DggType;
-    using TugType  = typename DCRTPoly::TugType;
-
 public:
     KeySwitchBV() = default;
 
-    virtual ~KeySwitchBV() = default;
+    ~KeySwitchBV() override = default;
 
     EvalKey<DCRTPoly> KeySwitchGenInternal(const PrivateKey<DCRTPoly> oldPrivateKey,
                                            const PrivateKey<DCRTPoly> newPrivateKey) const override;

@@ -43,14 +43,8 @@
 namespace lbcrypto {
 
 class PKEBFVRNS : public PKERNS {
-    using ParmType = typename DCRTPoly::Params;
-    using IntType  = typename DCRTPoly::Integer;
-    using DugType  = typename DCRTPoly::DugType;
-    using DggType  = typename DCRTPoly::DggType;
-    using TugType  = typename DCRTPoly::TugType;
-
 public:
-    virtual ~PKEBFVRNS() {}
+    ~PKEBFVRNS() override = default;
 
     KeyPair<DCRTPoly> KeyGenInternal(CryptoContext<DCRTPoly> cc, bool makeSparse) const override;
 

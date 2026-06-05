@@ -54,8 +54,6 @@ namespace lbcrypto {
  * @tparam Element a ring element.
  */
 class CryptoParametersRNS : public CryptoParametersRLWE<DCRTPoly> {
-    using ParmType = typename DCRTPoly::Params;
-
 protected:
     CryptoParametersRNS()
         : CryptoParametersRLWE<DCRTPoly>(),
@@ -109,13 +107,12 @@ protected:
         : CryptoParametersRLWE<DCRTPoly>(
               std::move(params), EncodingParams(std::make_shared<EncodingParamsImpl>(plaintextModulus)),
               distributionParameter, assuranceMeasure, securityLevel, digitSize, maxRelinSkDeg, secretKeyDist, INDCPA,
-              multipartyMode, executionMode, decryptionNoiseMode) {
-        m_ksTechnique                         = ksTech;
-        m_scalTechnique                       = scalTech;
-        m_encTechnique                        = encTech;
-        m_multTechnique                       = multTech;
-        m_MPIntBootCiphertextCompressionLevel = mPIntBootCiphertextCompressionLevel;
-    }
+              multipartyMode, executionMode, decryptionNoiseMode),
+          m_ksTechnique(ksTech),
+          m_scalTechnique(scalTech),
+          m_encTechnique(encTech),
+          m_multTechnique(multTech),
+          m_MPIntBootCiphertextCompressionLevel(mPIntBootCiphertextCompressionLevel) {}
 
     CryptoParametersRNS(std::shared_ptr<ParmType> params, EncodingParams encodingParams, float distributionParameter,
                         float assuranceMeasure, SecurityLevel securityLevel, uint32_t digitSize,
@@ -133,16 +130,15 @@ protected:
         : CryptoParametersRLWE<DCRTPoly>(std::move(params), std::move(encodingParams), distributionParameter,
                                          assuranceMeasure, securityLevel, digitSize, maxRelinSkDeg, secretKeyDist,
                                          PREMode, multipartyMode, executionMode, decryptionNoiseMode, noiseScale,
-                                         statisticalSecurity, numAdversarialQueries, thresholdNumOfParties) {
-        m_ksTechnique                         = ksTech;
-        m_scalTechnique                       = scalTech;
-        m_encTechnique                        = encTech;
-        m_multTechnique                       = multTech;
-        m_MPIntBootCiphertextCompressionLevel = mPIntBootCiphertextCompressionLevel;
-        m_compositeDegree                     = compositeDegree;
-        m_registerWordSize                    = registerWordSize;
-        m_ckksDataType                        = ckksDataType;
-    }
+                                         statisticalSecurity, numAdversarialQueries, thresholdNumOfParties),
+          m_ksTechnique(ksTech),
+          m_scalTechnique(scalTech),
+          m_encTechnique(encTech),
+          m_multTechnique(multTech),
+          m_compositeDegree(compositeDegree),
+          m_registerWordSize(registerWordSize),
+          m_MPIntBootCiphertextCompressionLevel(mPIntBootCiphertextCompressionLevel),
+          m_ckksDataType(ckksDataType) {}
 
     ~CryptoParametersRNS() override = default;
 

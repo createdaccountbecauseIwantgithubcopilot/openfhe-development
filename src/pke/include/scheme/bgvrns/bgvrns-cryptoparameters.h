@@ -45,11 +45,10 @@
 namespace lbcrypto {
 
 class CryptoParametersBGVRNS : public CryptoParametersRNS {
-    using ParmType = typename DCRTPoly::Params;
-    #define DISABLED_FOR_BGVRNS_PARAMS OPENFHE_THROW("This parameter is not available for BGVRNS.");
+#define DISABLED_FOR_BGVRNS_PARAMS OPENFHE_THROW("This parameter is not available for BGVRNS.");
 
 public:
-    CryptoParametersBGVRNS() : CryptoParametersRNS() {}
+    CryptoParametersBGVRNS() = default;
 
     CryptoParametersBGVRNS(const CryptoParametersBGVRNS& rhs) : CryptoParametersRNS(rhs) {}
 
@@ -78,7 +77,7 @@ public:
                               multipartyMode, executionMode, decryptionNoiseMode, noiseScale, statisticalSecurity,
                               numAdversarialQueries, thresholdNumOfParties) {}
 
-    virtual ~CryptoParametersBGVRNS() {}
+    ~CryptoParametersBGVRNS() override = default;
 
     void PrecomputeCRTTables(KeySwitchTechnique ksTech, ScalingTechnique scalTech, EncryptionTechnique encTech,
                              MultiplicationTechnique multTech, uint32_t numPartQ, uint32_t auxBits,

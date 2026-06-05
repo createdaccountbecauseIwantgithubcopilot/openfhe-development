@@ -45,11 +45,12 @@
 namespace lbcrypto {
 
 class CryptoParametersBFVRNS : public CryptoParametersRNS {
-    using ParmType = typename DCRTPoly::Params;
-    #define DISABLED_FOR_BFVRNS_PARAMS OPENFHE_THROW("This parameter is not available for BFVRNS.");
+#define DISABLED_FOR_BFVRNS_PARAMS OPENFHE_THROW("This parameter is not available for BFVRNS.");
 
 public:
-    CryptoParametersBFVRNS() : CryptoParametersRNS() {}
+    CryptoParametersBFVRNS() = default;
+
+    ~CryptoParametersBFVRNS() override = default;
 
     CryptoParametersBFVRNS(const CryptoParametersBFVRNS& rhs) : CryptoParametersRNS(rhs) {}
 
@@ -77,8 +78,6 @@ public:
                               secretKeyDist, maxRelinSkDeg, ksTech, scalTech, encTech, multTech, PREMode,
                               multipartyMode, executionMode, decryptionNoiseMode, noiseScale, statisticalSecurity,
                               numAdversarialQueries, thresholdNumOfParties) {}
-
-    virtual ~CryptoParametersBFVRNS() {}
 
     void PrecomputeCRTTables(KeySwitchTechnique ksTech, ScalingTechnique scalTech, EncryptionTechnique encTech,
                              MultiplicationTechnique multTech, uint32_t numPartQ, uint32_t auxBits,

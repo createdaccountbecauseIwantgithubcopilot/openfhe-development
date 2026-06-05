@@ -63,6 +63,13 @@ private:
     std::vector<std::complex<double>> m_value;
     double m_logError = 0.;
 
+    void SetImaginaryPartToZero() {
+        auto* rvptr = reinterpret_cast<double*>(m_value.data()) + 1;
+        auto* limit = rvptr + 2 * m_value.size();
+        for (; rvptr < limit; rvptr += 2)
+            *rvptr = 0;
+    }
+
 public:
     // these two constructors are used inside of Decrypt
     template <typename T, typename std::enable_if<std::is_same<T, Poly::Params>::value ||
@@ -93,12 +100,8 @@ public:
         m_level         = lvl;
         m_noiseScaleDeg = nsdeg;
         m_slots         = GetDefaultSlotSize(slts, v.size());
-
         if (m_ckksDataType == REAL) {
-            auto* rvptr = reinterpret_cast<double*>(m_value.data()) + 1;
-            auto* limit = rvptr + 2 * m_value.size();
-            for (; rvptr < limit; rvptr += 2)
-                *rvptr = 0;
+            SetImaginaryPartToZero();
         }
     }
 
@@ -112,10 +115,7 @@ public:
         m_slots = GetDefaultSlotSize(s, v.size());
 
         // Assumes m_ckksDataType = REAL
-        auto* rvptr = reinterpret_cast<double*>(m_value.data()) + 1;
-        auto* limit = rvptr + 2 * m_value.size();
-        for (; rvptr < limit; rvptr += 2)
-            *rvptr = 0;
+        SetImaginaryPartToZero();
     }
 
     /**

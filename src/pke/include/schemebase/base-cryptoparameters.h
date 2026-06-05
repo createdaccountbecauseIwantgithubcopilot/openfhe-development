@@ -51,6 +51,7 @@ namespace lbcrypto {
  */
 template <typename Element>
 class CryptoParametersBase : public Serializable {
+protected:
     using ParmType = typename Element::Params;
     using IntType  = typename Element::Integer;
     using DugType  = typename Element::DugType;
@@ -60,7 +61,7 @@ class CryptoParametersBase : public Serializable {
 public:
     CryptoParametersBase() = default;
 
-    virtual ~CryptoParametersBase() = default;
+    ~CryptoParametersBase() override = default;
 
     // NOTE: some getters and setters are declared "virtual" as they should be overriden and disabled in
     // some scheme-specific parameter classes derived from CryptoParametersBase

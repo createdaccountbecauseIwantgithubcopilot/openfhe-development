@@ -55,7 +55,7 @@ class SWITCHCKKSRNS : public FHERNS {
     using ParmType = typename DCRTPoly::Params;
 
 public:
-    virtual ~SWITCHCKKSRNS() = default;
+    ~SWITCHCKKSRNS() override = default;
 
     //------------------------------------------------------------------------------
     // Scheme Switching Wrappers

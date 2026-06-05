@@ -44,7 +44,7 @@
 namespace lbcrypto {
 class MultipartyBGVRNS : public MultipartyRNS {
 public:
-    virtual ~MultipartyBGVRNS() {}
+    ~MultipartyBGVRNS() override = default;
 
     DecryptResult MultipartyDecryptFusion(const std::vector<Ciphertext<DCRTPoly>>& ciphertextVec,
                                           NativePoly* plaintext) const override;

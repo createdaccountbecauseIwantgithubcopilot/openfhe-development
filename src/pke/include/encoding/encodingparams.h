@@ -82,28 +82,14 @@ public:
    *
    * @param &rhs the input set of parameters which is copied.
    */
-    EncodingParamsImpl(const EncodingParamsImpl& rhs) {
-        m_plaintextModulus        = rhs.m_plaintextModulus;
-        m_plaintextRootOfUnity    = rhs.m_plaintextRootOfUnity;
-        m_plaintextBigModulus     = rhs.m_plaintextBigModulus;
-        m_plaintextBigRootOfUnity = rhs.m_plaintextBigRootOfUnity;
-        m_plaintextGenerator      = rhs.m_plaintextGenerator;
-        m_batchSize               = rhs.m_batchSize;
-    }
+    EncodingParamsImpl(const EncodingParamsImpl&) = default;
 
     /**
    * Move constructor.
    *
    * @param &rhs the input set of parameters which is copied.
    */
-    EncodingParamsImpl(EncodingParamsImpl&& rhs) noexcept {
-        m_plaintextModulus        = std::move(rhs.m_plaintextModulus);
-        m_plaintextRootOfUnity    = std::move(rhs.m_plaintextRootOfUnity);
-        m_plaintextBigModulus     = std::move(rhs.m_plaintextBigModulus);
-        m_plaintextBigRootOfUnity = std::move(rhs.m_plaintextBigRootOfUnity);
-        m_plaintextGenerator      = std::move(rhs.m_plaintextGenerator);
-        m_batchSize               = rhs.m_batchSize;
-    }
+    EncodingParamsImpl(EncodingParamsImpl&&) noexcept = default;
 
     /**
    * Assignment Operator.
@@ -111,15 +97,7 @@ public:
    * @param &rhs the EncodingParamsImpl to be copied.
    * @return the resulting EncodingParamsImpl.
    */
-    const EncodingParamsImpl& operator=(const EncodingParamsImpl& rhs) {
-        m_plaintextModulus        = rhs.m_plaintextModulus;
-        m_plaintextRootOfUnity    = rhs.m_plaintextRootOfUnity;
-        m_plaintextBigModulus     = rhs.m_plaintextBigModulus;
-        m_plaintextBigRootOfUnity = rhs.m_plaintextBigRootOfUnity;
-        m_plaintextGenerator      = rhs.m_plaintextGenerator;
-        m_batchSize               = rhs.m_batchSize;
-        return *this;
-    }
+    EncodingParamsImpl& operator=(const EncodingParamsImpl&) = default;
 
     /**
    * Destructor.

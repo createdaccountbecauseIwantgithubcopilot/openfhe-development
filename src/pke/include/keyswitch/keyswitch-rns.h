@@ -52,7 +52,7 @@ namespace lbcrypto {
  */
 class KeySwitchRNS : public KeySwitchBase<DCRTPoly> {
 public:
-    virtual ~KeySwitchRNS() = default;
+    ~KeySwitchRNS() override = default;
 
     /////////////////////////////////////////
     // SERIALIZATION

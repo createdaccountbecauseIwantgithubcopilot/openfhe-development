@@ -71,14 +71,8 @@ namespace lbcrypto {
  * @tparam Element a ring element.
  */
 class MultipartyRNS : public MultipartyBase<DCRTPoly> {
-    using ParmType = typename DCRTPoly::Params;
-    using IntType  = typename DCRTPoly::Integer;
-    using DugType  = typename DCRTPoly::DugType;
-    using DggType  = typename DCRTPoly::DggType;
-    using TugType  = typename DCRTPoly::TugType;
-
 public:
-    virtual ~MultipartyRNS() = default;
+    ~MultipartyRNS() override = default;
 
     Ciphertext<DCRTPoly> MultipartyDecryptMain(ConstCiphertext<DCRTPoly> ciphertext,
                                                const PrivateKey<DCRTPoly> privateKey) const override;

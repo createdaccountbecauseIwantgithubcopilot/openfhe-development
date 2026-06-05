@@ -51,14 +51,8 @@ namespace lbcrypto {
  * @tparam Element a ring element.
  */
 class PKERNS : public PKEBase<DCRTPoly> {
-    using ParmType = typename DCRTPoly::Params;
-    using IntType  = typename DCRTPoly::Integer;
-    using DugType  = typename DCRTPoly::DugType;
-    using DggType  = typename DCRTPoly::DggType;
-    using TugType  = typename DCRTPoly::TugType;
-
 public:
-    virtual ~PKERNS() = default;
+    ~PKERNS() override = default;
 
     /**
    * Method for encrypting plaintext using LBC

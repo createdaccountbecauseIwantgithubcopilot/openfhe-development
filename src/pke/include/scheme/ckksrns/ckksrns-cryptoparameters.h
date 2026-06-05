@@ -45,7 +45,6 @@
 namespace lbcrypto {
 
 class CryptoParametersCKKSRNS : public CryptoParametersRNS {
-    using ParmType = typename DCRTPoly::Params;
 #define DISABLED_FOR_CKKSRNS_PARAMS OPENFHE_THROW("This parameter is not available for CKKSRNS.");
 
 public:
@@ -87,7 +86,7 @@ public:
                               numAdversarialQueries, thresholdNumOfParties, mPIntBootCiphertextCompressionLevel,
                               compositeDegree, registerWordSize, ckksDataType) {}
 
-    virtual ~CryptoParametersCKKSRNS() = default;
+    ~CryptoParametersCKKSRNS() override = default;
 
     void PrecomputeCRTTables(KeySwitchTechnique ksTech, ScalingTechnique scalTech, EncryptionTechnique encTech,
                              MultiplicationTechnique multTech, uint32_t numPartQ, uint32_t auxBits,

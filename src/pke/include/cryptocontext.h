@@ -514,13 +514,19 @@ public:
     */
     // TODO (dsuponit): investigate if we really need 2 constructors for CryptoContextImpl as one of them take regular pointer
     // and the other one takes shared_ptr
-    CryptoContextImpl(CryptoParametersBase<Element>* params = nullptr, SchemeBase<Element>* scheme = nullptr,
+    [[deprecated("Use the CryptoContextImpl constructor that takes std::shared_ptr arguments instead.")]]
+    CryptoContextImpl(CryptoParametersBase<Element>* params, SchemeBase<Element>* scheme,
                       SCHEME schemeId = SCHEME::INVALID_SCHEME) {
         m_params.reset(params);
         m_scheme.reset(scheme);
-        m_keyGenLevel = 0;
         m_schemeId    = schemeId;
+        m_keyGenLevel = 0;
     }
+
+    /**
+    * @brief Default constructor. It's needed for CryptoContext deserialization
+    */
+    CryptoContextImpl() = default;
 
     /**
     * @brief Constructor from shared pointers to parameters and scheme
@@ -529,37 +535,22 @@ public:
     * @param scheme sharedpointer to Crypto Scheme object
     * @param schemeId scheme identifier
     */
-    CryptoContextImpl(std::shared_ptr<CryptoParametersBase<Element>> params,
-                      std::shared_ptr<SchemeBase<Element>> scheme, SCHEME schemeId = SCHEME::INVALID_SCHEME) {
-        m_params      = params;
-        m_scheme      = scheme;
-        m_keyGenLevel = 0;
-        m_schemeId    = schemeId;
-    }
+    CryptoContextImpl(const std::shared_ptr<CryptoParametersBase<Element>>& params,
+                      const std::shared_ptr<SchemeBase<Element>>& scheme, SCHEME schemeId = SCHEME::INVALID_SCHEME)
+        : m_params(params), m_scheme(scheme), m_schemeId(schemeId) {}
 
     /**
     * @brief Copy constructor
     * @param other cryptocontext to copy from
     */
-    CryptoContextImpl(const CryptoContextImpl<Element>& other) {
-        m_params      = other.m_params;
-        m_scheme      = other.m_scheme;
-        m_keyGenLevel = 0;
-        m_schemeId    = other.m_schemeId;
-    }
-
+    CryptoContextImpl(const CryptoContextImpl<Element>& other)
+        : m_params(other.m_params), m_scheme(other.m_scheme), m_schemeId(other.m_schemeId) {}
     /**
     * @brief Assignment operator
     * @param rhs cryptocontext to assign values from
     * @return this
     */
-    CryptoContextImpl<Element>& operator=(const CryptoContextImpl<Element>& rhs) {
-        m_params      = rhs.m_params;
-        m_scheme      = rhs.m_scheme;
-        m_keyGenLevel = rhs.m_keyGenLevel;
-        m_schemeId    = rhs.m_schemeId;
-        return *this;
-    }
+    CryptoContextImpl<Element>& operator=(const CryptoContextImpl<Element>& rhs) = default;
 
     /**
     * @brief Checks the CryptoContextImpl object health.

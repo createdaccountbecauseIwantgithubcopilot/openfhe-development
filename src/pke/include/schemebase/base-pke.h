@@ -55,6 +55,7 @@ class KeyPair;
  */
 template <class Element>
 class PKEBase {
+protected:
     using ParmType = typename Element::Params;
     using IntType  = typename Element::Integer;
     using DugType  = typename Element::DugType;

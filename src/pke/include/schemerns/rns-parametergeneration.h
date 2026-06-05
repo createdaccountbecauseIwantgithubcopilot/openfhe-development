@@ -52,7 +52,7 @@ namespace lbcrypto {
  */
 class ParameterGenerationRNS : public ParameterGenerationBase<DCRTPoly> {
 public:
-    virtual ~ParameterGenerationRNS() = default;
+    ~ParameterGenerationRNS() override = default;
 
     /////////////////////////////////////
     // SERIALIZATION

@@ -45,7 +45,7 @@ namespace lbcrypto {
 
 class ParameterGenerationBFVRNS : public ParameterGenerationRNS {
 public:
-    virtual ~ParameterGenerationBFVRNS() {}
+    ~ParameterGenerationBFVRNS() override = default;
 
     bool ParamsGenBFVRNSInternal(std::shared_ptr<CryptoParametersBase<DCRTPoly>> cryptoParams, uint32_t evalAddCount,
                                  uint32_t multiplicativeDepth, uint32_t keySwitchCount, size_t dcrBits, uint32_t n,

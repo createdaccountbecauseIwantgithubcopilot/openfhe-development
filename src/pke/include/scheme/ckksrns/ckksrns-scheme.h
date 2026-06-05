@@ -59,7 +59,7 @@ public:
         this->m_ParamsGen = std::make_shared<ParameterGenerationCKKSRNS>();
     }
 
-    virtual ~SchemeCKKSRNS() = default;
+    ~SchemeCKKSRNS() override = default;
 
     bool operator==(const SchemeBase<DCRTPoly>& sch) const override {
         return (typeid(sch) == typeid(SchemeCKKSRNS));
