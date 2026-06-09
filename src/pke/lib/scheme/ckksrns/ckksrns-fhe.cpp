@@ -1333,30 +1333,25 @@ std::vector<uint32_t> FHECKKSRNS::FindCoeffsToSlotsRotationIndices(uint32_t slot
     const uint32_t reduceMod = std::min(M, 2 * slots);
     const int32_t flagRem    = (p.remCollapse == 0) ? 0 : 1;
     // §3.2: zero-based inner indices; j=0 rotation is free (no key needed)
-    const int32_t offset = static_cast<int32_t>((p.numRotations + 1) / 2) - 1;
     for (int32_t s = -1 + p.lvlb; s >= flagRem; --s) {
         const uint32_t scalingFactor = 1U << ((s - flagRem) * p.layersCollapse + p.remCollapse);
         for (int32_t j = 1; j < static_cast<int32_t>(p.g); ++j)
             indexList.emplace_back(ReduceRotation(j * static_cast<int32_t>(scalingFactor), reduceMod));
-        // per-level correction key: rotation by -delta_s = -(offset * scale)
-        if (offset != 0)
-            indexList.emplace_back(ReduceRotation(-offset * static_cast<int32_t>(scalingFactor), reduceMod));
         // Horner: single giant stride per level
         if (p.b > 1)
             indexList.emplace_back(ReduceRotation(p.g * scalingFactor, reduceMod));
     }
 
     if (flagRem == 1) {
-        const int32_t offsetRem = static_cast<int32_t>((p.numRotationsRem + 1) / 2) - 1;
         for (int32_t j = 1; j < static_cast<int32_t>(p.gRem); ++j)
             indexList.emplace_back(ReduceRotation(j, reduceMod));
-        // per-level correction key for remainder (scale = 1)
-        if (offsetRem != 0)
-            indexList.emplace_back(ReduceRotation(-offsetRem, reduceMod));
         // Horner: single giant stride for remainder
         if (p.bRem > 1)
             indexList.emplace_back(ReduceRotation(p.gRem, reduceMod));
     }
+
+    // §3.4: single accumulated correction key shared between CtS and StC
+    indexList.emplace_back(ReduceRotation(-2 * static_cast<int32_t>(slots - 1), reduceMod));
 
     return indexList;
 }
@@ -1385,14 +1380,10 @@ std::vector<uint32_t> FHECKKSRNS::FindSlotsToCoeffsRotationIndices(uint32_t slot
     const uint32_t flagRem   = (p.remCollapse == 0) ? 0 : 1;
     const uint32_t smax      = p.lvlb - flagRem;
     // §3.2: zero-based inner indices; j=0 rotation is free (no key needed)
-    const int32_t offset = static_cast<int32_t>((p.numRotations + 1) / 2) - 1;
     for (uint32_t s = 0; s < smax; ++s) {
         const uint32_t scalingFactor = 1U << (s * p.layersCollapse);
         for (int32_t j = 1; j < static_cast<int32_t>(p.g); ++j)
             indexList.emplace_back(ReduceRotation(j * static_cast<int32_t>(scalingFactor), reduceMod));
-        // per-level correction key: rotation by -delta_s = -(offset * scale)
-        if (offset != 0)
-            indexList.emplace_back(ReduceRotation(-offset * static_cast<int32_t>(scalingFactor), reduceMod));
         // Horner: single giant stride per level
         if (p.b > 1)
             indexList.emplace_back(ReduceRotation(p.g * scalingFactor, reduceMod));
@@ -1400,17 +1391,15 @@ std::vector<uint32_t> FHECKKSRNS::FindSlotsToCoeffsRotationIndices(uint32_t slot
 
     if (flagRem == 1) {
         const uint32_t scalingFactor = 1U << (smax * p.layersCollapse);
-        const int32_t offsetRem      = static_cast<int32_t>((p.numRotationsRem + 1) / 2) - 1;
         for (int32_t j = 1; j < static_cast<int32_t>(p.gRem); ++j)
             indexList.emplace_back(ReduceRotation(j * static_cast<int32_t>(scalingFactor), reduceMod));
-        // per-level correction key for remainder
-        if (offsetRem != 0)
-            indexList.emplace_back(ReduceRotation(-offsetRem * static_cast<int32_t>(scalingFactor), reduceMod));
         // Horner: single giant stride for remainder
         if (p.bRem > 1)
             indexList.emplace_back(ReduceRotation(p.gRem * scalingFactor, reduceMod));
     }
 
+    // §3.4: per-level corrections are now folded into plaintexts; no correction keys needed here
+    // (the single accumulated correction key is generated in FindCoeffsToSlotsRotationIndices)
     return indexList;
 }
 
@@ -1608,6 +1597,8 @@ std::vector<std::vector<ReadOnlyPlaintext>> FHECKKSRNS::EvalCoeffsToSlotsPrecomp
     // §3.2: zero-based inner indices require shifting the pre-rotation by +offset*scale
     const int32_t offset    = static_cast<int32_t>((p.numRotations + 1) / 2) - 1;
     const int32_t offsetRem = static_cast<int32_t>((p.numRotationsRem + 1) / 2) - 1;
+    // §3.4: running accumulated correction; plaintexts pre-absorb the per-level Aut_{-delta_s}
+    int32_t runningAcc = 0;
 
     if (uint32_t M4 = M / 4; slots == M4 || flagStCComplex) {
         //------------------------------------------------------------------------------
@@ -1631,14 +1622,15 @@ std::vector<std::vector<ReadOnlyPlaintext>> FHECKKSRNS::EvalCoeffsToSlotsPrecomp
                             c *= scale;
                     }
 
-                    auto rot =
-                        Rotate(coeff[s][ij],
-                               ReduceRotation(-rotScale * static_cast<int32_t>(ij / p.g) + offset * shiftScale, slots));
+                    auto rot = Rotate(coeff[s][ij], ReduceRotation(-rotScale * static_cast<int32_t>(ij / p.g) +
+                                                                       offset * shiftScale + runningAcc,
+                                                                   slots));
 
                     result[s][ij] =
                         MakeAuxPlaintext(cc, paramsVector[s - stop], rot, 1, level0 - compositeDegree * s, rot.size());
                 }
             }
+            runningAcc += offset * shiftScale;
         }
 
         if (flagRem == 1) {
@@ -1651,10 +1643,10 @@ std::vector<std::vector<ReadOnlyPlaintext>> FHECKKSRNS::EvalCoeffsToSlotsPrecomp
                     for (auto& c : coeff[stop][ij])
                         c *= scale;
 
-                    auto rot = Rotate(
-                        coeff[stop][ij],
-                        ReduceRotation(-static_cast<int32_t>(p.gRem) * static_cast<int32_t>(ij / p.gRem) + offsetRem,
-                                       slots));
+                    auto rot = Rotate(coeff[stop][ij],
+                                      ReduceRotation(-static_cast<int32_t>(p.gRem) * static_cast<int32_t>(ij / p.gRem) +
+                                                         offsetRem + runningAcc,
+                                                     slots));
 
                     result[stop][ij] = MakeAuxPlaintext(cc, paramsVector[0], rot, 1, level0, rot.size());
                 }
@@ -1688,14 +1680,15 @@ std::vector<std::vector<ReadOnlyPlaintext>> FHECKKSRNS::EvalCoeffsToSlotsPrecomp
                             c *= scale;
                     }
 
-                    auto rot = Rotate(
-                        clearTmp,
-                        ReduceRotation(-rotScale * static_cast<int32_t>(ij / p.g) + offset * shiftScale, 2 * slots));
+                    auto rot = Rotate(clearTmp, ReduceRotation(-rotScale * static_cast<int32_t>(ij / p.g) +
+                                                                   offset * shiftScale + runningAcc,
+                                                               2 * slots));
 
                     result[s][ij] =
                         MakeAuxPlaintext(cc, paramsVector[s - stop], rot, 1, level0 - compositeDegree * s, rot.size());
                 }
             }
+            runningAcc += offset * shiftScale;
         }
 
         if (flagRem == 1) {
@@ -1712,10 +1705,10 @@ std::vector<std::vector<ReadOnlyPlaintext>> FHECKKSRNS::EvalCoeffsToSlotsPrecomp
                     for (auto& c : clearTmp)
                         c *= scale;
 
-                    auto rot = Rotate(
-                        clearTmp,
-                        ReduceRotation(-static_cast<int32_t>(p.gRem) * static_cast<int32_t>(ij / p.gRem) + offsetRem,
-                                       2 * slots));
+                    auto rot = Rotate(clearTmp,
+                                      ReduceRotation(-static_cast<int32_t>(p.gRem) * static_cast<int32_t>(ij / p.gRem) +
+                                                         offsetRem + runningAcc,
+                                                     2 * slots));
 
                     result[stop][ij] = MakeAuxPlaintext(cc, paramsVector[0], rot, 1, level0, rot.size());
                 }
@@ -1780,6 +1773,8 @@ std::vector<std::vector<ReadOnlyPlaintext>> FHECKKSRNS::EvalSlotsToCoeffsPrecomp
     // §3.2: zero-based inner indices require shifting the pre-rotation by +offset*shiftScale
     const int32_t offset    = static_cast<int32_t>((p.numRotations + 1) / 2) - 1;
     const int32_t offsetRem = static_cast<int32_t>((p.numRotationsRem + 1) / 2) - 1;
+    // §3.4: start from CtS accumulated correction (slots-1), then absorb StC per-level corrections
+    int32_t runningAcc = static_cast<int32_t>(slots) - 1;
 
     if (uint32_t M4 = cc.GetCyclotomicOrder() / 4; M4 == slots || flagStCComplex) {
         // fully-packed
@@ -1800,14 +1795,15 @@ std::vector<std::vector<ReadOnlyPlaintext>> FHECKKSRNS::EvalSlotsToCoeffsPrecomp
                             c *= scale;
                     }
 
-                    auto rot =
-                        Rotate(coeff[s][ij],
-                               ReduceRotation(-rotScale * static_cast<int32_t>(ij / p.g) + offset * shiftScale, slots));
+                    auto rot = Rotate(coeff[s][ij], ReduceRotation(-rotScale * static_cast<int32_t>(ij / p.g) +
+                                                                       offset * shiftScale + runningAcc,
+                                                                   slots));
 
                     result[s][ij] =
                         MakeAuxPlaintext(cc, paramsVector[s], rot, 1, towersToDrop + compositeDegree * s, rot.size());
                 }
             }
+            runningAcc += offset * shiftScale;
         }
 
         if (flagRem == 1) {
@@ -1823,7 +1819,7 @@ std::vector<std::vector<ReadOnlyPlaintext>> FHECKKSRNS::EvalSlotsToCoeffsPrecomp
                         c *= scale;
 
                     auto rot = Rotate(coeff[smax][ij], ReduceRotation(-rotScale * static_cast<int32_t>(ij / p.gRem) +
-                                                                          offsetRem * shiftScaleRem,
+                                                                          offsetRem * shiftScaleRem + runningAcc,
                                                                       slots));
 
                     result[smax][ij] = MakeAuxPlaintext(cc, paramsVector[smax], rot, 1,
@@ -1860,14 +1856,15 @@ std::vector<std::vector<ReadOnlyPlaintext>> FHECKKSRNS::EvalSlotsToCoeffsPrecomp
                             c *= scale;
                     }
 
-                    auto rot = Rotate(
-                        clearTmp,
-                        ReduceRotation(-rotScale * static_cast<int32_t>(ij / p.g) + offset * shiftScale, 2 * slots));
+                    auto rot = Rotate(clearTmp, ReduceRotation(-rotScale * static_cast<int32_t>(ij / p.g) +
+                                                                   offset * shiftScale + runningAcc,
+                                                               2 * slots));
 
                     result[s][ij] =
                         MakeAuxPlaintext(cc, paramsVector[s], rot, 1, towersToDrop + compositeDegree * s, rot.size());
                 }
             }
+            runningAcc += offset * shiftScale;
         }
 
         if (flagRem == 1) {
@@ -1887,7 +1884,7 @@ std::vector<std::vector<ReadOnlyPlaintext>> FHECKKSRNS::EvalSlotsToCoeffsPrecomp
                         c *= scale;
 
                     auto rot = Rotate(clearTmp, ReduceRotation(-rotScale * static_cast<int32_t>(ij / p.gRem) +
-                                                                   offsetRem * shiftScaleRem,
+                                                                   offsetRem * shiftScaleRem + runningAcc,
                                                                2 * slots));
 
                     result[smax][ij] = MakeAuxPlaintext(cc, paramsVector[smax], rot, 1,
@@ -1980,7 +1977,6 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalCoeffsToSlots(const std::vector<std::vector
     const uint32_t reduceMod = std::min(M4, 2 * slots);
 
     // §3.2: zero-based inner indices (j=0 always maps to rotation 0, which is free)
-    const int32_t offset = static_cast<int32_t>((p.numRotations + 1) / 2) - 1;
     for (int32_t s = p.lvlb - 1; s > stop; --s) {
         const int32_t scale = 1 << ((s - flagRem) * p.layersCollapse + p.remCollapse);
         for (uint32_t j = 0; j < p.g; ++j)
@@ -2038,12 +2034,7 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalCoeffsToSlots(const std::vector<std::vector
             }
         }
         result = cc->KeySwitchDown(outer);
-        // §3.2: apply per-level correction Aut_{-delta_s} where delta_s = offset * scale
-        if (offset != 0) {
-            const int32_t delta = ReduceRotation(-offset * scale, reduceMod);
-            if (delta != 0)
-                result = cc->EvalAtIndex(result, delta);
-        }
+        // §3.4: per-level correction is absorbed into precomputed plaintexts; no per-level EvalAtIndex here
     }
 
     if (flagRem == 1) {
@@ -2082,13 +2073,7 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalCoeffsToSlots(const std::vector<std::vector
             }
         }
         result = cc->KeySwitchDown(outer);
-        // §3.2: apply remainder correction Aut_{-delta_rem} where delta_rem = offsetRem * 1 (scale=1 for CtS rem)
-        const int32_t offsetRem2 = static_cast<int32_t>((p.numRotationsRem + 1) / 2) - 1;
-        if (offsetRem2 != 0) {
-            const int32_t deltaRem = ReduceRotation(-offsetRem2, reduceMod);
-            if (deltaRem != 0)
-                result = cc->EvalAtIndex(result, deltaRem);
-        }
+        // §3.4: rem correction absorbed into precomputed plaintexts
     }
     return result;
 }
@@ -2113,7 +2098,6 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalSlotsToCoeffs(const std::vector<std::vector
     const uint32_t reduceMod = std::min(M4, 2 * slots);
     const int32_t smax       = p.lvlb - flagRem;
     // §3.2: zero-based inner indices (j=0 always maps to rotation 0, which is free)
-    const int32_t offset = static_cast<int32_t>((p.numRotations + 1) / 2) - 1;
     for (int32_t s = 0; s < smax; ++s) {
         const int32_t scale = 1 << (s * p.layersCollapse);
         for (uint32_t j = 0; j < p.g; ++j)
@@ -2172,12 +2156,7 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalSlotsToCoeffs(const std::vector<std::vector
             }
         }
         result = cc->KeySwitchDown(outer);
-        // §3.2: apply per-level correction Aut_{-delta_s} where delta_s = offset * scale
-        if (offset != 0) {
-            const int32_t delta = ReduceRotation(-offset * scale, reduceMod);
-            if (delta != 0)
-                result = cc->EvalAtIndex(result, delta);
-        }
+        // §3.4: per-level correction is absorbed into precomputed plaintexts; no per-level EvalAtIndex here
     }
 
     if (flagRem == 1) {
@@ -2217,14 +2196,14 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalSlotsToCoeffs(const std::vector<std::vector
             }
         }
         result = cc->KeySwitchDown(outer);
-        // §3.2: apply remainder correction Aut_{-delta_rem} where delta_rem = offsetRem * scaleRem
-        const int32_t offsetRem = static_cast<int32_t>((p.numRotationsRem + 1) / 2) - 1;
-        if (offsetRem != 0) {
-            const int32_t deltaRem = ReduceRotation(-offsetRem * scaleRem, reduceMod);
-            if (deltaRem != 0)
-                result = cc->EvalAtIndex(result, deltaRem);
-        }
+        // §3.4: rem correction absorbed into precomputed plaintexts
     }
+
+    // §3.4: apply single accumulated correction Aut_{-Delta} where Delta = 2*(slots-1)
+    const int32_t Delta = ReduceRotation(-2 * static_cast<int32_t>(slots - 1), reduceMod);
+    if (Delta != 0)
+        result = cc->EvalAtIndex(result, Delta);
+
     return result;
 }
 
