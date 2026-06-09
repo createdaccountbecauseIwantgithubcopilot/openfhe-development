@@ -247,29 +247,22 @@ Ciphertext<DCRTPoly> KeySwitchHYBRID::KeySwitchDown(ConstCiphertext<DCRTPoly> ci
     const auto cryptoParams = std::dynamic_pointer_cast<CryptoParametersCKKSRNS>(ciphertext->GetCryptoParameters());
     const auto paramsP      = cryptoParams->GetParamsP();
 
-    // TODO : (Andrey) precompute paramsQl in cryptoparameters
     const uint32_t sizeQl = paramsQlP->GetParams().size() - paramsP->GetParams().size();
-    std::vector<NativeInteger> moduliQ(sizeQl);
-    std::vector<NativeInteger> rootsQ(sizeQl);
-    for (uint32_t i = 0; i < sizeQl; ++i) {
-        moduliQ[i] = paramsQlP->GetParams()[i]->GetModulus();
-        rootsQ[i]  = paramsQlP->GetParams()[i]->GetRootOfUnity();
-    }
-    const auto paramsQl = std::make_shared<ParmType>(paramsQlP->GetCyclotomicOrder(), moduliQ, rootsQ);
+    const auto paramsQl   = cryptoParams->GetParamsQlHybrid(sizeQl);
 
     const PlaintextModulus t = (cryptoParams->GetNoiseScale() == 1) ? 0 : cryptoParams->GetPlaintextModulus();
 
-    std::vector<DCRTPoly> elements(2);
-    elements[0] = cv[0].ApproxModDown(paramsQl, cryptoParams->GetParamsP(), cryptoParams->GetPInvModq(),
-                                      cryptoParams->GetPInvModqPrecon(), cryptoParams->GetPHatInvModp(),
-                                      cryptoParams->GetPHatInvModpPrecon(), cryptoParams->GetPHatModq(),
-                                      cryptoParams->GetModqBarrettMu(), cryptoParams->GettInvModp(),
-                                      cryptoParams->GettInvModpPrecon(), t, cryptoParams->GettModqPrecon());
-    elements[1] = cv[1].ApproxModDown(paramsQl, cryptoParams->GetParamsP(), cryptoParams->GetPInvModq(),
-                                      cryptoParams->GetPInvModqPrecon(), cryptoParams->GetPHatInvModp(),
-                                      cryptoParams->GetPHatInvModpPrecon(), cryptoParams->GetPHatModq(),
-                                      cryptoParams->GetModqBarrettMu(), cryptoParams->GettInvModp(),
-                                      cryptoParams->GettInvModpPrecon(), t, cryptoParams->GettModqPrecon());
+    std::vector<DCRTPoly> elements;
+    elements.emplace_back(cv[0].ApproxModDown(paramsQl, cryptoParams->GetParamsP(), cryptoParams->GetPInvModq(),
+                                              cryptoParams->GetPInvModqPrecon(), cryptoParams->GetPHatInvModp(),
+                                              cryptoParams->GetPHatInvModpPrecon(), cryptoParams->GetPHatModq(),
+                                              cryptoParams->GetModqBarrettMu(), cryptoParams->GettInvModp(),
+                                              cryptoParams->GettInvModpPrecon(), t, cryptoParams->GettModqPrecon()));
+    elements.emplace_back(cv[1].ApproxModDown(paramsQl, cryptoParams->GetParamsP(), cryptoParams->GetPInvModq(),
+                                              cryptoParams->GetPInvModqPrecon(), cryptoParams->GetPHatInvModp(),
+                                              cryptoParams->GetPHatInvModpPrecon(), cryptoParams->GetPHatModq(),
+                                              cryptoParams->GetModqBarrettMu(), cryptoParams->GettInvModp(),
+                                              cryptoParams->GettInvModpPrecon(), t, cryptoParams->GettModqPrecon()));
 
     auto result = ciphertext->CloneEmpty();
     result->SetElements(std::move(elements));
@@ -283,15 +276,8 @@ DCRTPoly KeySwitchHYBRID::KeySwitchDownFirstElement(ConstCiphertext<DCRTPoly> ci
     const auto cryptoParams = std::dynamic_pointer_cast<CryptoParametersCKKSRNS>(ciphertext->GetCryptoParameters());
     const auto paramsP      = cryptoParams->GetParamsP();
 
-    // TODO : (Andrey) precompute paramsQl in cryptoparameters
     const uint32_t sizeQl = paramsQlP->GetParams().size() - paramsP->GetParams().size();
-    std::vector<NativeInteger> moduliQ(sizeQl);
-    std::vector<NativeInteger> rootsQ(sizeQl);
-    for (uint32_t i = 0; i < sizeQl; ++i) {
-        moduliQ[i] = paramsQlP->GetParams()[i]->GetModulus();
-        rootsQ[i]  = paramsQlP->GetParams()[i]->GetRootOfUnity();
-    }
-    const auto paramsQl = std::make_shared<ParmType>(paramsQlP->GetCyclotomicOrder(), moduliQ, rootsQ);
+    const auto paramsQl   = cryptoParams->GetParamsQlHybrid(sizeQl);
 
     const PlaintextModulus t = (cryptoParams->GetNoiseScale() == 1) ? 0 : cryptoParams->GetPlaintextModulus();
 
