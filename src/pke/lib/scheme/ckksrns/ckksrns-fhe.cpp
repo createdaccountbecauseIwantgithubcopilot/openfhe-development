@@ -1329,16 +1329,19 @@ std::vector<uint32_t> FHECKKSRNS::FindCoeffsToSlotsRotationIndices(uint32_t slot
     }
 
     M >>= 2;
-    const int32_t flagRem   = (p.remCollapse == 0) ? 0 : 1;
-    const int32_t halfRots  = 1 - (p.numRotations + 1) / 2;
-    const int32_t halfRotsg = halfRots + p.g;
+    // §3.5: clamp giant-step indices to [0, 2*slots) so the ciphertext rotation
+    // period matches the sparse-precompute vector's cyclic period (2*slots).
+    const uint32_t reduceMod = std::min(M, 2 * slots);
+    const int32_t flagRem    = (p.remCollapse == 0) ? 0 : 1;
+    const int32_t halfRots   = 1 - (p.numRotations + 1) / 2;
+    const int32_t halfRotsg  = halfRots + p.g;
     for (int32_t s = -1 + p.lvlb; s >= flagRem; --s) {
         const uint32_t scalingFactor = 1U << ((s - flagRem) * p.layersCollapse + p.remCollapse);
         for (int32_t j = halfRots; j < halfRotsg; ++j)
             indexList.emplace_back(ReduceRotation(j * scalingFactor, slots));
         // Horner: single giant stride per level instead of arithmetic series
         if (p.b > 1)
-            indexList.emplace_back(ReduceRotation(p.g * scalingFactor, M));
+            indexList.emplace_back(ReduceRotation(p.g * scalingFactor, reduceMod));
     }
 
     if (flagRem == 1) {
@@ -1348,7 +1351,7 @@ std::vector<uint32_t> FHECKKSRNS::FindCoeffsToSlotsRotationIndices(uint32_t slot
             indexList.emplace_back(ReduceRotation(j, slots));
         // Horner: single giant stride for remainder (scale=1)
         if (p.bRem > 1)
-            indexList.emplace_back(ReduceRotation(p.gRem, M));
+            indexList.emplace_back(ReduceRotation(p.gRem, reduceMod));
     }
 
     return indexList;
@@ -1373,17 +1376,20 @@ std::vector<uint32_t> FHECKKSRNS::FindSlotsToCoeffsRotationIndices(uint32_t slot
     }
 
     M >>= 2;
-    const uint32_t flagRem  = (p.remCollapse == 0) ? 0 : 1;
-    const uint32_t smax     = p.lvlb - flagRem;
-    const int32_t halfRots  = (1 - (p.numRotations + 1) / 2);
-    const int32_t halfRotsg = halfRots + p.g;
+    // §3.5: clamp all indices to [0, 2*slots) so the ciphertext rotation
+    // period matches the sparse-precompute vector's cyclic period (2*slots).
+    const uint32_t reduceMod = std::min(M, 2 * slots);
+    const uint32_t flagRem   = (p.remCollapse == 0) ? 0 : 1;
+    const uint32_t smax      = p.lvlb - flagRem;
+    const int32_t halfRots   = (1 - (p.numRotations + 1) / 2);
+    const int32_t halfRotsg  = halfRots + p.g;
     for (uint32_t s = 0; s < smax; ++s) {
         const uint32_t scalingFactor = 1U << (s * p.layersCollapse);
         for (int32_t j = halfRots; j < halfRotsg; ++j)
-            indexList.emplace_back(ReduceRotation(j * scalingFactor, M));
+            indexList.emplace_back(ReduceRotation(j * scalingFactor, reduceMod));
         // Horner: single giant stride per level instead of arithmetic series
         if (p.b > 1)
-            indexList.emplace_back(ReduceRotation(p.g * scalingFactor, M));
+            indexList.emplace_back(ReduceRotation(p.g * scalingFactor, reduceMod));
     }
 
     if (flagRem == 1) {
@@ -1391,10 +1397,10 @@ std::vector<uint32_t> FHECKKSRNS::FindSlotsToCoeffsRotationIndices(uint32_t slot
         const int32_t halfRotsRem    = (1 - (p.numRotationsRem + 1) / 2);
         const int32_t halfRotsRemg   = halfRotsRem + p.gRem;
         for (int32_t j = halfRotsRem; j < halfRotsRemg; ++j)
-            indexList.emplace_back(ReduceRotation(j * scalingFactor, M));
+            indexList.emplace_back(ReduceRotation(j * scalingFactor, reduceMod));
         // Horner: single giant stride for remainder
         if (p.bRem > 1)
-            indexList.emplace_back(ReduceRotation(p.gRem * scalingFactor, M));
+            indexList.emplace_back(ReduceRotation(p.gRem * scalingFactor, reduceMod));
     }
 
     return indexList;
@@ -1663,7 +1669,7 @@ std::vector<std::vector<ReadOnlyPlaintext>> FHECKKSRNS::EvalCoeffsToSlotsPrecomp
                             c *= scale;
                     }
 
-                    auto rot = Rotate(clearTmp, ReduceRotation(-rotScale * (ij / p.g), M4));
+                    auto rot = Rotate(clearTmp, ReduceRotation(-rotScale * (ij / p.g), 2 * slots));
 
                     result[s][ij] =
                         MakeAuxPlaintext(cc, paramsVector[s - stop], rot, 1, level0 - compositeDegree * s, rot.size());
@@ -1685,7 +1691,7 @@ std::vector<std::vector<ReadOnlyPlaintext>> FHECKKSRNS::EvalCoeffsToSlotsPrecomp
                     for (auto& c : clearTmp)
                         c *= scale;
 
-                    auto rot = Rotate(clearTmp, ReduceRotation(-p.gRem * (ij / p.gRem), M4));
+                    auto rot = Rotate(clearTmp, ReduceRotation(-p.gRem * (ij / p.gRem), 2 * slots));
 
                     result[stop][ij] = MakeAuxPlaintext(cc, paramsVector[0], rot, 1, level0, rot.size());
                 }
@@ -1819,7 +1825,7 @@ std::vector<std::vector<ReadOnlyPlaintext>> FHECKKSRNS::EvalSlotsToCoeffsPrecomp
                             c *= scale;
                     }
 
-                    auto rot = Rotate(clearTmp, ReduceRotation(-rotScale * (ij / p.g), M4));
+                    auto rot = Rotate(clearTmp, ReduceRotation(-rotScale * (ij / p.g), 2 * slots));
 
                     result[s][ij] =
                         MakeAuxPlaintext(cc, paramsVector[s], rot, 1, towersToDrop + compositeDegree * s, rot.size());
@@ -1842,7 +1848,7 @@ std::vector<std::vector<ReadOnlyPlaintext>> FHECKKSRNS::EvalSlotsToCoeffsPrecomp
                     for (auto& c : clearTmp)
                         c *= scale;
 
-                    auto rot = Rotate(clearTmp, ReduceRotation(-rotScale * (ij / p.gRem), M4));
+                    auto rot = Rotate(clearTmp, ReduceRotation(-rotScale * (ij / p.gRem), 2 * slots));
 
                     result[smax][ij] = MakeAuxPlaintext(cc, paramsVector[smax], rot, 1,
                                                         towersToDrop + compositeDegree * smax, rot.size());
@@ -1930,7 +1936,8 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalCoeffsToSlots(const std::vector<std::vector
 
     auto cc = ctxt->GetCryptoContext();
 
-    const uint32_t M4 = cc->GetCyclotomicOrder() / 4;
+    const uint32_t M4        = cc->GetCyclotomicOrder() / 4;
+    const uint32_t reduceMod = std::min(M4, 2 * slots);
 
     const int32_t offset = static_cast<int32_t>((p.numRotations + 1) / 2) - 1;
     for (int32_t s = p.lvlb - 1; s > stop; --s) {
@@ -1967,7 +1974,7 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalCoeffsToSlots(const std::vector<std::vector
 
         // Horner backward accumulation with single giant stride t = g * scale
         const int32_t scale = 1 << ((s - flagRem) * p.layersCollapse + p.remCollapse);
-        const int32_t t     = ReduceRotation(static_cast<int32_t>(p.g) * scale, M4);
+        const int32_t t     = ReduceRotation(static_cast<int32_t>(p.g) * scale, reduceMod);
 
         Ciphertext<DCRTPoly> outer;
         for (int32_t i = static_cast<int32_t>(p.b) - 1; i >= 0; --i) {
@@ -2006,7 +2013,7 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalCoeffsToSlots(const std::vector<std::vector
                                      cc->KeySwitchExt(result, true);
 
         // Remainder scale is 1 in CtS; Horner giant stride = gRem
-        const int32_t tRem = ReduceRotation(static_cast<int32_t>(p.gRem), M4);
+        const int32_t tRem = ReduceRotation(static_cast<int32_t>(p.gRem), reduceMod);
 
         Ciphertext<DCRTPoly> outer;
         for (int32_t i = static_cast<int32_t>(p.bRem) - 1; i >= 0; --i) {
@@ -2050,20 +2057,21 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalSlotsToCoeffs(const std::vector<std::vector
 
     auto cc = ctxt->GetCryptoContext();
 
-    const uint32_t M4    = cc->GetCyclotomicOrder() / 4;
-    const int32_t smax   = p.lvlb - flagRem;
-    const int32_t offset = static_cast<int32_t>((p.numRotations + 1) / 2) - 1;
+    const uint32_t M4        = cc->GetCyclotomicOrder() / 4;
+    const uint32_t reduceMod = std::min(M4, 2 * slots);
+    const int32_t smax       = p.lvlb - flagRem;
+    const int32_t offset     = static_cast<int32_t>((p.numRotations + 1) / 2) - 1;
     for (int32_t s = 0; s < smax; ++s) {
         const int32_t scale = 1 << (s * p.layersCollapse);
         for (uint32_t j = 0; j < p.g; ++j)
-            rot_in[s][j] = ReduceRotation((j - offset) * scale, M4);
+            rot_in[s][j] = ReduceRotation((j - offset) * scale, reduceMod);
     }
 
     if (flagRem == 1) {
         const int32_t scaleRem  = 1 << (smax * p.layersCollapse);
         const int32_t offsetRem = static_cast<int32_t>((p.numRotationsRem + 1) / 2) - 1;
         for (uint32_t j = 0; j < p.gRem; ++j)
-            rot_in[smax][j] = ReduceRotation((j - offsetRem) * scaleRem, M4);
+            rot_in[smax][j] = ReduceRotation((j - offsetRem) * scaleRem, reduceMod);
     }
 
     //  No need for Encrypted Bit Reverse
@@ -2088,7 +2096,7 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalSlotsToCoeffs(const std::vector<std::vector
 
         // Horner backward accumulation with single giant stride t = g * scale
         const int32_t scale = 1 << (s * p.layersCollapse);
-        const int32_t t     = ReduceRotation(static_cast<int32_t>(p.g) * scale, M4);
+        const int32_t t     = ReduceRotation(static_cast<int32_t>(p.g) * scale, reduceMod);
 
         Ciphertext<DCRTPoly> outer;
         for (int32_t i = static_cast<int32_t>(p.b) - 1; i >= 0; --i) {
@@ -2128,7 +2136,7 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalSlotsToCoeffs(const std::vector<std::vector
 
         // Horner giant stride for remainder: g_rem * scale_rem
         const int32_t scaleRem = 1 << (smax * p.layersCollapse);
-        const int32_t tRem     = ReduceRotation(static_cast<int32_t>(p.gRem) * scaleRem, M4);
+        const int32_t tRem     = ReduceRotation(static_cast<int32_t>(p.gRem) * scaleRem, reduceMod);
 
         Ciphertext<DCRTPoly> outer;
         for (int32_t i = static_cast<int32_t>(p.bRem) - 1; i >= 0; --i) {
