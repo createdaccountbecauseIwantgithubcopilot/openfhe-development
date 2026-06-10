@@ -1350,8 +1350,8 @@ std::vector<uint32_t> FHECKKSRNS::FindCoeffsToSlotsRotationIndices(uint32_t slot
             indexList.emplace_back(ReduceRotation(p.gRem, reduceMod));
     }
 
-    // §3.4: single accumulated correction key shared between CtS and StC
-    indexList.emplace_back(ReduceRotation(-2 * static_cast<int32_t>(slots - 1), reduceMod));
+    // §3.4: StC correction key Aut_{-(slots-1)} (CtS correction is now absorbed into plaintexts)
+    indexList.emplace_back(ReduceRotation(-static_cast<int32_t>(slots - 1), reduceMod));
 
     return indexList;
 }
@@ -1773,8 +1773,8 @@ std::vector<std::vector<ReadOnlyPlaintext>> FHECKKSRNS::EvalSlotsToCoeffsPrecomp
     // §3.2: zero-based inner indices require shifting the pre-rotation by +offset*shiftScale
     const int32_t offset    = static_cast<int32_t>((p.numRotations + 1) / 2) - 1;
     const int32_t offsetRem = static_cast<int32_t>((p.numRotationsRem + 1) / 2) - 1;
-    // §3.4: start from CtS accumulated correction (slots-1), then absorb StC per-level corrections
-    int32_t runningAcc = static_cast<int32_t>(slots) - 1;
+    // §3.4: CtS output now carries no extra rotation (absorbed into CtS precompute), so start at 0
+    int32_t runningAcc = 0;
 
     if (uint32_t M4 = cc.GetCyclotomicOrder() / 4; M4 == slots || flagStCComplex) {
         // fully-packed
@@ -2075,6 +2075,13 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalCoeffsToSlots(const std::vector<std::vector
         result = cc->KeySwitchDown(outer);
         // §3.4: rem correction absorbed into precomputed plaintexts
     }
+    // §3.4: undo the per-level accumulated rotation so the output is in standard slot ordering.
+    // CtS plaintexts were pre-rotated by running sum of per-level offsets (total = slots-1),
+    // producing Aut_{+(slots-1)}(correct_CtS(x)).  Undoing it here decouples CtS from StC so
+    // that EvalHomDecoding can be called on user-modified ciphertexts without extra rotation.
+    const int32_t CtSDelta = ReduceRotation(-static_cast<int32_t>(slots - 1), reduceMod);
+    if (CtSDelta != 0)
+        result = cc->EvalAtIndex(result, CtSDelta);
     return result;
 }
 
@@ -2199,8 +2206,8 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalSlotsToCoeffs(const std::vector<std::vector
         // §3.4: rem correction absorbed into precomputed plaintexts
     }
 
-    // §3.4: apply single accumulated correction Aut_{-Delta} where Delta = 2*(slots-1)
-    const int32_t Delta = ReduceRotation(-2 * static_cast<int32_t>(slots - 1), reduceMod);
+    // §3.4: apply StC accumulated correction Aut_{-Delta} where Delta = slots-1
+    const int32_t Delta = ReduceRotation(-static_cast<int32_t>(slots - 1), reduceMod);
     if (Delta != 0)
         result = cc->EvalAtIndex(result, Delta);
 
