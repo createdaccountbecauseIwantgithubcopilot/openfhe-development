@@ -646,27 +646,30 @@ std::vector<std::vector<std::vector<std::complex<double>>>> CoeffDecodingCollaps
         dimCollapse,
         std::vector<std::vector<std::complex<double>>>(numRotations, std::vector<std::complex<double>>(slots)));
     if (flagRem) {
-        // this one corresponds to the last index in decoding (same applies to the first index in encoding too)
-        coeff[dimCollapse - 1] =
+        // §4: re-partition: remainder is at index 0 (first, scale 1), mirroring CtS
+        coeff[0] =
             std::vector<std::vector<std::complex<double>>>(numRotationsRem, std::vector<std::complex<double>>(slots));
     }
 
     if (layersCollapse) {  // this condition is necessary for the code executed before the inner loop
         std::vector<std::vector<std::complex<double>>> zeros(numRotations,
                                                              std::vector<std::complex<double>>(slots, 0.0));
+        // §4: full levels at positions flagRem..lvlb-1; layer base = remCollapse + s*layersCollapse
         for (uint32_t s = 0; s < rowsCollapse; ++s) {
-            coeff[s][0] = coeff1[s * layersCollapse];
-            coeff[s][1] = coeff1[log2slots + s * layersCollapse];
-            coeff[s][2] = coeff1[2 * log2slots + s * layersCollapse];
+            const uint32_t layerBase = remCollapse + s * layersCollapse;
+            const uint32_t pos       = s + flagRem;
+            coeff[pos][0]            = coeff1[layerBase];
+            coeff[pos][1]            = coeff1[log2slots + layerBase];
+            coeff[pos][2]            = coeff1[2 * log2slots + layerBase];
 
             for (uint32_t l = 1; l < layersCollapse; ++l) {
-                auto temp = coeff[s];
-                coeff[s]  = zeros;
+                auto temp  = coeff[pos];
+                coeff[pos] = zeros;
                 for (uint32_t t = 0; t < 3; ++t) {
                     uint32_t shift = (t == 0) ? 0 : ((t == 1) ? (1U << l) : (1U << (l + 1)));
                     for (uint32_t u = 0; u < (1U << (l + 1)) - 1; ++u) {
                         for (uint32_t k = 0; k < slots; ++k) {
-                            coeff[s][u + shift][k] += coeff1[s * layersCollapse + l + t * log2slots][k] * temp[u][k];
+                            coeff[pos][u + shift][k] += coeff1[layerBase + l + t * log2slots][k] * temp[u][k];
                         }
                     }
                 }
@@ -675,22 +678,23 @@ std::vector<std::vector<std::vector<std::complex<double>>>> CoeffDecodingCollaps
     }
 
     if (flagRem && remCollapse) {  // check if (remCollapse > 0). it is necessary for the code executed before the loop
-        const uint32_t s = rowsCollapse;
+        // §4: remainder at position 0; layer base = 0
+        const uint32_t pos = 0;
 
-        coeff[s][0] = coeff1[s * layersCollapse];
-        coeff[s][1] = coeff1[log2slots + s * layersCollapse];
-        coeff[s][2] = coeff1[2 * log2slots + s * layersCollapse];
+        coeff[pos][0] = coeff1[0];
+        coeff[pos][1] = coeff1[log2slots];
+        coeff[pos][2] = coeff1[2 * log2slots];
 
         std::vector<std::vector<std::complex<double>>> zeros(numRotationsRem,
                                                              std::vector<std::complex<double>>(slots, 0.0));
         for (uint32_t l = 1; l < remCollapse; ++l) {
-            auto temp = coeff[s];
-            coeff[s]  = zeros;
+            auto temp  = coeff[pos];
+            coeff[pos] = zeros;
             for (uint32_t t = 0; t < 3; ++t) {
                 uint32_t shift = (t == 0) ? 0 : ((t == 1) ? (1U << l) : (1U << (l + 1)));
                 for (uint32_t u = 0; u < (1U << (l + 1)) - 1; ++u) {
                     for (uint32_t k = 0; k < slots; ++k) {
-                        coeff[s][u + shift][k] += coeff1[s * layersCollapse + l + t * log2slots][k] * temp[u][k];
+                        coeff[pos][u + shift][k] += coeff1[l + t * log2slots][k] * temp[u][k];
                     }
                 }
             }
