@@ -88,9 +88,9 @@ bool ParameterGenerationCKKSRNS::ParamsGenCKKSRNSInternal(std::shared_ptr<Crypto
             errorMsg += " Also, you can use COMPOSITESCALINGMANUAL at your own risk.";
             OPENFHE_THROW(errorMsg);
         }
-        else if (compositeDegree == 1 && registerWordSize < 64) {
+        else if (compositeDegree == 1 && registerWordSize <= 64) {
             OPENFHE_THROW(
-                "This COMPOSITESCALING* version does not support composite degree == 1 with register size < 64.");
+                "This COMPOSITESCALING* version does not support composite degree == 1 with register size <= 64.");
         }
         else if (compositeDegree < 1) {
             OPENFHE_THROW("Composite degree must be greater than or equal to 1.");
