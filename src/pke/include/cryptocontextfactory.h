@@ -63,8 +63,9 @@ protected:
 
 public:
     static void ReleaseAllContexts() {
-        if (AllContexts.size() > 0)
+        if (!AllContexts.empty())
             AllContexts[0]->ClearStaticMapsAndVectors();
+
         AllContexts.clear();
     }
 

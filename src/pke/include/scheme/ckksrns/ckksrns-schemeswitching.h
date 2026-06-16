@@ -57,6 +57,19 @@ class SWITCHCKKSRNS : public FHERNS {
 public:
     virtual ~SWITCHCKKSRNS() = default;
 
+    /**
+     * Clear cached CKKS/FHEW scheme-switch data held by this object.
+     * Any shared object already returned to the caller stays alive until released.
+     */
+    void ClearSchemeSwitchPrecom() noexcept override {
+        std::vector<ReadOnlyPlaintext>().swap(m_U0Pre);
+        m_ccLWE.reset();
+        m_ccKS.reset();
+        m_CKKStoFHEWswk.reset();
+        m_FHEWtoCKKSswk.reset();
+        m_ctxtKS.reset();
+    }
+
     //------------------------------------------------------------------------------
     // Scheme Switching Wrappers
     //------------------------------------------------------------------------------

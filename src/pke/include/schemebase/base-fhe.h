@@ -68,6 +68,18 @@ public:
     virtual ~FHEBase() = default;
 
     /**
+   * Clear scheme-level bootstrap precomputations, if this FHE component
+   * caches any. The default implementation is a no-op.
+   */
+    virtual void ClearBootstrapPrecom() noexcept {}
+
+    /**
+   * Clear scheme-switch precomputations, if this FHE component owns any.
+   * The default implementation is a no-op.
+   */
+    virtual void ClearSchemeSwitchPrecom() noexcept {}
+
+    /**
    * Bootstrap functionality:
    * There are three methods that have to be called in this specific order:
    * 1. EvalBootstrapSetup: computes and encodes the coefficients for encoding and

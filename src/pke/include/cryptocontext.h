@@ -623,6 +623,22 @@ public:
     static void ClearStaticMapsAndVectors();
 
     /**
+    * @brief Clear CKKS bootstrap precomputations cached by this context's scheme.
+    */
+    void ClearBootstrapPrecom() noexcept {
+        VerifyCKKSScheme(__func__);
+        m_scheme->ClearBootstrapPrecom();
+    }
+
+    /**
+    * @brief Clear CKKS/FHEW scheme-switch precomputations cached by this context's scheme.
+    */
+    void ClearSchemeSwitchPrecom() noexcept {
+        VerifyCKKSScheme(__func__);
+        m_scheme->ClearSchemeSwitchPrecom();
+    }
+
+    /**
     * @brief Serializes either all EvalMult keys (if keyTag is empty) or the EvalMult keys for keyTag
     *
     * @param ser stream to serialize to

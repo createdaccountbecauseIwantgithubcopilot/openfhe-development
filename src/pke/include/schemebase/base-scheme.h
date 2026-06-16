@@ -1146,6 +1146,16 @@ public:
         m_FHE->EvalBootstrapSetup(cc, levelBudget, dim1, slots, correctionFactor, precompute, BTSlotsEncoding);
     }
 
+    void ClearBootstrapPrecom() noexcept {
+        VerifyFHEEnabled(__func__);
+        m_FHE->ClearBootstrapPrecom();
+    }
+
+    void ClearSchemeSwitchPrecom() noexcept {
+        VerifySchemeSwitchEnabled(__func__);
+        m_SchemeSwitch->ClearSchemeSwitchPrecom();
+    }
+
     std::shared_ptr<std::map<uint32_t, EvalKey<Element>>> EvalBootstrapKeyGen(const PrivateKey<Element> privateKey,
                                                                               uint32_t slots) {
         VerifyFHEEnabled(__func__);
