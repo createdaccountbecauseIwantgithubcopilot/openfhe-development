@@ -192,12 +192,25 @@ void FHECKKSRNS::EvalBootstrapSetup(const CryptoContextImpl<DCRTPoly>& cc, std::
 
         uint32_t compositeDegree = cryptoParams->GetCompositeDegree();
 
-        double qDouble  = GetBigModulus(cryptoParams);
-        double factor   = static_cast<uint128_t>(1) << static_cast<uint32_t>(std::round(std::log2(qDouble)));
-        double pre      = (compositeDegree > 1) ? 1.0 : qDouble / factor;
+        double qDouble = GetBigModulus(cryptoParams);
+        double factor  = static_cast<uint128_t>(1) << static_cast<uint32_t>(std::round(std::log2(qDouble)));
+        // For composite scaling, capture the (inexact) overflow normalization SF0/qDouble as a coefficient
+        // close to 1, SF0*post/qDouble, which the CoeffsToSlots/SlotsToCoeffs matrices encode at full
+        // precision and telescope away (scaleDec = 1/scaleEnc*1/k cancels it). The exact power-of-two part
+        // 1/post is applied as the shrink and restored by the integer "scalar" in EvalBootstrap. This
+        // mirrors the FLEXIBLEAUTO scaling structure and avoids the precision loss of folding a tiny
+        // non-power-of-two constant into a single plaintext multiply.
+        double pre;
+        if (compositeDegree > 1) {
+            double powP = std::pow(2, cryptoParams->GetPlaintextModulus());
+            double post = std::pow(2, std::round(std::log2(qDouble / powP)));
+            pre         = cryptoParams->GetScalingFactorReal(0) * post / qDouble;
+        }
+        else {
+            pre = qDouble / factor;
+        }
         double scaleEnc = pre / k;
-        // TODO: YSP Can be extended to FLEXIBLE* scaling techniques as well as the closeness of 2^p to moduli is no longer needed
-        double scaleDec = (compositeDegree > 1) ? qDouble / cryptoParams->GetScalingFactorReal(0) : 1.0 / pre;
+        double scaleDec = 1.0 / pre;
 
         // compute # of levels to remain when encoding the coefficients
         // for FLEXIBLEAUTOEXT we do not need extra modulus in auxiliary plaintexts
@@ -382,12 +395,22 @@ void FHECKKSRNS::EvalBootstrapPrecompute(const CryptoContextImpl<DCRTPoly>& cc, 
 
     uint32_t compositeDegree = cryptoParams->GetCompositeDegree();
 
-    double qDouble  = GetBigModulus(cryptoParams);
-    double factor   = static_cast<uint128_t>(1) << static_cast<uint32_t>(std::round(std::log2(qDouble)));
-    double pre      = (compositeDegree > 1) ? 1.0 : qDouble / factor;
+    double qDouble = GetBigModulus(cryptoParams);
+    double factor  = static_cast<uint128_t>(1) << static_cast<uint32_t>(std::round(std::log2(qDouble)));
+    // For composite scaling, capture the (inexact) overflow normalization SF0/qDouble as a coefficient
+    // close to 1, SF0*post/qDouble, encoded at full precision in the CoeffsToSlots/SlotsToCoeffs matrices
+    // and telescoped away; the exact power-of-two 1/post is applied as the shrink/scalar (see EvalBootstrap).
+    double pre;
+    if (compositeDegree > 1) {
+        double powP = std::pow(2, cryptoParams->GetPlaintextModulus());
+        double post = std::pow(2, std::round(std::log2(qDouble / powP)));
+        pre         = cryptoParams->GetScalingFactorReal(0) * post / qDouble;
+    }
+    else {
+        pre = qDouble / factor;
+    }
     double scaleEnc = pre / k;
-    // TODO: YSP Can be extended to FLEXIBLE* scaling techniques as well as the closeness of 2^p to moduli is no longer needed
-    double scaleDec = (compositeDegree > 1) ? qDouble / cryptoParams->GetScalingFactorReal(0) : 1.0 / pre;
+    double scaleDec = 1.0 / pre;
 
     // compute # of levels to remain when encoding the coefficients
     // for FLEXIBLEAUTOEXT we do not need extra modulus in auxiliary plaintexts
@@ -567,7 +590,10 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalBootstrap(ConstCiphertext<DCRTPoly>& cipher
     double post         = std::pow(2, static_cast<double>(deg));
 
     // TODO: YSP Can be extended to FLEXIBLE* scaling techniques as well as the closeness of 2^p to moduli is no longer needed
-    double pre      = (compositeDegree > 1) ? cryptoParams->GetScalingFactorReal(0) / qDouble : 1. / post;
+    // 1/post is an exact power of two for all scaling techniques. For composite scaling the residual
+    // (inexact) part of the overflow normalization is carried by the CoeffsToSlots/SlotsToCoeffs matrix
+    // coefficients (see EvalBootstrapSetup), so the shrink below stays an exact power-of-two multiply.
+    double pre      = 1. / post;
     uint64_t scalar = std::llround(post);
 
     //------------------------------------------------------------------------------
@@ -732,10 +758,10 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalBootstrap(ConstCiphertext<DCRTPoly>& cipher
         algo->MultByMonomialInPlace(ctxtEncI, slots);
         cc->EvalAddInPlaceNoCheck(ctxtEnc, ctxtEncI);
 
-        if (st != COMPOSITESCALINGAUTO && st != COMPOSITESCALINGMANUAL) {
-            // scale the message back up after Chebyshev interpolation
-            algo->MultByIntegerInPlace(ctxtEnc, scalar);
-        }
+        // scale the message back up after Chebyshev interpolation; for composite scaling this restores
+        // the exact power-of-two 2^deg via an integer multiply (the residual ~1 coefficient lives in the
+        // StC matrix, see EvalBootstrapSetup)
+        algo->MultByIntegerInPlace(ctxtEnc, scalar);
 
 #ifdef BOOTSTRAPTIMING
         timeModReduce = TOC(t);
@@ -817,10 +843,10 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalBootstrap(ConstCiphertext<DCRTPoly>& cipher
         ApplyDoubleAngleIterations(ctxtEnc, numIter);
 
         // TODO: YSP Can be extended to FLEXIBLE* scaling techniques as well as the closeness of 2^p to moduli is no longer needed
-        if (st != COMPOSITESCALINGAUTO && st != COMPOSITESCALINGMANUAL) {
-            // scale the message back up after Chebyshev interpolation
-            algo->MultByIntegerInPlace(ctxtEnc, scalar);
-        }
+        // scale the message back up after Chebyshev interpolation; for composite scaling this restores
+        // the exact power-of-two 2^deg via an integer multiply (the residual ~1 coefficient lives in the
+        // StC matrix, see EvalBootstrapSetup)
+        algo->MultByIntegerInPlace(ctxtEnc, scalar);
 
 #ifdef BOOTSTRAPTIMING
         timeModReduce = TOC(t);
@@ -974,7 +1000,10 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalBootstrapStCFirst(ConstCiphertext<DCRTPoly>
     double post         = std::pow(2, static_cast<double>(deg));
 
     // TODO: YSP Can be extended to FLEXIBLE* scaling techniques as well as the closeness of 2^p to moduli is no longer needed
-    double pre      = (compositeDegree > 1) ? cryptoParams->GetScalingFactorReal(0) / qDouble : 1. / post;
+    // 1/post is an exact power of two for all scaling techniques. For composite scaling the residual
+    // (inexact) part of the overflow normalization is carried by the CoeffsToSlots/SlotsToCoeffs matrix
+    // coefficients (see EvalBootstrapSetup), so the shrink below stays an exact power-of-two multiply.
+    double pre      = 1. / post;
     uint64_t scalar = std::llround(post);
 
     //------------------------------------------------------------------------------
@@ -1224,11 +1253,10 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalBootstrapStCFirst(ConstCiphertext<DCRTPoly>
         cc->EvalAddInPlaceNoCheck(ctxtEnc, ctxtEncI);
     }
 
-    // TODO: YSP Can be extended to FLEXIBLE* scaling techniques as well as the closeness of 2^p to moduli is no longer needed
-    if (st != COMPOSITESCALINGAUTO && st != COMPOSITESCALINGMANUAL) {
-        // scale the message back up after Chebyshev interpolation
-        algo->MultByIntegerInPlace(ctxtEnc, scalar);
-    }
+    // scale the message back up after Chebyshev interpolation; for composite scaling this restores
+    // the exact power-of-two 2^deg via an integer multiply (the residual ~1 coefficient lives in the
+    // StC matrix, see EvalBootstrapSetup)
+    algo->MultByIntegerInPlace(ctxtEnc, scalar);
 
 #ifdef BOOTSTRAPTIMING
     timeModReduce = TOC(t);
