@@ -62,15 +62,23 @@ void RingGSWCryptoParams::PreCompute(bool signEval) {
             }
             if (m_baseG == baseGlist[j])
                 m_Gpower = tempvec;
-            m_Gpower_map[baseGlist[j]] = std::move(tempvec);
+            m_Gpowers[baseGlist[j]] = std::move(tempvec);
         }
     }
     else {
-        m_Gpower.reserve(m_digitsG);
-        NativeInteger vTemp{1};
-        for (uint32_t i = 0; i < m_digitsG; ++i) {
-            m_Gpower.push_back(vTemp);
-            vTemp = vTemp.ModMulFast(NativeInteger(m_baseG), m_Q);
+        for (size_t i=0; i<m_vectorBaseG.size(); i++){
+            auto baseG = m_vectorBaseG[i];
+            auto digitsG = m_vectorDigitsG[i];
+            if (m_Gpowers.find(baseG) != m_Gpowers.end())
+                continue;
+
+            NativeInteger vTemp{1};
+            std::vector<NativeInteger> tempvec(digitsG);
+            for (size_t j=0; j<digitsG; j++){
+                tempvec[j] = vTemp;
+                vTemp      = vTemp.ModMulFast(NativeInteger(baseG), m_Q);
+            }
+            m_Gpowers[baseG] = std::move(tempvec);
         }
     }
 
@@ -123,6 +131,13 @@ void RingGSWCryptoParams::PreCompute(bool signEval) {
             gPow               = (gPow * gen) % M;
             m_logGen[gPow]     = i;
             m_logGen[M - gPow] = -i;
+        }
+
+        m_autoPower.reserve(m_digitsAuto);
+        NativeInteger vTempAuto{1};
+        for (uint32_t i = 0; i < m_digitsAuto; ++i) {
+            m_autoPower.push_back(vTempAuto);
+            vTempAuto = vTempAuto.ModMulFast(NativeInteger(m_baseAuto), m_Q);
         }
     }
 }
