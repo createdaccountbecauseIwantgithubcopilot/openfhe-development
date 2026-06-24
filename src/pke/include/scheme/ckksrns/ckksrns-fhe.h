@@ -256,13 +256,36 @@ public:
     //------------------------------------------------------------------------------
     // EVALUATION: CoeffsToSlots and SlotsToCoeffs
     //------------------------------------------------------------------------------
+    // The transforms below use a baby-step/giant-step (BSGS) decomposition in
+    // which the giant steps are accumulated in Horner form with a single giant-
+    // step stride. This requires only one giant-step rotation key per level
+    // (instead of one per giant step), minimizing the number of distinct
+    // rotation keys that EvalBootstrapKeyGen must generate and store.
 
+    /**
+   * Single-level linear transform, used for CoeffsToSlots/SlotsToCoeffs when the
+   * level budget is 1. Evaluated with a BSGS decomposition (Horner giant steps).
+   * @param A precomputed diagonal plaintexts of the linear transform
+   * @param ct input ciphertext
+   */
     Ciphertext<DCRTPoly> EvalLinearTransform(const std::vector<ReadOnlyPlaintext>& A,
                                              ConstCiphertext<DCRTPoly>& ct) const;
 
+    /**
+   * Homomorphic encoding (CoeffsToSlots) over multiple BSGS levels, evaluated
+   * with Horner giant steps to minimize the number of rotation keys.
+   * @param A precomputed encoding plaintexts, one inner vector per BSGS level
+   * @param ctxt input ciphertext
+   */
     Ciphertext<DCRTPoly> EvalCoeffsToSlots(const std::vector<std::vector<ReadOnlyPlaintext>>& A,
                                            ConstCiphertext<DCRTPoly>& ctxt) const;
 
+    /**
+   * Homomorphic decoding (SlotsToCoeffs); the inverse of EvalCoeffsToSlots,
+   * evaluated with the same Horner giant-step BSGS structure.
+   * @param A precomputed decoding plaintexts, one inner vector per BSGS level
+   * @param ctxt input ciphertext
+   */
     Ciphertext<DCRTPoly> EvalSlotsToCoeffs(const std::vector<std::vector<ReadOnlyPlaintext>>& A,
                                            ConstCiphertext<DCRTPoly>& ctxt) const;
 
