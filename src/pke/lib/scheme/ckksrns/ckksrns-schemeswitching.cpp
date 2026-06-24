@@ -501,7 +501,7 @@ Ciphertext<DCRTPoly> SWITCHCKKSRNS::EvalLTWithPrecomputeSwitch(const CryptoConte
     // Computing the baby-step bStep and the giant-step gStep
     uint32_t slots = A.size();
     uint32_t bStep = dim1;
-    uint32_t gStep = std::ceil(static_cast<double>(slots) / bStep);
+    int32_t gStep  = std::ceil(static_cast<double>(slots) / bStep);
 
     // Computes the NTTs for each CRT limb (for the hoisted automorphisms used later on)
     auto digits = cc.EvalFastRotationPrecompute(ctxt);
@@ -512,41 +512,31 @@ Ciphertext<DCRTPoly> SWITCHCKKSRNS::EvalLTWithPrecomputeSwitch(const CryptoConte
     for (uint32_t j = 1; j < bStep; ++j)
         fastRotation[j - 1] = cc.EvalFastRotationExt(ctxt, j, digits, true);
 
-    uint32_t M = cc.GetCyclotomicOrder();
-    uint32_t N = cc.GetRingDimension();
-    std::vector<uint32_t> map(N);
+    auto ctxtExt = cc.KeySwitchExt(ctxt, true);
+
+    // Horner backward accumulation with a single giant stride t = bStep:
+    //   result = block_0 + Aut_bStep(block_1 + Aut_bStep(...))
+    // so only one giant-step key (bStep) is needed instead of the distinct keys
+    // {2*bStep, ..., (gStep-1)*bStep} the forward form required.
     Ciphertext<DCRTPoly> result;
-    DCRTPoly first;
+    for (int32_t j = gStep - 1; j >= 0; --j) {
+        const int32_t G = bStep * j;
+        auto inner      = FHECKKSRNS::EvalMultExt(ctxtExt, A[G]);
+        for (uint32_t i = 1; i < bStep; ++i)
+            if (G + i < slots)
+                FHECKKSRNS::EvalAddExtInPlace(inner, FHECKKSRNS::EvalMultExt(fastRotation[i - 1], A[G + i]));
 
-    for (uint32_t j = 0; j < gStep; ++j) {
-        auto inner = FHECKKSRNS::EvalMultExt(cc.KeySwitchExt(ctxt, true), A[bStep * j]);
-        for (uint32_t i = 1; i < bStep; ++i) {
-            if (bStep * j + i < slots)
-                FHECKKSRNS::EvalAddExtInPlace(inner, FHECKKSRNS::EvalMultExt(fastRotation[i - 1], A[bStep * j + i]));
-        }
-
-        if (j == 0) {
-            first         = cc.KeySwitchDownFirstElement(inner);
-            auto elements = inner->GetElements();
-            elements[0].SetValuesToZero();
-            inner->SetElements(std::move(elements));
+        if (j == gStep - 1) {
             result = std::move(inner);
         }
         else {
-            inner = cc.KeySwitchDown(inner);
-            // Find the automorphism index that corresponds to the rotation index.
-            uint32_t autoIndex = FindAutomorphismIndex2nComplex(bStep * j, M);
-            PrecomputeAutoMap(N, autoIndex, &map);
-            first += inner->GetElements()[0].AutomorphismTransform(autoIndex, map);
-
-            auto&& innerDigits = cc.EvalFastRotationPrecompute(inner);
-            FHECKKSRNS::EvalAddExtInPlace(result, cc.EvalFastRotationExt(inner, bStep * j, innerDigits, false));
+            auto resStd    = cc.KeySwitchDown(result);
+            auto resDigits = cc.EvalFastRotationPrecompute(resStd);
+            result         = cc.EvalFastRotationExt(resStd, bStep, resDigits, true);
+            FHECKKSRNS::EvalAddExtInPlace(result, inner);
         }
     }
-
-    result = cc.KeySwitchDown(result);
-    result->GetElements()[0] += first;
-    return result;
+    return cc.KeySwitchDown(result);
 }
 
 Ciphertext<DCRTPoly> SWITCHCKKSRNS::EvalLTRectWithPrecomputeSwitch(
@@ -556,7 +546,7 @@ Ciphertext<DCRTPoly> SWITCHCKKSRNS::EvalLTRectWithPrecomputeSwitch(
 
     // Computing the baby-step bStep and the giant-step gStep
     uint32_t bStep = (dim1 == 0) ? getRatioBSGSLT(n) : dim1;
-    uint32_t gStep = std::ceil(static_cast<double>(n) / bStep);
+    int32_t gStep  = std::ceil(static_cast<double>(n) / bStep);
 
     uint32_t M = cc.GetCyclotomicOrder();
     uint32_t N = cc.GetRingDimension();
@@ -608,43 +598,39 @@ Ciphertext<DCRTPoly> SWITCHCKKSRNS::EvalLTRectWithPrecomputeSwitch(
     for (uint32_t j = 1; j < bStep; ++j)
         fastRotation[j - 1] = cc.EvalFastRotationExt(ct, j, digits, true);
 
-    std::vector<uint32_t> map(N);
     Ciphertext<DCRTPoly> result;
-    DCRTPoly first;
 
-    for (uint32_t j = 0; j < gStep; j++) {
-        int32_t offset = (j == 0) ? 0 : -static_cast<int32_t>(bStep * j);
-        auto temp      = cc.MakeCKKSPackedPlaintext(Rotate(Fill(A[bStep * j], N / 2), offset), 1, towersToDrop,
-                                                    elementParamsPtr2, N / 2);
-        auto inner     = FHECKKSRNS::EvalMultExt(cc.KeySwitchExt(ct, true), temp);
+    // ct raised to the extended (P*Q) basis -- the unrotated (i=0) baby term.
+    auto ctExt = cc.KeySwitchExt(ct, true);
 
+    // Horner backward accumulation with a single giant stride t = bStep (one giant
+    // key instead of {2*bStep, ..., (gStep-1)*bStep}). Per-block plaintexts stay
+    // pre-rotated by -bStep*j; that is independent of the outer-rotation Horner form.
+    for (int32_t j = gStep - 1; j >= 0; --j) {
+        const int32_t G = bStep * j;
+        int32_t offset  = (j == 0) ? 0 : -G;
+        auto temp =
+            cc.MakeCKKSPackedPlaintext(Rotate(Fill(A[G], N / 2), offset), 1, towersToDrop, elementParamsPtr2, N / 2);
+        auto inner = FHECKKSRNS::EvalMultExt(ctExt, temp);
         for (uint32_t i = 1; i < bStep; i++) {
-            if (bStep * j + i < n) {
-                auto tempi = cc.MakeCKKSPackedPlaintext(Rotate(Fill(A[bStep * j + i], N / 2), offset), 1, towersToDrop,
+            if (G + i < n) {
+                auto tempi = cc.MakeCKKSPackedPlaintext(Rotate(Fill(A[G + i], N / 2), offset), 1, towersToDrop,
                                                         elementParamsPtr2, N / 2);
                 FHECKKSRNS::EvalAddExtInPlace(inner, FHECKKSRNS::EvalMultExt(fastRotation[i - 1], tempi));
             }
         }
 
-        if (j == 0) {
-            first         = cc.KeySwitchDownFirstElement(inner);
-            auto elements = inner->GetElements();
-            elements[0].SetValuesToZero();
-            inner->SetElements(std::move(elements));
+        if (j == gStep - 1) {
             result = std::move(inner);
         }
         else {
-            inner = cc.KeySwitchDown(inner);
-            // Find the automorphism index that corresponds to rotation index index.
-            uint32_t autoIndex = FindAutomorphismIndex2nComplex(bStep * j, M);
-            PrecomputeAutoMap(N, autoIndex, &map);
-            first += inner->GetElements()[0].AutomorphismTransform(autoIndex, map);
-            auto&& innerDigits = cc.EvalFastRotationPrecompute(inner);
-            FHECKKSRNS::EvalAddExtInPlace(result, cc.EvalFastRotationExt(inner, bStep * j, innerDigits, false));
+            auto resStd    = cc.KeySwitchDown(result);
+            auto resDigits = cc.EvalFastRotationPrecompute(resStd);
+            result         = cc.EvalFastRotationExt(resStd, bStep, resDigits, true);
+            FHECKKSRNS::EvalAddExtInPlace(result, inner);
         }
     }
     result = cc.KeySwitchDown(result);
-    result->GetElements()[0] += first;
 
     // A represents the diagonals, which lose the information whether the initial matrix is tall or wide
     if (wide) {
@@ -920,7 +906,7 @@ std::vector<std::shared_ptr<LWECiphertextImpl>> SWITCHCKKSRNS::EvalCKKStoFHEW(Co
 #pragma omp parallel for num_threads(OpenFHEParallelControls.GetThreadLimit(numCtxts))
         for (uint32_t i = 0; i < numCtxts; ++i) {
             auto& original_a = LWEciphertexts[i]->GetA();
-            auto original_b = LWEciphertexts[i]->GetB();
+            auto original_b  = LWEciphertexts[i]->GetB();
             // multiply by Q_LWE/Q' and round to Q_LWE
             NativeVector a_round(n, m_modulus_LWE);
             for (uint32_t j = 0; j < n; ++j)
