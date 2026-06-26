@@ -92,6 +92,7 @@ option(WITH_NATIVEOPT "Use machine-specific optimizations"                      
 option(WITH_COVTEST "Turn on to enable coverage testing (can be used with g++ only)"   OFF )
 option(WITH_NOISE_DEBUG "Use only when running lattice estimator; not for production"  OFF )
 option(WITH_REDUCED_NOISE "Enable reduced noise within HKS and BFV HPSPOVERQ modes"    OFF )
+option(WITH_BSGS_HORNER "Use single-giant-key Horner BSGS linear transforms (CKKS bootstrapping/scheme switching); OFF reverts to the legacy multi-key flow" ON )
 option(USE_MACPORTS "Use MacPorts installed packages"                                  OFF )
 
 # Set required number of bits for native integer in build by setting NATIVE_SIZE to 64 or 128
@@ -122,7 +123,12 @@ message(STATUS "WITH_NATIVEOPT:     ${WITH_NATIVEOPT}")
 message(STATUS "WITH_COVTEST:       ${WITH_COVTEST}")
 message(STATUS "WITH_NOISE_DEBUG:   ${WITH_NOISE_DEBUG}")
 message(STATUS "WITH_REDUCED_NOISE: ${WITH_REDUCED_NOISE}")
+message(STATUS "WITH_BSGS_HORNER:   ${WITH_BSGS_HORNER}")
 message(STATUS "USE_MACPORTS:       ${USE_MACPORTS}")
+
+if(WITH_BSGS_HORNER)
+    add_definitions(-DCKKS_BSGS_HORNER)
+endif()
 
 #--------------------------------------------------------------------
 # Compiler logic

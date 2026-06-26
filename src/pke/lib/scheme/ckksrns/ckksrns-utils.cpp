@@ -741,16 +741,24 @@ std::vector<int32_t> FindLTRotationIndicesSwitch(uint32_t dim1, uint32_t m, uint
     else
         slots = blockDimension;
 
-    // Computing the baby-step bStep
-    uint32_t bStep = (dim1 == 0) ? getRatioBSGSLT(slots) : dim1;
+    // Computing the baby-step bStep (and, for the legacy path, the giant-step count)
+    uint32_t bStep                  = (dim1 == 0) ? getRatioBSGSLT(slots) : dim1;
+    [[maybe_unused]] uint32_t gStep = static_cast<uint32_t>(std::ceil(static_cast<double>(slots) / bStep));
 
-    // The Horner form of the LT transforms uses a single giant stride (bStep,
-    // already contained in {1..bStep}), so the giant-step keys
-    // {2*bStep, ..., (gStep-1)*bStep} the forward form needed are no longer generated.
     std::vector<int32_t> indexList;
+#ifdef CKKS_BSGS_HORNER
+    // Horner uses a single giant stride bStep, already contained in the baby set {1..bStep}.
     indexList.reserve(bStep);
+#else
+    indexList.reserve(bStep + gStep - 2);
+#endif
     for (uint32_t i = 1; i <= bStep; i++)
         indexList.emplace_back(i);
+#ifndef CKKS_BSGS_HORNER
+    // legacy: distinct giant-step keys {2*bStep, ..., (gStep-1)*bStep}
+    for (uint32_t i = 2; i < gStep; i++)
+        indexList.emplace_back(bStep * i);
+#endif
 
     // Remove possible duplicates
     sort(indexList.begin(), indexList.end());
@@ -781,11 +789,14 @@ std::vector<int32_t> FindLTRotationIndicesSwitchArgmin(uint32_t m, uint32_t bloc
     indexList.reserve(bStep + gStep + cols);
 
     while (slots >= 1) {
-        // Computing all indices for baby-step giant-step procedure. The Horner form
-        // uses a single giant stride bStep (already in {1..bStep}), so the giant-step
-        // keys {2*bStep, ..., (gStep-1)*bStep} are no longer generated.
+        // baby-step keys {1..bStep} (shared)
         for (uint32_t i = 1; i <= bStep; i++)
             indexList.emplace_back(i);
+#ifndef CKKS_BSGS_HORNER
+        // legacy: distinct giant-step keys {2*bStep, ..., (gStep-1)*bStep}
+        for (uint32_t i = 2; i < gStep; i++)
+            indexList.emplace_back(bStep * i);
+#endif
 
         // If the linear transform is wide instead of tall, we need extra rotations
         if (slots < cols) {
@@ -800,6 +811,9 @@ std::vector<int32_t> FindLTRotationIndicesSwitchArgmin(uint32_t m, uint32_t bloc
 
         // Recompute the baby-step for the next (halved) tree level
         bStep = getRatioBSGSLT(slots);
+#ifndef CKKS_BSGS_HORNER
+        gStep = std::ceil(static_cast<double>(slots) / bStep);
+#endif
     }
 
     // Remove possible duplicates
