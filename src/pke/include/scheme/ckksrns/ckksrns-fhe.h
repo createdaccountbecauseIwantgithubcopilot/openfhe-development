@@ -352,6 +352,19 @@ public:
     static Ciphertext<DCRTPoly> EvalAddExt(ConstCiphertext<DCRTPoly> ciphertext1,
                                            ConstCiphertext<DCRTPoly> ciphertext2);
 
+    // Loads the loop-invariant automorphism key, index and O(N) permutation map for a constant
+    // Horner giant stride, so they are built once instead of re-derived inside the BSGS
+    // accumulation loop. Shared by the bootstrapping and scheme-switching linear transforms.
+    static EvalKey<DCRTPoly> GetGiantStepRotation(ConstCiphertext<DCRTPoly> ct, int32_t stride, uint32_t& autoIndex,
+                                                  std::vector<uint32_t>& map);
+
+    // Inlined giant-step rotation for the Horner accumulation: equivalent to
+    // EvalFastRotationExt(KeySwitchDown(outer), stride, precompute(.), addFirst=true), reusing the
+    // caller-supplied loop-invariant (autoIndex, map, giantKey) from GetGiantStepRotation.
+    static Ciphertext<DCRTPoly> EvalHornerGiantRotate(ConstCiphertext<DCRTPoly> outer, uint32_t autoIndex,
+                                                      const std::vector<uint32_t>& map,
+                                                      const EvalKey<DCRTPoly>& giantKey);
+
     static EvalKey<DCRTPoly> ConjugateKeyGen(const PrivateKey<DCRTPoly> privateKey);
 
     static Ciphertext<DCRTPoly> Conjugate(ConstCiphertext<DCRTPoly> ciphertext,

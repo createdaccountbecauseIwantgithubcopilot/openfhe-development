@@ -76,6 +76,58 @@ double GetBigModulus(const std::shared_ptr<lbcrypto::CryptoParametersCKKSRNS>& c
 
 namespace lbcrypto {
 
+// Looks up the automorphism key, index and O(N) permutation map for a constant Horner giant
+// stride. Hoisted out of the accumulation loop so these loop-invariant quantities are built once
+// per stride instead of being re-derived by every EvalFastRotationExt call.
+EvalKey<DCRTPoly> FHECKKSRNS::GetGiantStepRotation(ConstCiphertext<DCRTPoly> ct, int32_t stride, uint32_t& autoIndex,
+                                                   std::vector<uint32_t>& map) {
+    auto cc          = ct->GetCryptoContext();
+    const uint32_t M = cc->GetCyclotomicOrder();
+    const uint32_t N = cc->GetRingDimension();
+    autoIndex        = FindAutomorphismIndex2nComplex(stride, M);
+    auto evalKeyMap  = cc->GetEvalAutomorphismKeyMap(ct->GetKeyTag());
+    auto evalKeyIt   = evalKeyMap.find(autoIndex);
+    if (evalKeyIt == evalKeyMap.end())
+        OPENFHE_THROW("EvalKey for index [" + std::to_string(autoIndex) + "] is not found.");
+    map.resize(N);
+    PrecomputeAutoMap(N, autoIndex, &map);
+    return evalKeyIt->second;
+}
+
+// Inlined giant-step rotation for the Horner accumulation: equivalent to
+// EvalFastRotationExt(KeySwitchDown(outer), stride, precompute(.), addFirst=true) but reusing the
+// caller-supplied loop-invariant (autoIndex, map, giantKey) instead of having EvalFastRotationExt
+// re-derive the automorphism index and O(N) map every call.
+Ciphertext<DCRTPoly> FHECKKSRNS::EvalHornerGiantRotate(ConstCiphertext<DCRTPoly> outer, uint32_t autoIndex,
+                                                       const std::vector<uint32_t>& map,
+                                                       const EvalKey<DCRTPoly>& giantKey) {
+    auto cc                 = outer->GetCryptoContext();
+    auto algo               = cc->GetScheme();
+    const auto cryptoParams = std::dynamic_pointer_cast<CryptoParametersCKKSRNS>(outer->GetCryptoParameters());
+
+    auto outerStd       = cc->KeySwitchDown(outer);
+    const auto& cvStd   = outerStd->GetElements();
+    const auto paramsQl = cvStd[0].GetParams();
+
+    auto digits = algo->EvalKeySwitchPrecomputeCore(cvStd[1], cryptoParams);
+    auto cTilda = algo->EvalFastKeySwitchCoreExt(digits, giantKey, paramsQl);
+
+    // addFirst: lift element 0 into the extended basis (c0 * P) and fold it in.
+    DCRTPoly psiC0(cTilda[0].GetParams(), Format::EVALUATION, true);
+    auto cMult            = cvStd[0].TimesNoCheck(cryptoParams->GetPModq());
+    const uint32_t sizeQl = paramsQl->GetParams().size();
+    for (uint32_t i = 0; i < sizeQl; ++i)
+        psiC0.SetElementAtIndex(i, std::move(cMult.GetElementAtIndex(i)));
+    cTilda[0] += psiC0;
+
+    cTilda[0] = cTilda[0].AutomorphismTransform(autoIndex, map);
+    cTilda[1] = cTilda[1].AutomorphismTransform(autoIndex, map);
+
+    auto rotated = outerStd->CloneEmpty();
+    rotated->SetElements(std::move(cTilda));
+    return rotated;
+}
+
 //------------------------------------------------------------------------------
 // Bootstrap Wrapper
 //------------------------------------------------------------------------------
@@ -165,7 +217,7 @@ void FHECKKSRNS::EvalBootstrapSetup(const CryptoContextImpl<DCRTPoly>& cc, std::
         // computes all powers of a primitive root of unity exp(2 * M_PI/m)
         std::vector<std::complex<double>> ksiPows(m + 1);
         double ak = 2 * M_PI / m;
-#pragma omp parallel for num_threads(OpenFHEParallelControls.GetThreadLimit(4))
+#pragma omp parallel for num_threads(OpenFHEParallelControls.GetThreadLimit(2))
         for (uint32_t j = 0; j < m; ++j) {
             double angle = ak * j;
             ksiPows[j].real(std::cos(angle));
@@ -355,7 +407,7 @@ void FHECKKSRNS::EvalBootstrapPrecompute(const CryptoContextImpl<DCRTPoly>& cc, 
     // computes all powers of a primitive root of unity exp(2 * M_PI/m)
     std::vector<std::complex<double>> ksiPows(m + 1);
     double ak = 2 * M_PI / m;
-#pragma omp parallel for num_threads(OpenFHEParallelControls.GetThreadLimit(4))
+#pragma omp parallel for num_threads(OpenFHEParallelControls.GetThreadLimit(2))
     for (uint32_t j = 0; j < m; ++j) {
         double angle = ak * j;
         ksiPows[j].real(std::cos(angle));
@@ -1875,24 +1927,26 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalLinearTransform(const std::vector<ReadOnlyP
 
     auto ctExt = cc->KeySwitchExt(ct, true);
 
-    // Horner backward accumulation with a single giant stride t = bStep:
-    Ciphertext<DCRTPoly> outer;
-    for (int32_t j = gStep - 1; j >= 0; --j) {
+    uint32_t autoIndex = 0;
+    std::vector<uint32_t> map;
+    EvalKey<DCRTPoly> giantKey;
+    if (gStep > 1)
+        giantKey = GetGiantStepRotation(ct, bStep, autoIndex, map);
+
+    // Horner backward accumulation with a single giant stride t = bStep.
+    const int32_t Gtop         = (gStep - 1) * bStep;
+    Ciphertext<DCRTPoly> outer = EvalMultExt(ctExt, A[Gtop]);
+    for (int32_t i = 1; i < bStep; ++i)
+        if (Gtop + i < slots)
+            EvalAddExtInPlace(outer, EvalMultExt(fastRotation[i - 1], A[Gtop + i]));
+
+    for (int32_t j = gStep - 2; j >= 0; --j) {
+        outer           = EvalHornerGiantRotate(outer, autoIndex, map, giantKey);
         const int32_t G = j * bStep;
         auto inner      = EvalMultExt(ctExt, A[G]);
         for (int32_t i = 1; i < bStep; ++i)
-            if (G + i < slots)
-                EvalAddExtInPlace(inner, EvalMultExt(fastRotation[i - 1], A[G + i]));
-
-        if (j == gStep - 1) {
-            outer = std::move(inner);
-        }
-        else {
-            auto outerStd    = cc->KeySwitchDown(outer);
-            auto outerDigits = cc->EvalFastRotationPrecompute(outerStd);
-            outer            = cc->EvalFastRotationExt(outerStd, bStep, outerDigits, true);
-            EvalAddExtInPlace(outer, inner);
-        }
+            EvalAddExtInPlace(inner, EvalMultExt(fastRotation[i - 1], A[G + i]));
+        EvalAddExtInPlace(outer, inner);
     }
     return cc->KeySwitchDown(outer);
 }
@@ -1941,26 +1995,27 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalCoeffsToSlots(const std::vector<std::vector
         const int32_t t = ReduceRotation(scale * p.g, reduceMod);
 
         const int32_t bLast = static_cast<int32_t>(p.b) - 1;
-        Ciphertext<DCRTPoly> outer;
-        for (int32_t i = bLast; i >= 0; --i) {
-            uint32_t G = p.g * i;
-            auto inner = EvalMultExt(fastRotation[0], A[s][G]);
-            for (uint32_t j = 1; j < p.g; ++j) {
-                if ((G + j) != p.numRotations)
-                    EvalAddExtInPlace(inner, EvalMultExt(fastRotation[j], A[s][G + j]));
-            }
 
-            if (i == bLast) {
-                outer = std::move(inner);
-            }
-            else {
-                if (t != 0) {
-                    auto outerStd    = cc->KeySwitchDown(outer);
-                    auto outerDigits = cc->EvalFastRotationPrecompute(outerStd);
-                    outer            = cc->EvalFastRotationExt(outerStd, t, outerDigits, true);
-                }
-                EvalAddExtInPlace(outer, inner);
-            }
+        uint32_t giantAutoIndex = 0;
+        std::vector<uint32_t> giantMap;
+        EvalKey<DCRTPoly> giantKey;
+        if (t != 0 && bLast > 0)
+            giantKey = GetGiantStepRotation(result, t, giantAutoIndex, giantMap);
+
+        const uint32_t Gtop        = p.g * bLast;
+        Ciphertext<DCRTPoly> outer = EvalMultExt(fastRotation[0], A[s][Gtop]);
+        for (uint32_t j = 1; j < p.g; ++j)
+            if ((Gtop + j) != p.numRotations)
+                EvalAddExtInPlace(outer, EvalMultExt(fastRotation[j], A[s][Gtop + j]));
+
+        for (int32_t i = bLast - 1; i >= 0; --i) {
+            if (t != 0)
+                outer = EvalHornerGiantRotate(outer, giantAutoIndex, giantMap, giantKey);
+            const uint32_t G = p.g * i;
+            auto inner       = EvalMultExt(fastRotation[0], A[s][G]);
+            for (uint32_t j = 1; j < p.g; ++j)
+                EvalAddExtInPlace(inner, EvalMultExt(fastRotation[j], A[s][G + j]));
+            EvalAddExtInPlace(outer, inner);
         }
         result = cc->KeySwitchDown(outer);
     }
@@ -1980,26 +2035,27 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalCoeffsToSlots(const std::vector<std::vector
         const int32_t tRem = ReduceRotation(p.gRem, reduceMod);
 
         const int32_t bLast = static_cast<int32_t>(p.bRem) - 1;
-        Ciphertext<DCRTPoly> outer;
-        for (int32_t i = bLast; i >= 0; --i) {
-            uint32_t GRem = p.gRem * i;
-            auto inner    = EvalMultExt(fastRotationRem[0], A[stop][GRem]);
-            for (uint32_t j = 1; j < p.gRem; ++j) {
-                if ((GRem + j) != p.numRotationsRem)
-                    EvalAddExtInPlace(inner, EvalMultExt(fastRotationRem[j], A[stop][GRem + j]));
-            }
 
-            if (i == bLast) {
-                outer = std::move(inner);
-            }
-            else {
-                if (tRem != 0) {
-                    auto outerStd    = cc->KeySwitchDown(outer);
-                    auto outerDigits = cc->EvalFastRotationPrecompute(outerStd);
-                    outer            = cc->EvalFastRotationExt(outerStd, tRem, outerDigits, true);
-                }
-                EvalAddExtInPlace(outer, inner);
-            }
+        uint32_t giantAutoIndex = 0;
+        std::vector<uint32_t> giantMap;
+        EvalKey<DCRTPoly> giantKey;
+        if (tRem != 0 && bLast > 0)
+            giantKey = GetGiantStepRotation(result, tRem, giantAutoIndex, giantMap);
+
+        const uint32_t GtopRem     = p.gRem * bLast;
+        Ciphertext<DCRTPoly> outer = EvalMultExt(fastRotationRem[0], A[stop][GtopRem]);
+        for (uint32_t j = 1; j < p.gRem; ++j)
+            if ((GtopRem + j) != p.numRotationsRem)
+                EvalAddExtInPlace(outer, EvalMultExt(fastRotationRem[j], A[stop][GtopRem + j]));
+
+        for (int32_t i = bLast - 1; i >= 0; --i) {
+            if (tRem != 0)
+                outer = EvalHornerGiantRotate(outer, giantAutoIndex, giantMap, giantKey);
+            const uint32_t GRem = p.gRem * i;
+            auto inner          = EvalMultExt(fastRotationRem[0], A[stop][GRem]);
+            for (uint32_t j = 1; j < p.gRem; ++j)
+                EvalAddExtInPlace(inner, EvalMultExt(fastRotationRem[j], A[stop][GRem + j]));
+            EvalAddExtInPlace(outer, inner);
         }
         result = cc->KeySwitchDown(outer);
     }
@@ -2050,26 +2106,27 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalSlotsToCoeffs(const std::vector<std::vector
         const int32_t t = ReduceRotation(scale * p.g, reduceMod);
 
         const int32_t bLast = static_cast<int32_t>(p.b) - 1;
-        Ciphertext<DCRTPoly> outer;
-        for (int32_t i = bLast; i >= 0; --i) {
-            uint32_t G = p.g * i;
-            auto inner = EvalMultExt(fastRotation[0], A[s][G]);
-            for (uint32_t j = 1; j < p.g; ++j) {
-                if ((G + j) != p.numRotations)
-                    EvalAddExtInPlace(inner, EvalMultExt(fastRotation[j], A[s][G + j]));
-            }
 
-            if (i == bLast) {
-                outer = std::move(inner);
-            }
-            else {
-                if (t != 0) {
-                    auto outerStd    = cc->KeySwitchDown(outer);
-                    auto outerDigits = cc->EvalFastRotationPrecompute(outerStd);
-                    outer            = cc->EvalFastRotationExt(outerStd, t, outerDigits, true);
-                }
-                EvalAddExtInPlace(outer, inner);
-            }
+        uint32_t giantAutoIndex = 0;
+        std::vector<uint32_t> giantMap;
+        EvalKey<DCRTPoly> giantKey;
+        if (t != 0 && bLast > 0)
+            giantKey = GetGiantStepRotation(result, t, giantAutoIndex, giantMap);
+
+        const uint32_t Gtop        = p.g * bLast;
+        Ciphertext<DCRTPoly> outer = EvalMultExt(fastRotation[0], A[s][Gtop]);
+        for (uint32_t j = 1; j < p.g; ++j)
+            if ((Gtop + j) != p.numRotations)
+                EvalAddExtInPlace(outer, EvalMultExt(fastRotation[j], A[s][Gtop + j]));
+
+        for (int32_t i = bLast - 1; i >= 0; --i) {
+            if (t != 0)
+                outer = EvalHornerGiantRotate(outer, giantAutoIndex, giantMap, giantKey);
+            const uint32_t G = p.g * i;
+            auto inner       = EvalMultExt(fastRotation[0], A[s][G]);
+            for (uint32_t j = 1; j < p.g; ++j)
+                EvalAddExtInPlace(inner, EvalMultExt(fastRotation[j], A[s][G + j]));
+            EvalAddExtInPlace(outer, inner);
         }
         result = cc->KeySwitchDown(outer);
     }
@@ -2091,26 +2148,27 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalSlotsToCoeffs(const std::vector<std::vector
         const int32_t tRem = ReduceRotation(scaleRem * p.gRem, reduceMod);
 
         const int32_t bLast = static_cast<int32_t>(p.bRem) - 1;
-        Ciphertext<DCRTPoly> outer;
-        for (int32_t i = bLast; i >= 0; --i) {
-            uint32_t GRem = p.gRem * i;
-            auto inner    = EvalMultExt(fastRotationRem[0], A[smax][GRem]);
-            for (uint32_t j = 1; j < p.gRem; ++j) {
-                if ((GRem + j) != p.numRotationsRem)
-                    EvalAddExtInPlace(inner, EvalMultExt(fastRotationRem[j], A[smax][GRem + j]));
-            }
 
-            if (i == bLast) {
-                outer = std::move(inner);
-            }
-            else {
-                if (tRem != 0) {
-                    auto outerStd    = cc->KeySwitchDown(outer);
-                    auto outerDigits = cc->EvalFastRotationPrecompute(outerStd);
-                    outer            = cc->EvalFastRotationExt(outerStd, tRem, outerDigits, true);
-                }
-                EvalAddExtInPlace(outer, inner);
-            }
+        uint32_t giantAutoIndex = 0;
+        std::vector<uint32_t> giantMap;
+        EvalKey<DCRTPoly> giantKey;
+        if (tRem != 0 && bLast > 0)
+            giantKey = GetGiantStepRotation(result, tRem, giantAutoIndex, giantMap);
+
+        const uint32_t GtopRem     = p.gRem * bLast;
+        Ciphertext<DCRTPoly> outer = EvalMultExt(fastRotationRem[0], A[smax][GtopRem]);
+        for (uint32_t j = 1; j < p.gRem; ++j)
+            if ((GtopRem + j) != p.numRotationsRem)
+                EvalAddExtInPlace(outer, EvalMultExt(fastRotationRem[j], A[smax][GtopRem + j]));
+
+        for (int32_t i = bLast - 1; i >= 0; --i) {
+            if (tRem != 0)
+                outer = EvalHornerGiantRotate(outer, giantAutoIndex, giantMap, giantKey);
+            const uint32_t GRem = p.gRem * i;
+            auto inner          = EvalMultExt(fastRotationRem[0], A[smax][GRem]);
+            for (uint32_t j = 1; j < p.gRem; ++j)
+                EvalAddExtInPlace(inner, EvalMultExt(fastRotationRem[j], A[smax][GRem + j]));
+            EvalAddExtInPlace(outer, inner);
         }
         result = cc->KeySwitchDown(outer);
     }
