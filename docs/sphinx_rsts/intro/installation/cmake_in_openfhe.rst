@@ -81,28 +81,34 @@ Each of the options is enabled by saying ``-DOPTION_NAME=ON`` and is disabled by
 
 The table below shows the current list of options, definition for the option, and a default value.
 
- ================== ===================================================================================================================================================================== ==========
-  OPTION_NAME        Description                                                                                                                                                           Default
- ================== ===================================================================================================================================================================== ==========
-  BUILD_UNITTESTS    Set to ON to build unit tests for the library                                                                                                                         ON
-  BUILD_EXAMPLES     Set to ON to build examples for the library                                                                                                                           ON
-  BUILD_BENCHMARKS   Set to ON to build benchmarks for the library                                                                                                                         ON
-  BUILD_EXTRAS       Set to ON to build extra examples for the library                                                                                                                     OFF
-  BUILD_SHARED       Set to ON to include shared versions of the library                                                                                                                   ON
-  BUILD_STATIC       Set to ON to include static versions of the library                                                                                                                   OFF
-  WITH_BE2           Include Backend 2 in build by setting WITH_BE2 to ON                                                                                                                  ON
-  WITH_BE4           Include Backend 4 in build by setting WITH_BE4 to ON                                                                                                                  ON
-  WITH_NTL           Include Backend 6 and NTL in build by setting WITH_NTL to ON                                                                                                          OFF
-  WITH_TCM           Activate tcmalloc by setting WITH_TCM to ON                                                                                                                           OFF
-  WITH_OPENMP        Use OpenMP to enable <omp.h>                                                                                                                                          ON
-  WITH_NATIVEOPT     Use machine-specific optimizations (major speedup for clang)                                                                                                          OFF
-  NATIVE_SIZE        Set default word size for native integer arithmetic to 64 or 128 bits                                                                                                 64
-  CKKS_M_FACTOR      Parameter used to strengthen the CKKS adversarial model in scenarios where decryption results are shared among multiple parties (See Security.md for more details)    1
- ================== ===================================================================================================================================================================== ==========
+ ==================== ===================================================================================================================================================================== ==========
+  OPTION_NAME          Description                                                                                                                                                           Default
+ ==================== ===================================================================================================================================================================== ==========
+  BUILD_UNITTESTS      Set to ON to build unit tests for the library                                                                                                                         ON
+  BUILD_EXAMPLES       Set to ON to build examples for the library                                                                                                                           ON
+  BUILD_BENCHMARKS     Set to ON to build benchmarks for the library                                                                                                                         ON
+  BUILD_EXTRAS         Set to ON to build extra examples for the library                                                                                                                     OFF
+  BUILD_SHARED         Set to ON to include shared versions of the library                                                                                                                   ON
+  BUILD_STATIC         Set to ON to include static versions of the library                                                                                                                   OFF
+  GIT_SUBMOD_AUTO      Automatically update git submodules at CMake configure time                                                                                                           ON
+  WITH_BE2             Include Backend 2 in build by setting WITH_BE2 to ON                                                                                                                  OFF
+  WITH_BE4             Include Backend 4 in build by setting WITH_BE4 to ON (always ON when MATHBACKEND=4, the default)                                                                      ON
+  WITH_NTL             Include Backend 6 and NTL in build by setting WITH_NTL to ON                                                                                                          OFF
+  WITH_TCM             Activate tcmalloc by setting WITH_TCM to ON                                                                                                                           OFF
+  WITH_MALLOC_TUNING   Tune glibc malloc to retain freed memory for reuse (higher performance, higher resident memory; see AllocTrim())                                                      ON
+  WITH_OPENMP          Use OpenMP to enable <omp.h>                                                                                                                                          ON
+  WITH_NATIVEOPT       Use machine-specific optimizations (major speedup for clang)                                                                                                          OFF
+  WITH_COVTEST         Turn on to enable coverage testing (can be used with g++ only)                                                                                                        OFF
+  WITH_NOISE_DEBUG     Use only when running the lattice estimator; not for production                                                                                                       OFF
+  WITH_REDUCED_NOISE   Enable reduced noise within HKS and BFV HPSPOVERQ modes                                                                                                               OFF
+  USE_MACPORTS         Use MacPorts installed packages (macOS)                                                                                                                               OFF
+  NATIVE_SIZE          Set default word size for native integer arithmetic to 64 or 128 bits                                                                                                 64
+  CKKS_M_FACTOR        Parameter used to strengthen the CKKS adversarial model in scenarios where decryption results are shared among multiple parties (See Security.md for more details)    1
+ ==================== ===================================================================================================================================================================== ==========
 
 .. note:: More Options will be added as development progresses
 
-The default math backend for the OpenFHE build is Backend 2 (basic fixed-maximum-length big integers). This default can be changed on the CMake command line by setting the MATHBACKEND variable. For example, to select backend 6 (high performance fixed integers based on the GMP and NTL libraries), use ``-DMATHBACKEND=6`` on the CMake command line.
+The default math backend for the OpenFHE build is Backend 4 (dynamically-sized big integers). This default can be changed on the CMake command line by setting the MATHBACKEND variable. For example, to select backend 6 (high performance fixed integers based on the GMP and NTL libraries), use ``-DMATHBACKEND=6`` on the CMake command line.
 
 Detecting Local Environments
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
