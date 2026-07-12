@@ -63,6 +63,21 @@ public:
         glscheme::rns::GlrShipCompactSelectorManifest;
     using NativeRefreshCompactSelectorBinding =
         glscheme::rns::GlrShipCompactSelectorBinding;
+    using NativeRefreshPackParameters =
+        glscheme::rns::GlrShipRefreshOnlyParameters;
+    using NativeRefreshPackConfig = glscheme::rns::GlrShipConfig;
+    using NativeRefreshPackAccumulator =
+        glscheme::rns::GlrShipRefreshOnlyPackAccumulator;
+    using NativeRefreshPackResult =
+        glscheme::rns::GlrShipRefreshOnlyPackedResult;
+    using NativeRefreshPackEvidence =
+        glscheme::rns::GlrShipRefreshOnlyPackEvidence;
+    using NativeRefreshPackCheckpointSink =
+        glscheme::rns::GlrShipRefreshOnlyPackCheckpointSink;
+    using NativeRefreshPackCheckpointSource =
+        glscheme::rns::GlrShipRefreshOnlyPackCheckpointSource;
+    using NativeRefreshPackCheckpointReceipt =
+        glscheme::rns::GlrShipRefreshOnlyPackCheckpointReceipt;
 
     // Fixed-capacity binding text keeps the refresh preflight itself free of
     // heap-owning strings while still carrying the exact canonical name and
@@ -263,6 +278,91 @@ public:
         bool productionExecutionExposed = false;
     };
 
+    class OrdinaryRefreshPackFacade;
+
+    // Move-only rolling state for the native ordinary-refresh coefficient
+    // packer.  This type is intentionally not convertible to either a packed
+    // tensor or a refreshed-xy endpoint result.  A session becomes a packed
+    // tensor only through OrdinaryRefreshPackFacade::Finalize after the native
+    // core validates a complete, gap-free coordinate cover.
+    class OrdinaryRefreshPackSession final {
+    public:
+        OrdinaryRefreshPackSession(const OrdinaryRefreshPackSession&) = delete;
+        OrdinaryRefreshPackSession& operator=(
+            const OrdinaryRefreshPackSession&) = delete;
+        OrdinaryRefreshPackSession(OrdinaryRefreshPackSession&&) noexcept =
+            default;
+        OrdinaryRefreshPackSession& operator=(
+            OrdinaryRefreshPackSession&&) noexcept = default;
+        ~OrdinaryRefreshPackSession() = default;
+
+        std::uint64_t NextCoordinate() const noexcept;
+        std::uint64_t TotalCoordinates() const noexcept;
+        bool CoordinateCoverComplete() const noexcept;
+
+    private:
+        friend class OrdinaryRefreshPackFacade;
+        explicit OrdinaryRefreshPackSession(
+            NativeRefreshPackAccumulator accumulator);
+
+        NativeRefreshPackAccumulator m_accumulator;
+    };
+
+    // The pack finalizer returns only the native full coefficient tensor and
+    // its measured pack evidence.  It deliberately has no endpoint-complete,
+    // production-exposed, ciphertext-value, or value/noise acceptance flag:
+    // CtS/normalization and StC/output validation remain the responsibility of
+    // the unchanged ExecuteOrdinaryRefresh endpoint, and owner decryption is a
+    // separate acceptance lane.
+    struct OrdinaryRefreshPackFinalizedResult {
+        NativeRefreshPackResult nativeResult;
+        NativeRefreshPackEvidence nativeEvidence;
+    };
+
+    // Narrow OpenFHE-facing facade over GLScheme's resumable native packer.
+    // Begin executes and merges the first nonempty prefix. Advance consumes
+    // the next contiguous coordinate count. SerializeCheckpoint and Resume
+    // use the bounded core codec and its externally authenticated receipt.
+    // Finalize consumes a complete session and cannot expose a refreshed-xy
+    // result. The referenced context and every provider/config pointer must
+    // outlive each synchronous call. The explicit context constructor keeps
+    // small staged/toy conformance possible; canonical callers obtain the
+    // facade from GLRProductionAdapter::ResumableOrdinaryRefreshPack().
+    class OrdinaryRefreshPackFacade final {
+    public:
+        explicit OrdinaryRefreshPackFacade(const Context& context) noexcept;
+
+        OrdinaryRefreshPackSession Begin(
+            const Ciphertext& sparseCoefficientInput,
+            const NativeRefreshPackParameters& parameters,
+            const NativeRefreshPackConfig& config,
+            std::uint64_t firstCoordinateCount) const;
+
+        void Advance(
+            OrdinaryRefreshPackSession& session,
+            const Ciphertext& sparseCoefficientInput,
+            const NativeRefreshPackParameters& parameters,
+            const NativeRefreshPackConfig& config,
+            std::uint64_t coordinateCount) const;
+
+        NativeRefreshPackCheckpointReceipt SerializeCheckpoint(
+            const OrdinaryRefreshPackSession& session,
+            const NativeRefreshPackCheckpointSink& sink) const;
+
+        OrdinaryRefreshPackSession Resume(
+            const NativeRefreshPackCheckpointReceipt& authenticatedReceipt,
+            const NativeRefreshPackCheckpointSource& source) const;
+
+        OrdinaryRefreshPackFinalizedResult Finalize(
+            OrdinaryRefreshPackSession&& session,
+            const Ciphertext& sparseCoefficientInput,
+            const NativeRefreshPackParameters& parameters,
+            const NativeRefreshPackConfig& config) const;
+
+    private:
+        const Context* m_context = nullptr;
+    };
+
     // Ordinary GL evaluation-key request.  Rotation amounts name the exact
     // native Galois keys to materialize; there is no implicit all-rotations
     // closure.  keyLevel counts dropped Q primes, just like GlrCiphertext.
@@ -337,6 +437,8 @@ public:
     ~GLRProductionAdapter() = default;
 
     const Context& GetContext() const noexcept;
+
+    OrdinaryRefreshPackFacade ResumableOrdinaryRefreshPack() const noexcept;
 
     // Calls GLScheme's allocation-free prime-p refresh census and binds it to
     // this adapter's exact GL-128-257-N32 context.  No key, ciphertext,

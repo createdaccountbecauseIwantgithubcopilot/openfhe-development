@@ -1079,6 +1079,153 @@ void RequireOrdinaryRefreshEvidenceMatchesAllYReceipt(
 
 }  // namespace
 
+GLRProductionAdapter::OrdinaryRefreshPackSession::
+    OrdinaryRefreshPackSession(NativeRefreshPackAccumulator accumulator)
+    : m_accumulator(std::move(accumulator)) {}
+
+std::uint64_t
+GLRProductionAdapter::OrdinaryRefreshPackSession::NextCoordinate()
+    const noexcept {
+    return m_accumulator.initialized ? m_accumulator.next_coordinate : 0U;
+}
+
+std::uint64_t
+GLRProductionAdapter::OrdinaryRefreshPackSession::TotalCoordinates()
+    const noexcept {
+    return m_accumulator.initialized ? m_accumulator.total_coordinates : 0U;
+}
+
+bool GLRProductionAdapter::OrdinaryRefreshPackSession::
+    CoordinateCoverComplete() const noexcept {
+    return m_accumulator.initialized && m_accumulator.total_coordinates != 0U &&
+           m_accumulator.next_coordinate ==
+               m_accumulator.total_coordinates;
+}
+
+GLRProductionAdapter::OrdinaryRefreshPackFacade::
+    OrdinaryRefreshPackFacade(const Context& context) noexcept
+    : m_context(&context) {}
+
+GLRProductionAdapter::OrdinaryRefreshPackSession
+GLRProductionAdapter::OrdinaryRefreshPackFacade::Begin(
+    const Ciphertext& sparseCoefficientInput,
+    const NativeRefreshPackParameters& parameters,
+    const NativeRefreshPackConfig& config,
+    std::uint64_t firstCoordinateCount) const {
+    const NativeRefreshTracePreflight plan =
+        glscheme::rns::glr_ship_refresh_only_pack_preflight(
+            m_context->n(), m_context->p_());
+    if (firstCoordinateCount == 0U ||
+        firstCoordinateCount > plan.centered_refreshes) {
+        throw GlrError(
+            "GLRProductionAdapter: resumable ordinary-refresh pack Begin "
+            "requires a nonempty prefix within the native coordinate range");
+    }
+
+    auto chunk = glscheme::rns::glr_ship_refresh_only_pack_chunk_prime(
+        *m_context, sparseCoefficientInput, parameters, config,
+        glscheme::rns::GlrShipRefreshOnlyPackCoordinateRange{
+            0U, firstCoordinateCount});
+    NativeRefreshPackAccumulator accumulator;
+    glscheme::rns::glr_ship_refresh_only_pack_merge_prime(
+        *m_context, sparseCoefficientInput, parameters, config, accumulator,
+        std::move(chunk));
+    return OrdinaryRefreshPackSession(std::move(accumulator));
+}
+
+void GLRProductionAdapter::OrdinaryRefreshPackFacade::Advance(
+    OrdinaryRefreshPackSession& session,
+    const Ciphertext& sparseCoefficientInput,
+    const NativeRefreshPackParameters& parameters,
+    const NativeRefreshPackConfig& config,
+    std::uint64_t coordinateCount) const {
+    NativeRefreshPackAccumulator& accumulator = session.m_accumulator;
+    if (!accumulator.initialized || accumulator.total_coordinates == 0U ||
+        accumulator.next_coordinate > accumulator.total_coordinates) {
+        throw GlrError(
+            "GLRProductionAdapter: resumable ordinary-refresh pack session "
+            "is uninitialized or malformed");
+    }
+    const std::uint64_t remaining =
+        accumulator.total_coordinates - accumulator.next_coordinate;
+    if (coordinateCount == 0U || coordinateCount > remaining) {
+        throw GlrError(
+            "GLRProductionAdapter: resumable ordinary-refresh pack Advance "
+            "requires a nonempty count within the remaining coordinate range");
+    }
+
+    const std::uint64_t begin = accumulator.next_coordinate;
+    auto chunk = glscheme::rns::glr_ship_refresh_only_pack_chunk_prime(
+        *m_context, sparseCoefficientInput, parameters, config,
+        glscheme::rns::GlrShipRefreshOnlyPackCoordinateRange{
+            begin, begin + coordinateCount});
+    glscheme::rns::glr_ship_refresh_only_pack_merge_prime(
+        *m_context, sparseCoefficientInput, parameters, config, accumulator,
+        std::move(chunk));
+}
+
+GLRProductionAdapter::NativeRefreshPackCheckpointReceipt
+GLRProductionAdapter::OrdinaryRefreshPackFacade::SerializeCheckpoint(
+    const OrdinaryRefreshPackSession& session,
+    const NativeRefreshPackCheckpointSink& sink) const {
+    const NativeRefreshPackAccumulator& accumulator = session.m_accumulator;
+    const NativeRefreshTracePreflight plan =
+        glscheme::rns::glr_ship_refresh_only_pack_preflight(
+            m_context->n(), m_context->p_());
+    if (!accumulator.initialized ||
+        accumulator.total_coordinates != plan.centered_refreshes ||
+        accumulator.parameter_fingerprint !=
+            glscheme::rns::glr_parameter_fingerprint(m_context->params)) {
+        throw GlrError(
+            "GLRProductionAdapter: resumable ordinary-refresh checkpoint "
+            "is not bound to this native context");
+    }
+    return glscheme::rns::
+        glr_serialize_ship_refresh_only_pack_accumulator(
+            *m_context, accumulator, sink);
+}
+
+GLRProductionAdapter::OrdinaryRefreshPackSession
+GLRProductionAdapter::OrdinaryRefreshPackFacade::Resume(
+    const NativeRefreshPackCheckpointReceipt& authenticatedReceipt,
+    const NativeRefreshPackCheckpointSource& source) const {
+    NativeRefreshPackAccumulator accumulator =
+        glscheme::rns::glr_deserialize_ship_refresh_only_pack_accumulator(
+            *m_context, authenticatedReceipt, source);
+    const NativeRefreshTracePreflight plan =
+        glscheme::rns::glr_ship_refresh_only_pack_preflight(
+            m_context->n(), m_context->p_());
+    if (!accumulator.initialized ||
+        accumulator.total_coordinates != plan.centered_refreshes ||
+        accumulator.parameter_fingerprint !=
+            glscheme::rns::glr_parameter_fingerprint(m_context->params)) {
+        throw GlrError(
+            "GLRProductionAdapter: resumed ordinary-refresh checkpoint is "
+            "not bound to this native context");
+    }
+    return OrdinaryRefreshPackSession(std::move(accumulator));
+}
+
+GLRProductionAdapter::OrdinaryRefreshPackFinalizedResult
+GLRProductionAdapter::OrdinaryRefreshPackFacade::Finalize(
+    OrdinaryRefreshPackSession&& session,
+    const Ciphertext& sparseCoefficientInput,
+    const NativeRefreshPackParameters& parameters,
+    const NativeRefreshPackConfig& config) const {
+    if (!session.CoordinateCoverComplete()) {
+        throw GlrError(
+            "GLRProductionAdapter: resumable ordinary-refresh pack Finalize "
+            "requires a complete gap-free coordinate cover");
+    }
+    NativeRefreshPackEvidence evidence;
+    NativeRefreshPackResult result =
+        glscheme::rns::glr_ship_refresh_only_pack_finalize_prime(
+            *m_context, sparseCoefficientInput, parameters, config,
+            std::move(session.m_accumulator), &evidence);
+    return OrdinaryRefreshPackFinalizedResult{
+        std::move(result), std::move(evidence)};
+}
+
 GLRProductionAdapter::EvaluationKeys::EvaluationKeys(
     EvaluationKeyPlan plan, KeyManifest manifest,
     std::unique_ptr<NativeKeyProvider> provider)
@@ -1147,6 +1294,11 @@ GLRProductionAdapter::GLRProductionAdapter(Context context)
 
 const GLRProductionAdapter::Context& GLRProductionAdapter::GetContext() const noexcept {
     return m_context;
+}
+
+GLRProductionAdapter::OrdinaryRefreshPackFacade
+GLRProductionAdapter::ResumableOrdinaryRefreshPack() const noexcept {
+    return OrdinaryRefreshPackFacade(m_context);
 }
 
 GLRProductionAdapter::OrdinaryRefreshPreflight

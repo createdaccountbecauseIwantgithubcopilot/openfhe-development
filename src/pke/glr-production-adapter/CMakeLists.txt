@@ -36,18 +36,37 @@ target_link_libraries(glr_production_adapter_metadata_test
     PRIVATE GLRProductionAdapter
 )
 
+add_executable(glr_production_adapter_resumable_pack_test
+    tests/glr-production-adapter-resumable-pack-test.cpp
+)
+target_compile_features(glr_production_adapter_resumable_pack_test
+    PRIVATE cxx_std_20
+)
+target_link_libraries(glr_production_adapter_resumable_pack_test
+    PRIVATE GLRProductionAdapter
+)
+
 if(BUILD_UNITTESTS)
     add_test(
         NAME glr_production_adapter_metadata
         COMMAND glr_production_adapter_metadata_test
     )
+    add_test(
+        NAME glr_production_adapter_resumable_pack
+        COMMAND glr_production_adapter_resumable_pack_test
+    )
     set_tests_properties(glr_production_adapter_metadata PROPERTIES
         LABELS "pke;glr;production-adapter"
+    )
+    set_tests_properties(glr_production_adapter_resumable_pack PROPERTIES
+        LABELS "pke;glr;production-adapter;resumable"
     )
 endif()
 
 add_custom_target(testglrproductionadapter
     COMMAND $<TARGET_FILE:glr_production_adapter_metadata_test>
+    COMMAND $<TARGET_FILE:glr_production_adapter_resumable_pack_test>
     DEPENDS glr_production_adapter_metadata_test
-    COMMENT "Running native GLR production-adapter metadata smoke test"
+            glr_production_adapter_resumable_pack_test
+    COMMENT "Running native GLR production-adapter focused tests"
 )
