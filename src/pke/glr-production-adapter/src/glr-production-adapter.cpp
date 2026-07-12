@@ -381,6 +381,7 @@ bool DirectBootstrapKeyPlanEquals(
         const auto& b = rhs.requirements[i];
         if (!(a.id == b.id) || a.ring != b.ring ||
             a.key_level != b.key_level ||
+            a.special_prime_count != b.special_prime_count ||
             a.application_site != b.application_site) {
             return false;
         }
@@ -1327,24 +1328,28 @@ GLRProductionAdapter::DirectVectorAllYReturnPreflight
 MakeDirectVectorPrimaryAllYReturnPreflight(
     const GLRProductionAdapter::Context& context) {
     constexpr std::uint32_t kHammingWeight = 40;
-    constexpr std::uint32_t kSelectorLevel = 4;
+    constexpr std::uint32_t kSelectorLevel =
+        glscheme::rns::kGl128DirectSelectorLevel;
     const auto windows = glscheme::rns::glr_ship_make_windows(
         128, 256, kHammingWeight, 0, 2, 2, 2);
     const auto plan = glscheme::rns::glr_model_ship_direct_vector_plan(
         context.params, kHammingWeight, kSelectorLevel, windows);
     if (plan.n != 128 || plan.p != 257 || plan.phi != 256 ||
-        plan.hamming_weight != 40 || plan.selector_level != 4 ||
-        plan.active_q_primes != 21 || plan.logical_slots != 32768ULL ||
+        plan.hamming_weight != 40 ||
+        plan.selector_level != glscheme::rns::kGl128DirectSelectorLevel ||
+        plan.active_q_primes != context.active_q_primes(kSelectorLevel) ||
+        plan.logical_slots != 32768ULL ||
         plan.unsigned_candidate_count != 320ULL ||
         plan.signed_selector_count != 640ULL ||
         plan.plaintext_ciphertext_products != 1280ULL ||
         plan.tree_product_nodes != 78ULL ||
         plan.multiplicative_depth != 7 || plan.rescale_stride != 2 ||
-        plan.physical_q_prime_drops != 14 || plan.output_level != 18 ||
+        plan.physical_q_prime_drops != 14 ||
+        plan.output_level != glscheme::rns::kGl128DirectOutputLevel ||
         !plan.q_depth_sufficient) {
         throw GlrError(
             "GLRProductionAdapter: native direct-vector h40 plan diverged "
-            "from the canonical L4/Q21 -> L18 ledger");
+            "from the canonical L0/Q25 -> L14 ledger");
     }
 
     GLRProductionAdapter::DirectVectorAllYReturnPreflight out;
@@ -1370,9 +1375,10 @@ MakeDirectVectorPrimaryAllYReturnPreflight(
         out.yRows, plan.tree_product_nodes,
         "modeling direct-vector tree products");
     out.treeRelinearizations = out.treeProductNodes;
-    // Two branches, six balanced tree frontiers per branch for h=40.
+    // The streamed implementation holds one synchronous relinearization-key
+    // lease for each complete branch, independent of its six frontiers.
     out.treeRelinearizationKeyProviderLeases = CheckedMul(
-        out.yRows, 12, "modeling direct-vector relin leases");
+        out.yRows, 2, "modeling direct-vector relin leases");
     // h=40 has one carried node at each of the 5->3 and 3->2 frontiers,
     // independently in both real/imaginary branches.
     out.treeCarryLevelAlignments = CheckedMul(
@@ -1384,10 +1390,11 @@ MakeDirectVectorPrimaryAllYReturnPreflight(
     out.representationScaleFactor =
         CheckedMul(context.n(), context.phi(),
                    "modeling direct-vector trace scale restoration");
-    out.packedInputLevel = 18;
-    out.transformMaterialLevel = 17;
-    out.transformKeyLevel = 18;
-    out.outputLevel = 22;
+    out.packedInputLevel = glscheme::rns::kGl128DirectOutputLevel;
+    out.transformMaterialLevel =
+        glscheme::rns::kGl128BootstrapForwardTransformMaterialLevel;
+    out.transformKeyLevel = glscheme::rns::kGl128DirectOutputLevel;
+    out.outputLevel = glscheme::rns::kGl128DirectForwardReturnLevel;
     out.forwardPhysicalQPrimeDrops = 4;
     out.expectedDftPlaintextVisits = 2;
     out.strictYOrderRequired = true;
@@ -1480,17 +1487,20 @@ MakeDirectVectorPrimaryAuthorization(
     candidate.sparse_public_input_active_q_primes = 1;
     candidate.sparse_public_input_key_domain =
         glscheme::rns::GlrShipDirectVectorCiphertextKeyDomain::sparse;
-    candidate.selector_level = 4;
+    candidate.selector_level = glscheme::rns::kGl128DirectSelectorLevel;
     candidate.selector_key_domain =
         glscheme::rns::GlrShipDirectVectorCiphertextKeyDomain::primary;
     candidate.relinearization_key = {
         GlrKsDirection::primary_sq_to_primary, 0};
-    candidate.relinearization_first_frontier_level = 6;
+    candidate.relinearization_first_frontier_level =
+        glscheme::rns::kGl128DirectFirstRelinLevel;
     candidate.conjugation_key = {
         GlrKsDirection::conjugation_to_primary, 0};
-    candidate.conjugation_level = 18;
-    candidate.reserved_xw_forward_return_output_level = 22;
-    candidate.reserved_transform_material_level = 17;
+    candidate.conjugation_level = glscheme::rns::kGl128DirectOutputLevel;
+    candidate.reserved_xw_forward_return_output_level =
+        glscheme::rns::kGl128DirectForwardReturnLevel;
+    candidate.reserved_transform_material_level =
+        glscheme::rns::kGl128BootstrapForwardTransformMaterialLevel;
     candidate.windows = std::move(windows);
     candidate.support_commitment = supportCommitment;
     candidate.owner_key_seed_commitment =
@@ -1708,13 +1718,16 @@ MakeDirectVectorPrimarySelectorStorageAuthorization(
             glscheme::rns::GlrShipDirectSelectorAdmissionKind::
                 compact_authenticated_production_streamed ||
         out.native.selector_admission.stored_selector_payload_bytes !=
-            UINT64_C(7046575360) ||
+            authorization.native.plan.exact_encoded_compact_selector_bytes ||
         out.native.selector_admission.streamed_peak_selector_bytes !=
-            UINT64_C(33030176) ||
+            authorization.native.plan.compact_streamed_peak_selector_bytes ||
         out.native.selector_admission.stored_selector_payload_bytes <=
             (UINT64_C(512) << 20) ||
-        out.native.selector_level != 4 || out.native.active_q_primes != 21 ||
-        out.native.signed_selector_count != 640 ||
+        out.native.selector_level != authorization.native.plan.selector_level ||
+        out.native.active_q_primes !=
+            authorization.native.plan.active_q_primes ||
+        out.native.signed_selector_count !=
+            authorization.native.plan.signed_selector_count ||
         out.native.sparse_security_transcript_sha256 !=
             authorization.native.sparse_h40_security
                 .estimator_transcript_sha256 ||
@@ -1733,8 +1746,7 @@ MakeDirectVectorPrimarySelectorStorageAuthorization(
         out.native.manifest_or_payload_generated) {
         throw GlrError(
             "GLRProductionAdapter: native selector-storage authorization "
-            "did not return the exact metadata-only 7,046,575,360-byte "
-            "canonical admission");
+            "did not return the exact modeled compact canonical admission");
     }
     out.metadataAuthorizationOnly = true;
     out.ownerKeyLineage = authorization.ownerKeyLineage;
@@ -1792,11 +1804,17 @@ MakeDirectVectorPrimarySelectorRecordPreflight(
     const std::uint64_t returnedBytes =
         plan.bytes_per_compact_selector_record +
         plan.bytes_per_encoded_compact_selector_record;
-    if (plan.signed_selector_count != 640 || plan.selector_level != 4 ||
-        plan.active_q_primes != 21 ||
-        plan.bytes_per_encoded_compact_selector_record != 11010274ULL ||
-        returnedBytes != 22020354ULL ||
-        plan.compact_streamed_peak_selector_bytes != 33030176ULL) {
+    if (plan.signed_selector_count != 640 ||
+        plan.selector_level != glscheme::rns::kGl128DirectSelectorLevel ||
+        plan.active_q_primes != context.active_q_primes(plan.selector_level) ||
+        plan.bytes_per_encoded_compact_selector_record == 0 ||
+        plan.bytes_per_compact_selector_record == 0 ||
+        returnedBytes !=
+            plan.bytes_per_compact_selector_record +
+                plan.bytes_per_encoded_compact_selector_record ||
+        plan.compact_streamed_peak_selector_bytes !=
+            plan.bytes_per_compact_selector_record +
+                plan.bytes_per_selector_ciphertext) {
         throw GlrError(
             "GLRProductionAdapter: random-access selector record preflight "
             "diverged from the exact canonical record/peak census");
@@ -2329,7 +2347,7 @@ GLRProductionAdapter::GenerateCompactDirectBootstrapKeys(
     if (!DirectBootstrapKeyPlanEquals(plan, expectedPlan)) {
         throw GlrError(
             "GLRProductionAdapter: direct-bootstrap key plan is not the "
-            "canonical five-key h40 L4/L6/L18/L24 plan");
+            "canonical five-key h40 L0/L2/L14/L24 plan");
     }
     RequireProductionSecretKey(m_context, primaryKey);
     GlrRngOwner rng = MakeRng(seed);
@@ -2385,7 +2403,7 @@ GLRProductionAdapter::OpenCompactDirectBootstrapKeys(
     if (!DirectBootstrapKeyPlanEquals(plan, expectedPlan)) {
         throw GlrError(
             "GLRProductionAdapter: direct-bootstrap key plan is not the "
-            "canonical five-key h40 L4/L6/L18/L24 plan");
+            "canonical five-key h40 L0/L2/L14/L24 plan");
     }
     RequireDirectBootstrapKeyGeneration(m_context, plan, generation);
     auto provider =
@@ -2450,6 +2468,20 @@ GLRProductionAdapter::NativeGL128DirectInputPreparationResult
 GLRProductionAdapter::PrepareDirectShipInput(
     const Ciphertext& canonicalCiphertext,
     const NativeGL128DirectBootstrapAuthorizationBundle& authorization,
+    const CompactDirectBootstrapKeys& evaluationKeys,
+    double normalizationRelativeTolerance) const {
+    const auto& provider = RequireDirectBootstrapKeys(
+        m_context, evaluationKeys, authorization.authorization);
+    return glscheme::rns::glr_gl128_prepare_direct_ship_input(
+        m_context, canonicalCiphertext, authorization,
+        evaluationKeys.GetLineage(), provider,
+        normalizationRelativeTolerance);
+}
+
+GLRProductionAdapter::NativeGL128DirectInputPreparationResult
+GLRProductionAdapter::PrepareDirectShipInput(
+    const Ciphertext& canonicalCiphertext,
+    const NativeGL128DirectBootstrapAuthorizationBundle& authorization,
     const NativeValidatedDftPlaintextProviderSession& dftSession,
     const CompactDirectBootstrapKeys& evaluationKeys,
     const NativeCtsStcConfig& config,
@@ -2489,6 +2521,21 @@ GLRProductionAdapter::AcceptBootstrapDirect(
     RequireProductionSecretKey(m_context, primaryKey);
     return glscheme::rns::glr_gl128_accept_bootstrap_output(
         m_context, primaryKey, expected, bootstrap, limits);
+}
+
+GLRProductionAdapter::NativeGL128CiphertextArtifactReceipt
+GLRProductionAdapter::WriteCiphertextArtifact(
+    const Ciphertext& ciphertext,
+    const NativeGL128CiphertextArtifactSink& sink) const {
+    return glscheme::rns::glr_gl128_write_ciphertext_artifact(
+        m_context, ciphertext, sink);
+}
+
+GLRProductionAdapter::NativeGL128CiphertextArtifactReadResult
+GLRProductionAdapter::ReadCiphertextArtifact(
+    const NativeGL128CiphertextArtifactSource& source) const {
+    return glscheme::rns::glr_gl128_read_ciphertext_artifact(
+        m_context, source);
 }
 
 GLRProductionAdapter::OrdinaryRefreshPackFacade

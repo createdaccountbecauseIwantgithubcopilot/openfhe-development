@@ -11,6 +11,7 @@
 #include "glscheme/gl128_scheme.hpp"
 #include "glscheme/gl128_bootstrap.hpp"
 #include "glscheme/gl128_bootstrap_acceptance.hpp"
+#include "glscheme/gl128_ciphertext_artifact.hpp"
 #include "glscheme/rns_dft_plaintext_provider.hpp"
 #include "glscheme/rns_encode.hpp"
 #include "glscheme/rns_hybrid_ks.hpp"
@@ -170,6 +171,14 @@ public:
         glscheme::rns::Gl128BootstrapAcceptanceLimits;
     using NativeGL128BootstrapAcceptanceReceipt =
         glscheme::rns::Gl128BootstrapAcceptanceReceipt;
+    using NativeGL128CiphertextArtifactSink =
+        glscheme::rns::Gl128CiphertextArtifactSink;
+    using NativeGL128CiphertextArtifactSource =
+        glscheme::rns::Gl128CiphertextArtifactSource;
+    using NativeGL128CiphertextArtifactReceipt =
+        glscheme::rns::Gl128CiphertextArtifactReceipt;
+    using NativeGL128CiphertextArtifactReadResult =
+        glscheme::rns::Gl128CiphertextArtifactReadResult;
 
     struct DirectVectorProductionRowResult {
         Ciphertext ciphertext;
@@ -231,7 +240,7 @@ public:
         std::string sparseSecretLineageCommitment;
     };
 
-    // OpenFHE-facing wrapper around GLScheme's dual-certificate L4/Q21
+    // OpenFHE-facing wrapper around GLScheme's dual-certificate L0/Q25
     // primary-selector authorization.  The native authorization remains
     // metadata-only; the all-Y member is an expected boundary shape and does
     // not promote h40 into the still-disabled value evaluator.
@@ -765,8 +774,9 @@ public:
 
     // Canonical end-to-end owner/evaluator direct-bootstrap facade.  This is
     // the preferred production surface over manually composing the lower
-    // selector methods below.  The transform config is shared by inverse CtS
-    // and forward StC and is validated before the first large CtS transient.
+    // selector methods below.  Direct preparation uses the public resident
+    // Slot-to-Coeff representation conversion; the transform config is used
+    // by forward StC and validated before the all-Y return transient.
     NativeGL128DirectBootstrapAuthorizationBundle AuthorizeDirectBootstrap(
         const SecretKey& primaryKey,
         const glscheme::rns::GlrSparseSecretKey& sparseKey,
@@ -793,10 +803,20 @@ public:
     NativeGL128DirectInputPreparationResult PrepareDirectShipInput(
         const Ciphertext& canonicalCiphertext,
         const NativeGL128DirectBootstrapAuthorizationBundle& authorization,
+        const CompactDirectBootstrapKeys& evaluationKeys,
+        double normalizationRelativeTolerance =
+            glscheme::rns::kGl128BootstrapNormalizationRelativeTolerance) const;
+    // Compatibility overload for deployments that open the directional DFT
+    // bank before preparation.  The session is authenticated but inverse
+    // records are not visited by the direct-coefficient preparation stage.
+    NativeGL128DirectInputPreparationResult PrepareDirectShipInput(
+        const Ciphertext& canonicalCiphertext,
+        const NativeGL128DirectBootstrapAuthorizationBundle& authorization,
         const NativeValidatedDftPlaintextProviderSession& dftSession,
         const CompactDirectBootstrapKeys& evaluationKeys,
         const NativeCtsStcConfig& config = {},
-        double normalizationRelativeTolerance = 1.0e-12) const;
+        double normalizationRelativeTolerance =
+            glscheme::rns::kGl128BootstrapNormalizationRelativeTolerance) const;
     NativeGL128BootstrapResult BootstrapDirect(
         const Ciphertext& canonicalCiphertext,
         const NativeGL128DirectBootstrapAuthorizationBundle& authorization,
@@ -805,7 +825,8 @@ public:
         const NativeValidatedDftPlaintextProviderSession& dftSession,
         const CompactDirectBootstrapKeys& evaluationKeys,
         const NativeCtsStcConfig& config = {},
-        double normalizationRelativeTolerance = 1.0e-12) const;
+        double normalizationRelativeTolerance =
+            glscheme::rns::kGl128BootstrapNormalizationRelativeTolerance) const;
 
     // Owner-side exhaustive post-bootstrap acceptance.  This is kept out of
     // BootstrapDirect so an evaluator cannot self-author a correctness/noise
@@ -816,6 +837,16 @@ public:
         const MatrixBatch& expected,
         const NativeGL128BootstrapResult& bootstrap,
         const NativeGL128BootstrapAcceptanceLimits& limits = {}) const;
+
+    // Streaming NATIVE32 artifact codec.  Residues retain the uint64_t
+    // arithmetic ABI in memory but persist as exact uint32_t words, halving
+    // ciphertext payload bytes.  The trailing SHA-256 is corruption
+    // detection; deployment authenticity remains caller-owned.
+    NativeGL128CiphertextArtifactReceipt WriteCiphertextArtifact(
+        const Ciphertext& ciphertext,
+        const NativeGL128CiphertextArtifactSink& sink) const;
+    NativeGL128CiphertextArtifactReadResult ReadCiphertextArtifact(
+        const NativeGL128CiphertextArtifactSource& source) const;
 
     OrdinaryRefreshPackFacade ResumableOrdinaryRefreshPack() const noexcept;
 
@@ -857,7 +888,7 @@ public:
         const DirectVectorPrimaryAuthorization& authorization) const;
 
     // Complete owner persistence and evaluator opening surface for the exact
-    // 640-record L4/h40 bank.  These calls delegate canonical record hashing,
+    // 640-record L0/h40 bank.  These calls delegate canonical record hashing,
     // checkpoint authentication, compact expansion, and KSK-lineage joins to
     // GLScheme; OpenFHE does not reinterpret selector ciphertexts.
     std::unique_ptr<NativeDirectVectorProductionSelectorGenerator>
