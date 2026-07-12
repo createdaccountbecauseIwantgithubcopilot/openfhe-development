@@ -60,6 +60,13 @@ std::size_t CoefficientIndex(std::size_t n, std::size_t phi, std::size_t x,
     return (x * n + y) * phi + w;
 }
 
+std::size_t DenseSlotIndex(GLIntBranch family, std::size_t matrix,
+                           std::size_t row, std::size_t column) noexcept {
+    const auto lane = family == GLIntBranch::Plus ? std::size_t{0}
+                                                  : std::size_t{1};
+    return ((lane * 256 + matrix) * 128 + row) * 128 + column;
+}
+
 std::uint64_t CanonicalCrt(std::uint32_t r0, std::uint32_t r1,
                            std::uint32_t q0, std::uint32_t q1) {
     const auto r0ModQ1 = static_cast<std::uint64_t>(r0) % q1;
@@ -264,6 +271,30 @@ bool GLIntProductionGLRBridge::IntegerAutomorphismKey::IsSecurityAuthorized() co
     return false;
 }
 
+void GLIntProductionGLRBridge::DenseIntegerBatch::Validate() const {
+    if (values.size() != kDenseIntegerSlotCount) {
+        throw GLDimensionError(
+            "dense GL integer batch must contain exactly 512x128x128 slots");
+    }
+    for (const auto value : values) {
+        if (value >= 1579009) {
+            throw GLDimensionError(
+                "dense GL integer batch value is not canonical modulo t");
+        }
+    }
+}
+
+std::uint64_t GLIntProductionGLRBridge::DenseIntegerBatch::At(
+    GLIntBranch family, std::uint32_t matrix, std::uint32_t row,
+    std::uint32_t column) const {
+    if (values.size() != kDenseIntegerSlotCount ||
+        (family != GLIntBranch::Plus && family != GLIntBranch::Minus) ||
+        matrix >= 256 || row >= 128 || column >= 128) {
+        throw GLDimensionError("dense GL integer batch index is out of range");
+    }
+    return values[DenseSlotIndex(family, matrix, row, column)];
+}
+
 GLIntProductionGLRBridge::GLIntProductionGLRBridge(
     const GLRProductionAdapter& adapter)
     : m_adapter(&adapter) {
@@ -284,6 +315,21 @@ GLIntProductionGLRBridge::GLIntProductionGLRBridge(
         throw GlrError(
             "GL integer and native GLR Q2 prefixes are not byte-compatible");
     }
+    glscheme::rns::GlrParams plaintextParameters;
+    plaintextParameters.name = "GL-128-257-T1579009";
+    plaintextParameters.n = context.n();
+    plaintextParameters.p = context.p_();
+    plaintextParameters.phi = context.phi();
+    plaintextParameters.gamma = context.params.gamma;
+    plaintextParameters.fourNp = context.params.fourNp;
+    plaintextParameters.delta = 1.0;
+    plaintextParameters.depth = 0;
+    plaintextParameters.dnum = 0;
+    plaintextParameters.rescale_stride = 1;
+    plaintextParameters.q_chain.push_back(
+        glscheme::rns::glr_make_modulus(1579009, context.n(), context.p_()));
+    m_plaintextContext = glscheme::rns::GlrContext::create(
+        std::move(plaintextParameters));
 }
 
 GLIntProductionGLRBridge::Capabilities
@@ -409,6 +455,142 @@ GlrPoly GLIntProductionGLRBridge::BGVModDownP1(
                 reduce(current.first, deltaReal),
                 reduce(current.second, deltaImaginary));
         }
+    }
+    return out;
+}
+
+GlrPoly GLIntProductionGLRBridge::RestrictSecretToQ(
+    const GlrPoly& full, std::uint32_t level) const {
+    const auto& context = m_adapter->GetContext();
+    if (full.domain != GlrDomain::Coeff || full.level != 0 ||
+        !full.extended || level >= context.params.levels()) {
+        throw GLContextMismatchError(
+            "full-chain integer secret restriction received invalid material");
+    }
+    GlrPoly out = GlrPoly::zero(context, full.ring, level, false,
+                                GlrDomain::Coeff);
+    const auto coefficients = full.ring_coeffs(context);
+    const auto active = context.active_q_primes(level);
+    for (std::uint32_t prime = 0; prime < active; ++prime) {
+        for (std::uint32_t lane = 0; lane < 2; ++lane) {
+            const auto* source = full.lane_ptr(context, prime, lane);
+            std::copy(source, source + coefficients,
+                      out.lane_ptr(context, prime, lane));
+        }
+    }
+    return out;
+}
+
+GlrPoly GLIntProductionGLRBridge::RingMultiply(
+    const GlrPoly& lhs, const GlrPoly& rhs) const {
+    const auto& context = m_adapter->GetContext();
+    if (lhs.ring != rhs.ring || lhs.level != rhs.level ||
+        lhs.extended != rhs.extended) {
+        throw GLContextMismatchError(
+            "full-chain integer ring multiplication shape mismatch");
+    }
+    GlrPoly output = lhs;
+    if (output.domain == GlrDomain::Coeff) {
+        glscheme::rns::glr_to_slots(context, output);
+    }
+    GlrPoly multiplier = rhs;
+    PolyWipe multiplierWipe(multiplier);
+    if (multiplier.domain == GlrDomain::Coeff) {
+        glscheme::rns::glr_to_slots(context, multiplier);
+    }
+    glscheme::rns::glr_mul_pointwise_inplace(context, output, multiplier);
+    glscheme::rns::glr_to_coeffs(context, output);
+    return output;
+}
+
+GlrPoly GLIntProductionGLRBridge::SampleTErr(
+    GlrRing ring, std::uint32_t level,
+    glscheme::rns::GlrRng& rng) const {
+    const auto& context = m_adapter->GetContext();
+    GlrPoly error = GlrPoly::zero(context, ring, level, false,
+                                  GlrDomain::Coeff);
+    if (ring == GlrRing::R) {
+        glscheme::rns::glr_sample_error_r(context, error, 3.2, rng);
+    }
+    else if (ring == GlrRing::Rp) {
+        for (std::uint32_t y = 0; y < context.n(); ++y) {
+            GlrPoly slice = GlrPoly::zero(context, GlrRing::R, level, false,
+                                          GlrDomain::Coeff);
+            PolyWipe sliceWipe(slice);
+            glscheme::rns::glr_sample_error_r(context, slice, 3.2, rng);
+            glscheme::rns::glr_insert_y_slice(context, error, slice, y);
+        }
+    }
+    else {
+        throw GLContextMismatchError(
+            "full-chain integer error sampling does not accept Raux");
+    }
+    glscheme::rns::glr_scalar_mul_inplace(context, error, 1579009);
+    return error;
+}
+
+GlrPoly GLIntProductionGLRBridge::BGVModSwitchPoly(
+    const GlrPoly& input) const {
+    const auto& context = m_adapter->GetContext();
+    if (input.extended || input.level + 1 >= context.params.levels()) {
+        throw GLDepthError(
+            "full-chain integer BGV modulus-switch chain is exhausted");
+    }
+    const auto originalDomain = input.domain;
+    GlrPoly coefficient = input;
+    if (coefficient.domain == GlrDomain::Slot) {
+        glscheme::rns::glr_to_coeffs(context, coefficient);
+    }
+    const auto active = context.active_q_primes(coefficient.level);
+    const auto droppedIndex = active - 1;
+    const auto& droppedModulus = context.params.q_chain[droppedIndex];
+    GlrPoly out = GlrPoly::zero(context, coefficient.ring,
+                                coefficient.level + 1, false,
+                                GlrDomain::Coeff);
+    const auto coefficients = coefficient.ring_coeffs(context);
+    constexpr std::uint64_t t = 1579009;
+    const auto tInverse = glscheme::rns::glr_invmod(
+        t % droppedModulus.q, droppedModulus.q);
+    std::vector<std::uint64_t> dropInverse(droppedIndex);
+    for (std::uint32_t q = 0; q < droppedIndex; ++q) {
+        dropInverse[q] = glscheme::rns::glr_invmod(
+            droppedModulus.q % context.params.q_chain[q].q,
+            context.params.q_chain[q].q);
+    }
+    for (std::size_t flat = 0; flat < coefficients; ++flat) {
+        const auto dropped = GaussianAtFlat(
+            context, coefficient, droppedIndex, droppedModulus, flat);
+        const auto deltaFor = [&](std::uint64_t value) {
+            const auto product = glscheme::rns::glr_mulmod(
+                value, tInverse, droppedModulus.q);
+            const auto residue =
+                product == 0 ? 0 : droppedModulus.q - product;
+            return CenterResidue(residue, droppedModulus.q);
+        };
+        const auto deltaReal = deltaFor(dropped.first);
+        const auto deltaImaginary = deltaFor(dropped.second);
+        for (std::uint32_t q = 0; q < droppedIndex; ++q) {
+            const auto& modulus = context.params.q_chain[q];
+            const auto current =
+                GaussianAtFlat(context, coefficient, q, modulus, flat);
+            const auto reduce = [&](std::uint64_t value,
+                                    std::int64_t delta) {
+                const auto correction = glscheme::rns::glr_mulmod(
+                    t % modulus.q, SignedMod(delta, modulus.q), modulus.q);
+                const auto numerator =
+                    value + correction >= modulus.q
+                        ? value + correction - modulus.q
+                        : value + correction;
+                return glscheme::rns::glr_mulmod(
+                    numerator, dropInverse[q], modulus.q);
+            };
+            SetGaussianAtFlat(context, &out, q, modulus, flat,
+                              reduce(current.first, deltaReal),
+                              reduce(current.second, deltaImaginary));
+        }
+    }
+    if (originalDomain == GlrDomain::Slot) {
+        glscheme::rns::glr_to_slots(context, out);
     }
     return out;
 }
@@ -1051,6 +1233,189 @@ GLIntProductionGLRBridge::EvaluateIntegerAutomorphism(
     transformed.key_lineage_commitment =
         evaluationKey.m_nativeKeyLineageCommitment;
     return transformed;
+}
+
+GLIntProductionGLRBridge::NativePlaintext
+GLIntProductionGLRBridge::EncodeDenseIntegerBatch(
+    const DenseIntegerBatch& batch) const {
+    batch.Validate();
+    const auto& context = m_adapter->GetContext();
+    GlrPoly plaintextModT = GlrPoly::zero(
+        m_plaintextContext, GlrRing::Rp, 0, false, GlrDomain::Slot);
+    const auto slotsPerLane = static_cast<std::size_t>(256) * 128 * 128;
+    for (std::uint32_t lane = 0; lane < 2; ++lane) {
+        auto* destination =
+            plaintextModT.lane_ptr(m_plaintextContext, 0, lane);
+        std::copy(batch.values.begin() + lane * slotsPerLane,
+                  batch.values.begin() + (lane + 1) * slotsPerLane,
+                  destination);
+    }
+    glscheme::rns::glr_to_coeffs(m_plaintextContext, plaintextModT);
+
+    NativePlaintext output;
+    output.poly = GlrPoly::zero(context, GlrRing::Rp, 0, false,
+                                GlrDomain::Coeff);
+    const auto& tModulus = m_plaintextContext.params.q_chain.front();
+    const auto coefficients = output.poly.ring_coeffs(context);
+    const auto n = static_cast<std::size_t>(context.n());
+    for (std::size_t flat = 0; flat < coefficients; ++flat) {
+        const auto gaussian = GaussianAtFlat(
+            m_plaintextContext, plaintextModT, 0, tModulus, flat);
+        const auto w = flat / (n * n);
+        const auto remainder = flat % (n * n);
+        const auto x = remainder / n;
+        const auto y = remainder % n;
+        glscheme::rns::glr_poly_set_gaussian(
+            context, output.poly, static_cast<std::uint32_t>(x),
+            static_cast<std::uint32_t>(y), static_cast<std::uint32_t>(w),
+            CenterResidue(gaussian.first, tModulus.q),
+            CenterResidue(gaussian.second, tModulus.q));
+    }
+    output.scale = 1.0;
+    output.level = 0;
+    return output;
+}
+
+GLIntProductionGLRBridge::CiphertextImport
+GLIntProductionGLRBridge::EncryptFullChainSymmetric(
+    const DenseIntegerBatch& batch, const OwnerBinding& owner,
+    std::uint64_t seed) const {
+    ValidateOwner(owner.GetReceipt().integerKeyTag, owner,
+                  "full-chain integer symmetric encryption");
+    const auto& context = m_adapter->GetContext();
+    auto plaintext = EncodeDenseIntegerBatch(batch);
+    GlrRngOwner rng(glscheme::rns::glr_rng_create(seed));
+    if (!rng) {
+        throw GlrError("full-chain integer encryption RNG creation failed");
+    }
+    GlrPoly a = GlrPoly::zero(context, GlrRing::Rp, 0, false,
+                              GlrDomain::Coeff);
+    glscheme::rns::glr_sample_uniform(context, a, *rng);
+    GlrPoly secret = RestrictSecretToQ(owner.GetNativeSecretKey().s, 0);
+    PolyWipe secretWipe(secret);
+    GlrPoly embedded =
+        glscheme::rns::glr_embed_r_into(context, secret, GlrRing::Rp);
+    PolyWipe embeddedWipe(embedded);
+    GlrPoly product = RingMultiply(a, embedded);
+    PolyWipe productWipe(product);
+    GlrPoly error = SampleTErr(GlrRing::Rp, 0, *rng);
+    PolyWipe errorWipe(error);
+    GlrPoly b = std::move(plaintext.poly);
+    glscheme::rns::glr_sub_inplace(context, b, product);
+    glscheme::rns::glr_add_inplace(context, b, error);
+    glscheme::rns::glr_to_slots(context, b);
+    glscheme::rns::glr_to_slots(context, a);
+
+    CiphertextImport result;
+    result.native.b = std::move(b);
+    result.native.a = std::move(a);
+    result.native.scale = 1.0;
+    result.native.level = 0;
+    result.native.key_id = kUntrustedIntegerKeyDomain;
+    result.native.key_lineage_commitment =
+        owner.GetReceipt().nativeKeyLineageCommitment;
+    result.receipt = MakeReceipt("Q25-L0-dense-Eq5-integer-ciphertext");
+    result.receipt.schema = "openfhe.gl_int.glr_full_chain.v1";
+    result.receipt.nativeLevel = 0;
+    result.receipt.activeQPrimes = context.params.levels();
+    result.receipt.integerKeyTag = owner.GetReceipt().integerKeyTag;
+    result.receipt.nativeKeyLineageCommitment =
+        owner.GetReceipt().nativeKeyLineageCommitment;
+    result.receipt.ownerSecretLineageBound = true;
+    return result;
+}
+
+GLIntProductionGLRBridge::DenseIntegerBatch
+GLIntProductionGLRBridge::DecryptDecodeFullChain(
+    const NativeCiphertext& ciphertext, const OwnerBinding& owner) const {
+    ValidateOwner(owner.GetReceipt().integerKeyTag, owner,
+                  "full-chain integer decryption");
+    const auto& context = m_adapter->GetContext();
+    if (ciphertext.key_id != kUntrustedIntegerKeyDomain ||
+        ciphertext.key_lineage_commitment !=
+            owner.GetReceipt().nativeKeyLineageCommitment ||
+        ciphertext.b.ring != GlrRing::Rp ||
+        ciphertext.a.ring != GlrRing::Rp || ciphertext.b.extended ||
+        ciphertext.a.extended || ciphertext.b.level != ciphertext.level ||
+        ciphertext.a.level != ciphertext.level ||
+        ciphertext.b.domain != ciphertext.a.domain ||
+        ciphertext.level >= context.params.levels()) {
+        throw GLContextMismatchError(
+            "full-chain integer decryption ciphertext metadata mismatch");
+    }
+    const auto scale = RequireIntegerScale(ciphertext.scale, 1579009);
+    const auto inverseScale =
+        glscheme::rns::glr_invmod(scale, 1579009);
+    GlrPoly secret =
+        RestrictSecretToQ(owner.GetNativeSecretKey().s, ciphertext.level);
+    PolyWipe secretWipe(secret);
+    GlrPoly embedded =
+        glscheme::rns::glr_embed_r_into(context, secret, GlrRing::Rp);
+    PolyWipe embeddedWipe(embedded);
+    GlrPoly product = RingMultiply(ciphertext.a, embedded);
+    PolyWipe productWipe(product);
+    GlrPoly relation = ciphertext.b;
+    if (relation.domain == GlrDomain::Slot) {
+        glscheme::rns::glr_to_coeffs(context, relation);
+    }
+    glscheme::rns::glr_add_inplace(context, relation, product);
+
+    GlrPoly plaintextModT = GlrPoly::zero(
+        m_plaintextContext, GlrRing::Rp, 0, false, GlrDomain::Coeff);
+    const auto& q0 = context.params.q_chain.front();
+    const auto& tModulus = m_plaintextContext.params.q_chain.front();
+    const auto coefficients = relation.ring_coeffs(context);
+    for (std::size_t flat = 0; flat < coefficients; ++flat) {
+        const auto gaussian = GaussianAtFlat(context, relation, 0, q0, flat);
+        const auto reduce = [&](std::uint64_t value) {
+            const auto centered = CenterResidue(value, q0.q);
+            return glscheme::rns::glr_mulmod(
+                SignedMod(centered, 1579009), inverseScale, 1579009);
+        };
+        SetGaussianAtFlat(m_plaintextContext, &plaintextModT, 0, tModulus,
+                          flat, reduce(gaussian.first),
+                          reduce(gaussian.second));
+    }
+    glscheme::rns::glr_to_slots(m_plaintextContext, plaintextModT);
+    DenseIntegerBatch output;
+    output.values.resize(kDenseIntegerSlotCount);
+    const auto slotsPerLane = static_cast<std::size_t>(256) * 128 * 128;
+    for (std::uint32_t lane = 0; lane < 2; ++lane) {
+        const auto* source =
+            plaintextModT.lane_ptr(m_plaintextContext, 0, lane);
+        std::copy(source, source + slotsPerLane,
+                  output.values.begin() + lane * slotsPerLane);
+    }
+    output.Validate();
+    return output;
+}
+
+GLIntProductionGLRBridge::NativeCiphertext
+GLIntProductionGLRBridge::ModSwitchFullChain(
+    const NativeCiphertext& ciphertext) const {
+    const auto& context = m_adapter->GetContext();
+    if (ciphertext.key_id != kUntrustedIntegerKeyDomain ||
+        !IsSha256Text(ciphertext.key_lineage_commitment) ||
+        ciphertext.b.ring != GlrRing::Rp ||
+        ciphertext.a.ring != GlrRing::Rp || ciphertext.b.extended ||
+        ciphertext.a.extended || ciphertext.b.level != ciphertext.level ||
+        ciphertext.a.level != ciphertext.level ||
+        ciphertext.b.domain != ciphertext.a.domain ||
+        ciphertext.level + 1 >= context.params.levels()) {
+        throw GLContextMismatchError(
+            "full-chain integer ModSwitch ciphertext metadata mismatch");
+    }
+    const auto scale = RequireIntegerScale(ciphertext.scale, 1579009);
+    const auto active = context.active_q_primes(ciphertext.level);
+    const auto dropped = context.params.q_chain[active - 1].q;
+    NativeCiphertext output = ciphertext;
+    output.b = BGVModSwitchPoly(ciphertext.b);
+    output.a = BGVModSwitchPoly(ciphertext.a);
+    ++output.level;
+    output.scale = static_cast<double>(glscheme::rns::glr_mulmod(
+        scale, glscheme::rns::glr_invmod(dropped % 1579009, 1579009),
+        1579009));
+    return output;
 }
 
 void GLIntProductionGLRBridge::RequireBootstrapDirectAdmission(

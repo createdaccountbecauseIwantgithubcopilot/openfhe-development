@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace lbcrypto {
 
@@ -35,6 +36,10 @@ public:
         bool keyedInterMatrixRotation{true};
         bool keyedTranspose{true};
         bool keyedConjugationFamilySwap{true};
+        bool denseEq5IntegerBatch{true};
+        bool fullChainSymmetricTErrEncryption{true};
+        bool fullChainBGVModSwitch{true};
+        bool fullChainPublicTErrEncryption{false};
         bool productionSecurityAuthorized{false};
         bool bootstrapDirectAdmitted{false};
     };
@@ -84,6 +89,17 @@ public:
     struct CiphertextImport {
         NativeCiphertext native;
         Receipt receipt;
+    };
+
+    static constexpr std::size_t kDenseIntegerSlotCount =
+        static_cast<std::size_t>(2) * 256 * 128 * 128;
+
+    struct DenseIntegerBatch {
+        // [family +/-][matrix 0..255][row][column], every value canonical mod t.
+        std::vector<std::uint64_t> values;
+        void Validate() const;
+        std::uint64_t At(GLIntBranch family, std::uint32_t matrix,
+                         std::uint32_t row, std::uint32_t column) const;
     };
 
     enum class IntegerAutomorphism : std::uint8_t {
@@ -165,6 +181,17 @@ public:
         const NativeCiphertext& ciphertext,
         const IntegerAutomorphismKey& evaluationKey) const;
 
+    NativePlaintext EncodeDenseIntegerBatch(
+        const DenseIntegerBatch& batch) const;
+    DenseIntegerBatch DecryptDecodeFullChain(
+        const NativeCiphertext& ciphertext,
+        const OwnerBinding& owner) const;
+    CiphertextImport EncryptFullChainSymmetric(
+        const DenseIntegerBatch& batch, const OwnerBinding& owner,
+        std::uint64_t seed = 0) const;
+    NativeCiphertext ModSwitchFullChain(
+        const NativeCiphertext& ciphertext) const;
+
     /** Always throws until an exact randomized Q7/L18 integer lift exists. */
     void RequireBootstrapDirectAdmission(const Receipt& receipt) const;
     /** Always throws for the sparse h<=4/Q2/support-revealing source path. */
@@ -185,11 +212,23 @@ private:
     ApplyIntegerSwitch(
         const glscheme::rns::GlrPoly& input,
         const IntegerAutomorphismKey& evaluationKey) const;
+    glscheme::rns::GlrPoly RestrictSecretToQ(
+        const glscheme::rns::GlrPoly& full,
+        std::uint32_t level) const;
+    glscheme::rns::GlrPoly RingMultiply(
+        const glscheme::rns::GlrPoly& lhs,
+        const glscheme::rns::GlrPoly& rhs) const;
+    glscheme::rns::GlrPoly SampleTErr(
+        glscheme::rns::GlrRing ring, std::uint32_t level,
+        glscheme::rns::GlrRng& rng) const;
+    glscheme::rns::GlrPoly BGVModSwitchPoly(
+        const glscheme::rns::GlrPoly& input) const;
 
     const GLRProductionAdapter* m_adapter{nullptr};
     std::uint32_t m_q2Level{0};
     std::uint32_t m_q0{0};
     std::uint32_t m_q1{0};
+    glscheme::rns::GlrContext m_plaintextContext;
 };
 
 }  // namespace lbcrypto
