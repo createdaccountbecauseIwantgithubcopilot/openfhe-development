@@ -320,7 +320,7 @@ GLRProductionAdapter::FixedProfileBindingText FixedBindingText(
     GLRProductionAdapter::FixedProfileBindingText out;
     if (value.size() > out.bytes.size()) {
         throw GlrError(
-            "GLRProductionAdapter: canonical refresh binding text exceeds "
+            "GLRProductionAdapter: refresh binding text exceeds "
             "its fixed-capacity representation");
     }
     std::copy(value.begin(), value.end(), out.bytes.begin());
@@ -680,6 +680,103 @@ void RequireCanonicalOrdinaryRefreshPreflight(
     }
 }
 
+GLRProductionAdapter::OrdinaryRefreshAuthorization
+MakeOrdinaryRefreshAuthorization(
+    const GLRProductionAdapter::Context& context,
+    const std::string& supportCommitment,
+    const GLRProductionAdapter::SecurityReport& securityReport,
+    std::uint32_t sparseHammingWeight,
+    bool reducedExposureCorridor) {
+    constexpr std::uint32_t kFoldKeyLevel = 18;
+    constexpr std::uint32_t kTransformMaterialLevel = 17;
+    const auto native =
+        glscheme::rns::glr_ship_refresh_only_endpoint_authorize_gl128(
+            context.params, kFoldKeyLevel, kTransformMaterialLevel,
+            sparseHammingWeight, reducedExposureCorridor, supportCommitment,
+            securityReport);
+    const std::string parameterFingerprint =
+        glscheme::rns::glr_parameter_fingerprint(context.params);
+    if (native.schema !=
+            "glscheme.glr_ship_refresh_only_endpoint_authorization.v1" ||
+        native.profile_binding_fingerprint != parameterFingerprint ||
+        native.support_commitment != supportCommitment ||
+        native.bootstrap_profile_fingerprint !=
+            securityReport.bootstrap_profile_fingerprint ||
+        native.estimator_transcript_sha256 !=
+            securityReport.estimator_transcript_sha256 ||
+        native.sparse_hamming_weight != 40 ||
+        native.sparse_hamming_weight != sparseHammingWeight ||
+        native.fold_level != kFoldKeyLevel ||
+        native.transform_material_level != kTransformMaterialLevel ||
+        native.exposed_q_primes != 7 ||
+        native.exposed_special_primes != 14 ||
+        !native.corridor_exposure_reduced_keys ||
+        !native.profile_fingerprint_bound ||
+        !native.support_commitment_bound ||
+        !native.security_policy_validated ||
+        !native.production_execution_admitted) {
+        throw GlrError(
+            "GLRProductionAdapter: native ordinary-refresh authorization "
+            "did not return the exact canonical Q7+P14/h40 binding");
+    }
+
+    GLRProductionAdapter::OrdinaryRefreshAuthorization out;
+    out.profileBindingFingerprint =
+        FixedBindingText(native.profile_binding_fingerprint);
+    out.supportCommitment = FixedBindingText(native.support_commitment);
+    out.bootstrapProfileFingerprint =
+        FixedBindingText(native.bootstrap_profile_fingerprint);
+    out.estimatorTranscriptSha256 =
+        FixedBindingText(native.estimator_transcript_sha256);
+    out.sparseHammingWeight = native.sparse_hamming_weight;
+    out.foldKeyLevel = native.fold_level;
+    out.transformMaterialLevel = native.transform_material_level;
+    out.exposedQPrimeCount = native.exposed_q_primes;
+    out.exposedSpecialPrimeCount = native.exposed_special_primes;
+    out.reducedExposureCorridor =
+        native.corridor_exposure_reduced_keys;
+    out.profileFingerprintBound = native.profile_fingerprint_bound;
+    out.supportCommitmentBound = native.support_commitment_bound;
+    out.securityPolicyValidated = native.security_policy_validated;
+    out.productionAuthorizationAdmitted =
+        native.production_execution_admitted;
+    // Authorization proves policy metadata only.  OpenFHE still has no
+    // selector/gadget/DFT/report owner-provider execution seam.
+    out.productionExecutionExposed = false;
+    return out;
+}
+
+void RequireOrdinaryRefreshAuthorization(
+    const GLRProductionAdapter::OrdinaryRefreshAuthorization& actual,
+    const GLRProductionAdapter::OrdinaryRefreshAuthorization& expected) {
+    if (!BindingTextEquals(actual.profileBindingFingerprint,
+                           expected.profileBindingFingerprint) ||
+        !BindingTextEquals(actual.supportCommitment,
+                           expected.supportCommitment) ||
+        !BindingTextEquals(actual.bootstrapProfileFingerprint,
+                           expected.bootstrapProfileFingerprint) ||
+        !BindingTextEquals(actual.estimatorTranscriptSha256,
+                           expected.estimatorTranscriptSha256) ||
+        actual.sparseHammingWeight != expected.sparseHammingWeight ||
+        actual.foldKeyLevel != expected.foldKeyLevel ||
+        actual.transformMaterialLevel != expected.transformMaterialLevel ||
+        actual.exposedQPrimeCount != expected.exposedQPrimeCount ||
+        actual.exposedSpecialPrimeCount != expected.exposedSpecialPrimeCount ||
+        actual.reducedExposureCorridor !=
+            expected.reducedExposureCorridor ||
+        actual.profileFingerprintBound != expected.profileFingerprintBound ||
+        actual.supportCommitmentBound != expected.supportCommitmentBound ||
+        actual.securityPolicyValidated != expected.securityPolicyValidated ||
+        actual.productionAuthorizationAdmitted !=
+            expected.productionAuthorizationAdmitted ||
+        actual.productionExecutionExposed !=
+            expected.productionExecutionExposed) {
+        throw GlrError(
+            "GLRProductionAdapter: ordinary-refresh authorization evidence "
+            "is forged, cross-report, or overstates execution readiness");
+    }
+}
+
 }  // namespace
 
 GLRProductionAdapter::EvaluationKeys::EvaluationKeys(
@@ -761,6 +858,30 @@ void GLRProductionAdapter::ValidateOrdinaryRefreshPreflight(
     const OrdinaryRefreshPreflight& preflight) const {
     RequireCanonicalOrdinaryRefreshPreflight(
         preflight, MakeCanonicalOrdinaryRefreshPreflight(m_context));
+}
+
+GLRProductionAdapter::OrdinaryRefreshAuthorization
+GLRProductionAdapter::AuthorizeOrdinaryRefreshProduction(
+    const std::string& supportCommitment,
+    const SecurityReport& securityReport,
+    std::uint32_t sparseHammingWeight,
+    bool reducedExposureCorridor) const {
+    return MakeOrdinaryRefreshAuthorization(
+        m_context, supportCommitment, securityReport, sparseHammingWeight,
+        reducedExposureCorridor);
+}
+
+void GLRProductionAdapter::ValidateOrdinaryRefreshAuthorization(
+    const OrdinaryRefreshAuthorization& authorization,
+    const std::string& supportCommitment,
+    const SecurityReport& securityReport,
+    std::uint32_t sparseHammingWeight,
+    bool reducedExposureCorridor) const {
+    RequireOrdinaryRefreshAuthorization(
+        authorization,
+        MakeOrdinaryRefreshAuthorization(
+            m_context, supportCommitment, securityReport,
+            sparseHammingWeight, reducedExposureCorridor));
 }
 
 GLRProductionAdapter::SecretKey GLRProductionAdapter::KeyGen(

@@ -18,6 +18,49 @@ void Require(bool condition, std::string_view message) {
     }
 }
 
+glscheme::SecurityReport MakeGl128CorridorReport(
+    const glscheme::rns::GlrParams& params,
+    std::uint32_t sparseHammingWeight,
+    const std::string& supportCommitment) {
+    glscheme::SecurityReport report;
+    report.valid = true;
+    report.production_safe = true;
+    report.fallback_advisory = false;
+    report.prime_congruence_ok = true;
+    report.ring_dimension = std::uint64_t{2} * params.coeffs_R();
+    report.target_security_bits = 128;
+    report.estimated_security_bits = 137.64699816982164;
+    report.error_sigma = 3.2;
+    report.estimator_name = "lattice-estimator";
+    report.estimator_commit =
+        glscheme::production_security_estimator_commit();
+    report.estimator_backend = "sage";
+    report.secret_distribution =
+        "sparse-ternary(h=" + std::to_string(sparseHammingWeight) + ")";
+    report.security_model = "classical";
+    report.estimator_transcript_sha256 = std::string(64, 'b');
+    report.parameter_fingerprint =
+        glscheme::rns::glr_parameter_fingerprint(params);
+    report.estimator_input_parameter_fingerprint =
+        report.parameter_fingerprint;
+    report.bootstrap_profile_fingerprint =
+        glscheme::rns::glr_bootstrap_profile_fingerprint(
+            params, sparseHammingWeight, supportCommitment);
+    report.estimator_input_bootstrap_profile_fingerprint =
+        report.bootstrap_profile_fingerprint;
+    for (std::size_t i = 0; i < 7; ++i) {
+        report.sparse_exposure_q_primes.push_back(params.q_chain[i].q);
+    }
+    for (const auto& modulus : params.p_special) {
+        report.sparse_exposure_q_primes.push_back(modulus.q);
+    }
+    for (const std::uint64_t prime : report.sparse_exposure_q_primes) {
+        report.sparse_estimate_modulus_bits +=
+            std::log2(static_cast<double>(prime));
+    }
+    return report;
+}
+
 }  // namespace
 
 int main() {
@@ -41,12 +84,17 @@ int main() {
                   Adapter::NativeRefreshEndpointPreflight>);
     static_assert(std::is_trivially_copyable_v<
                   Adapter::OrdinaryRefreshPreflight>);
+    static_assert(std::is_trivially_copyable_v<
+                  Adapter::OrdinaryRefreshAuthorization>);
     using AdapterRef = const Adapter&;
     using CiphertextRef = const Adapter::Ciphertext&;
     using PlaintextRef = const Adapter::Plaintext&;
     using KeysRef = const Adapter::EvaluationKeys&;
     using RefreshPreflightRef =
         const Adapter::OrdinaryRefreshPreflight&;
+    using SecurityReportRef = const Adapter::SecurityReport&;
+    using AuthorizationRef =
+        const Adapter::OrdinaryRefreshAuthorization&;
     static_assert(std::is_same_v<
                   decltype(std::declval<AdapterRef>()
                                .PreflightOrdinaryRefresh()),
@@ -55,6 +103,21 @@ int main() {
                   decltype(std::declval<AdapterRef>()
                                .ValidateOrdinaryRefreshPreflight(
                                    std::declval<RefreshPreflightRef>())),
+                  void>);
+    static_assert(std::is_same_v<
+                  decltype(std::declval<AdapterRef>()
+                               .AuthorizeOrdinaryRefreshProduction(
+                                   std::declval<const std::string&>(),
+                                   std::declval<SecurityReportRef>(), 40,
+                                   true)),
+                  Adapter::OrdinaryRefreshAuthorization>);
+    static_assert(std::is_same_v<
+                  decltype(std::declval<AdapterRef>()
+                               .ValidateOrdinaryRefreshAuthorization(
+                                   std::declval<AuthorizationRef>(),
+                                   std::declval<const std::string&>(),
+                                   std::declval<SecurityReportRef>(), 40,
+                                   true)),
                   void>);
     static_assert(std::is_same_v<
                   decltype(std::declval<AdapterRef>().Sub(
@@ -385,6 +448,137 @@ int main() {
                 forged.productionExecutionExposed = true;
             }),
             "forged production refresh readiness did not fail closed");
+
+    // Production policy admission is typed evidence bound to the actual
+    // support commitment and authenticated estimator report.  It deliberately
+    // remains distinct from (and cannot be upgraded into) value execution.
+    const std::string refreshSupportCommitment =
+        "openfhe-glr-canonical-refresh-support";
+    const Adapter::SecurityReport refreshSecurityReport =
+        MakeGl128CorridorReport(context.params, 40,
+                                refreshSupportCommitment);
+    const Adapter::OrdinaryRefreshAuthorization refreshAuthorization =
+        adapter.AuthorizeOrdinaryRefreshProduction(
+            refreshSupportCommitment, refreshSecurityReport, 40, true);
+    adapter.ValidateOrdinaryRefreshAuthorization(
+        refreshAuthorization, refreshSupportCommitment,
+        refreshSecurityReport, 40, true);
+    Require(refreshAuthorization.profileBindingFingerprint.View() ==
+                    profile.binding_fingerprint &&
+                refreshAuthorization.supportCommitment.View() ==
+                    refreshSupportCommitment &&
+                refreshAuthorization.bootstrapProfileFingerprint.View() ==
+                    refreshSecurityReport.bootstrap_profile_fingerprint &&
+                refreshAuthorization.estimatorTranscriptSha256.View() ==
+                    refreshSecurityReport.estimator_transcript_sha256,
+            "ordinary-refresh authorization lost an exact report binding");
+    Require(refreshAuthorization.sparseHammingWeight == 40 &&
+                refreshAuthorization.foldKeyLevel == 18 &&
+                refreshAuthorization.transformMaterialLevel == 17 &&
+                refreshAuthorization.exposedQPrimeCount == 7 &&
+                refreshAuthorization.exposedSpecialPrimeCount == 14 &&
+                refreshAuthorization.reducedExposureCorridor &&
+                refreshAuthorization.profileFingerprintBound &&
+                refreshAuthorization.supportCommitmentBound &&
+                refreshAuthorization.securityPolicyValidated &&
+                refreshAuthorization.productionAuthorizationAdmitted &&
+                !refreshAuthorization.productionExecutionExposed &&
+                !refresh.productionExecutionExposed,
+            "ordinary-refresh authorization is not exact Q7+P14/h40 "
+            "policy-only evidence");
+
+    const auto rejectedAuthorizationCall = [&](const std::string& support,
+                                                const auto& report,
+                                                std::uint32_t h,
+                                                bool corridor) {
+        try {
+            (void)adapter.AuthorizeOrdinaryRefreshProduction(
+                support, report, h, corridor);
+        }
+        catch (const glscheme::rns::GlrError&) {
+            return true;
+        }
+        return false;
+    };
+    Require(rejectedAuthorizationCall(
+                refreshSupportCommitment + "-forged",
+                refreshSecurityReport, 40, true),
+            "cross-support ordinary-refresh authorization did not fail "
+            "closed");
+    Require(rejectedAuthorizationCall(
+                refreshSupportCommitment, refreshSecurityReport, 16, true),
+            "h16 ordinary-refresh authorization did not fail closed");
+    Require(rejectedAuthorizationCall(
+                refreshSupportCommitment, refreshSecurityReport, 40, false),
+            "non-corridor ordinary-refresh authorization did not fail "
+            "closed");
+
+    Adapter::SecurityReport forgedExposureReport = refreshSecurityReport;
+    forgedExposureReport.sparse_exposure_q_primes.pop_back();
+    forgedExposureReport.sparse_estimate_modulus_bits = 0.0;
+    for (const std::uint64_t prime :
+         forgedExposureReport.sparse_exposure_q_primes) {
+        forgedExposureReport.sparse_estimate_modulus_bits +=
+            std::log2(static_cast<double>(prime));
+    }
+    Require(rejectedAuthorizationCall(
+                refreshSupportCommitment, forgedExposureReport, 40, true),
+            "P13 report exposure ordinary-refresh authorization did not "
+            "fail closed");
+
+    Adapter::SecurityReport forgedFingerprintReport = refreshSecurityReport;
+    Require(!forgedFingerprintReport
+                 .estimator_input_parameter_fingerprint.empty(),
+            "test report unexpectedly lacks its parameter fingerprint");
+    forgedFingerprintReport.estimator_input_parameter_fingerprint.back() ^=
+        1;
+    Require(rejectedAuthorizationCall(
+                refreshSupportCommitment, forgedFingerprintReport, 40,
+                true),
+            "cross-fingerprint report ordinary-refresh authorization did "
+            "not fail closed");
+
+    const auto rejectedAuthorizationForgery = [&](auto mutate) {
+        Adapter::OrdinaryRefreshAuthorization forged =
+            refreshAuthorization;
+        mutate(forged);
+        try {
+            adapter.ValidateOrdinaryRefreshAuthorization(
+                forged, refreshSupportCommitment, refreshSecurityReport,
+                40, true);
+        }
+        catch (const glscheme::rns::GlrError&) {
+            return true;
+        }
+        return false;
+    };
+    Require(rejectedAuthorizationForgery([](auto& forged) {
+                forged.supportCommitment.bytes[0] ^= 1;
+            }),
+            "copied cross-support authorization evidence did not fail "
+            "closed");
+    Require(rejectedAuthorizationForgery([](auto& forged) {
+                forged.estimatorTranscriptSha256.bytes[0] ^= 1;
+            }),
+            "copied cross-report authorization evidence did not fail "
+            "closed");
+    Require(rejectedAuthorizationForgery([](auto& forged) {
+                forged.sparseHammingWeight = 16;
+            }),
+            "copied h16 authorization evidence did not fail closed");
+    Require(rejectedAuthorizationForgery([](auto& forged) {
+                forged.exposedSpecialPrimeCount = 13;
+            }),
+            "copied P13 authorization evidence did not fail closed");
+    Require(rejectedAuthorizationForgery([](auto& forged) {
+                forged.productionAuthorizationAdmitted = false;
+            }),
+            "copied non-admitted authorization evidence did not fail "
+            "closed");
+    Require(rejectedAuthorizationForgery([](auto& forged) {
+                forged.productionExecutionExposed = true;
+            }),
+            "copied authorization evidence overstated execution readiness");
 
     // Planning is exact and allocation-free even for the production geometry.
     // It must deduplicate the Hermitian key shared by the explicit transform

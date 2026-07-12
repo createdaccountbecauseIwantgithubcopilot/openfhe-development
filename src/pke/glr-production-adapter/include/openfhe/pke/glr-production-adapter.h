@@ -38,6 +38,7 @@ public:
     using KeyRing = glscheme::rns::GlrRing;
     using KeyManifest = glscheme::rns::GlrKskManifest;
     using NativeKeyProvider = glscheme::rns::GlrKskProvider;
+    using SecurityReport = ::glscheme::SecurityReport;
     using NativeRefreshTracePreflight =
         glscheme::rns::GlrShipRefreshOnlyPackPreflight;
     using NativeRefreshEndpointPreflight =
@@ -139,6 +140,29 @@ public:
         bool productionExecutionExposed = false;
     };
 
+    // Fixed, copyable result of validating one ACTUAL support commitment and
+    // authenticated SecurityReport against GLScheme's canonical GL-128
+    // endpoint authorization gate.  `productionAuthorizationAdmitted` means
+    // that metadata passed the Q7+P14/h40 policy; it does not expose an
+    // OpenFHE value-execution seam, which remains false independently.
+    struct OrdinaryRefreshAuthorization {
+        FixedProfileBindingText profileBindingFingerprint;
+        FixedProfileBindingText supportCommitment;
+        FixedProfileBindingText bootstrapProfileFingerprint;
+        FixedProfileBindingText estimatorTranscriptSha256;
+        std::uint32_t sparseHammingWeight = 0;
+        std::uint32_t foldKeyLevel = 0;
+        std::uint32_t transformMaterialLevel = 0;
+        std::uint32_t exposedQPrimeCount = 0;
+        std::uint32_t exposedSpecialPrimeCount = 0;
+        bool reducedExposureCorridor = false;
+        bool profileFingerprintBound = false;
+        bool supportCommitmentBound = false;
+        bool securityPolicyValidated = false;
+        bool productionAuthorizationAdmitted = false;
+        bool productionExecutionExposed = false;
+    };
+
     // Ordinary GL evaluation-key request.  Rotation amounts name the exact
     // native Galois keys to materialize; there is no implicit all-rotations
     // closure.  keyLevel counts dropped Q primes, just like GlrCiphertext.
@@ -223,6 +247,21 @@ public:
     OrdinaryRefreshPreflight PreflightOrdinaryRefresh() const;
     void ValidateOrdinaryRefreshPreflight(
         const OrdinaryRefreshPreflight& preflight) const;
+
+    // Calls glr_ship_refresh_only_endpoint_authorize_gl128 with the actual
+    // commitment/report.  Fold/key level 18 and transform-material level 17
+    // are pinned internally; no bare authorization boolean is accepted.
+    OrdinaryRefreshAuthorization AuthorizeOrdinaryRefreshProduction(
+        const std::string& supportCommitment,
+        const SecurityReport& securityReport,
+        std::uint32_t sparseHammingWeight = 40,
+        bool reducedExposureCorridor = true) const;
+    void ValidateOrdinaryRefreshAuthorization(
+        const OrdinaryRefreshAuthorization& authorization,
+        const std::string& supportCommitment,
+        const SecurityReport& securityReport,
+        std::uint32_t sparseHammingWeight = 40,
+        bool reducedExposureCorridor = true) const;
 
     // GLScheme's current owner-side encryption API is symmetric.  A zero seed
     // requests operating-system entropy; nonzero seeds are deterministic and
