@@ -393,6 +393,17 @@ GLRProductionAdapter::SecretKey GLRProductionAdapter::KeyGen(
     return glscheme::rns::glr_keygen_primary(m_context, *rng);
 }
 
+GLRProductionAdapter::PublicKey GLRProductionAdapter::PublicKeyGen(
+    const SecretKey& secretKey, std::uint64_t seed) const {
+    RequireProductionSecretKey(m_context, secretKey);
+    GlrRngOwner rng = MakeRng(seed);
+    return glscheme::rns::glr_keygen_public(m_context, secretKey, *rng);
+}
+
+std::uint64_t GLRProductionAdapter::PublicKeyResidentBytes() const {
+    return glscheme::rns::glr_public_key_resident_bytes(m_context);
+}
+
 GLRProductionAdapter::Plaintext GLRProductionAdapter::Encode(
     const MatrixBatch& matrices, double scale, std::uint32_t level,
     bool slotDomain) const {
@@ -424,6 +435,15 @@ GLRProductionAdapter::Ciphertext GLRProductionAdapter::Encrypt(
     GlrRngOwner rng = MakeRng(seed);
     return glscheme::rns::glr_encrypt(m_context, secretKey, plaintext, *rng,
                                       slotDomain);
+}
+
+GLRProductionAdapter::Ciphertext GLRProductionAdapter::Encrypt(
+    const PublicKey& publicKey, const Plaintext& plaintext, std::uint64_t seed,
+    bool slotDomain) const {
+    RequireProductionPlaintext(m_context, plaintext);
+    GlrRngOwner rng = MakeRng(seed);
+    return glscheme::rns::glr_encrypt_public(
+        m_context, publicKey, plaintext, *rng, slotDomain);
 }
 
 GLRProductionAdapter::Plaintext GLRProductionAdapter::Decrypt(

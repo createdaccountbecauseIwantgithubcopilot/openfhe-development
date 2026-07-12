@@ -11,6 +11,7 @@
 #include "glscheme/rns_encode.hpp"
 #include "glscheme/rns_hybrid_ks.hpp"
 #include "glscheme/rns_keygen.hpp"
+#include "glscheme/rns_public_key.hpp"
 #include "glscheme/rns_w_algebra.hpp"
 
 #include <cstdint>
@@ -25,6 +26,7 @@ public:
     using Profile = glscheme::production::Profile;
     using Context = glscheme::rns::GlrContext;
     using SecretKey = glscheme::rns::GlrSecretKey;
+    using PublicKey = glscheme::rns::GlrPublicKey;
     using MatrixBatch = glscheme::rns::GlrMatrixBatch;
     using Plaintext = glscheme::rns::GlrPlaintext;
     using Ciphertext = glscheme::rns::GlrCiphertext;
@@ -112,6 +114,9 @@ public:
     // requests operating-system entropy; nonzero seeds are deterministic and
     // intended for tests/reproducible experiments.
     SecretKey KeyGen(std::uint64_t seed = 0) const;
+    PublicKey PublicKeyGen(const SecretKey& secretKey,
+                           std::uint64_t seed = 0) const;
+    std::uint64_t PublicKeyResidentBytes() const;
 
     Plaintext Encode(const MatrixBatch& matrices, double scale,
                      std::uint32_t level = 0,
@@ -120,6 +125,9 @@ public:
 
     Ciphertext Encrypt(const SecretKey& secretKey, const Plaintext& plaintext,
                        std::uint64_t seed = 0, bool slotDomain = true) const;
+    Ciphertext Encrypt(const PublicKey& publicKey, const Plaintext& plaintext,
+                       std::uint64_t seed = 0,
+                       bool slotDomain = true) const;
     Plaintext Decrypt(const SecretKey& secretKey,
                       const Ciphertext& ciphertext) const;
 

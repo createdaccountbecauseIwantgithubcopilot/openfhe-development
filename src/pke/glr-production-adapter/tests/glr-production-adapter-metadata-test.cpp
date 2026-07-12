@@ -26,6 +26,8 @@ int main() {
     static_assert(std::is_same_v<Adapter::Context, glscheme::rns::GlrContext>);
     static_assert(
         std::is_same_v<Adapter::Ciphertext, glscheme::rns::GlrCiphertext>);
+    static_assert(
+        std::is_same_v<Adapter::PublicKey, glscheme::rns::GlrPublicKey>);
     static_assert(!std::is_copy_constructible_v<Adapter>);
     static_assert(!std::is_copy_constructible_v<Adapter::EvaluationKeys>);
     using AdapterRef = const Adapter&;
@@ -126,6 +128,12 @@ int main() {
             "wrong context geometry");
     Require(context.params.coeffs_Rp() == 4194304ULL,
             "context is not the production R' tensor");
+    const std::uint64_t expectedPublicKeyBytes =
+        std::uint64_t{context.active_q_primes(0)} * 2 *
+        context.params.coeffs_R() * 2 * sizeof(std::uint64_t);
+    Require(adapter.PublicKeyResidentBytes() == expectedPublicKeyBytes &&
+                expectedPublicKeyBytes == 25ULL * 1024 * 1024,
+            "compact production public-key byte model is wrong");
 
     // Planning is exact and allocation-free even for the production geometry.
     // It must deduplicate the Hermitian key shared by the explicit transform
@@ -233,6 +241,21 @@ int main() {
         context.params.coeffs_R();
     Require(secretKey.s.data.size() == expectedKeyResidues,
             "primary key storage does not match native GLR QP geometry");
+
+    // The compact ring-R public key is production-sized but remains only
+    // 25 MiB, so exercise real owner-side generation here.  Full R' matrix
+    // plaintext/ciphertext allocation remains in the resource-qualified lane.
+    Adapter::PublicKey publicKey = adapter.PublicKeyGen(
+        secretKey, 0x474c525055424b45ULL);
+    Require(publicKey.key_id == "primary" &&
+                publicKey.parameter_fingerprint == profile.binding_fingerprint,
+            "production public key lost its primary/fingerprint binding");
+    Require(publicKey.b.ring == glscheme::rns::GlrRing::R &&
+                publicKey.a.ring == glscheme::rns::GlrRing::R &&
+                !publicKey.b.extended && !publicKey.a.extended &&
+                publicKey.byte_size() == expectedPublicKeyBytes,
+            "production public key is not the compact Q-only ring-R pair");
+    publicKey.secure_clear();
 
     // A nonempty production plan must be rejected before generation when the
     // caller's explicit byte budget is one byte short.  Do not materialize
