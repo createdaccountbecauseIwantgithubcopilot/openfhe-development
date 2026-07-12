@@ -1,6 +1,7 @@
 #include "openfhe/pke/glr-production-adapter.h"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <limits>
 #include <memory>
@@ -597,10 +598,11 @@ MakeCanonicalOrdinaryRefreshPreflight(
     out.sparseKeyRequired = true;
     out.encryptedSelectorBankRequired = false;
     out.encryptedGadgetBankRequired = false;
-    out.dftBankRequired = true;
+    out.dftBankRequired = false;
     out.productionExecutionExposed = false;
     out.compactSelectorBindingRequired = true;
     out.streamedGadgetProviderRequired = true;
+    out.streamedDftProviderRequired = true;
     return out;
 }
 
@@ -679,7 +681,9 @@ void RequireCanonicalOrdinaryRefreshPreflight(
         actual.compactSelectorBindingRequired !=
             expected.compactSelectorBindingRequired ||
         actual.streamedGadgetProviderRequired !=
-            expected.streamedGadgetProviderRequired) {
+            expected.streamedGadgetProviderRequired ||
+        actual.streamedDftProviderRequired !=
+            expected.streamedDftProviderRequired) {
         throw GlrError(
             "GLRProductionAdapter: ordinary-refresh preflight is forged, "
             "cross-profile, or overstates production execution readiness");
@@ -902,7 +906,8 @@ GLRProductionAdapter::ExecuteOrdinaryRefresh(
     constexpr double kDftScale = 70368744177664.0;  // 2^46
     constexpr double kNormalizationTolerance = 1.0e-12;
 
-    if (material.keyProvider == nullptr || material.dftBank == nullptr ||
+    if (material.keyProvider == nullptr || material.dftProvider == nullptr ||
+        material.dftBinding == nullptr ||
         material.gadgetProvider == nullptr ||
         material.gadgetBinding == nullptr ||
         material.compactSelector == nullptr ||
@@ -910,12 +915,11 @@ GLRProductionAdapter::ExecuteOrdinaryRefresh(
         material.securityReport == nullptr) {
         throw GlrError(
             "GLRProductionAdapter: ordinary-refresh execution requires "
-            "non-null KSK, DFT, streamed-gadget/binding, compact-selector/"
-            "binding, and SecurityReport material");
+            "non-null KSK, streamed-DFT provider/binding, streamed-gadget/"
+            "binding, compact-selector/binding, and SecurityReport material");
     }
 
     const NativeKeyProvider& keys = *material.keyProvider;
-    const NativeRefreshDftBank& dft = *material.dftBank;
     const std::string parameterFingerprint =
         glscheme::rns::glr_parameter_fingerprint(m_context.params);
     if (keys.secret_material_accessed() ||
@@ -925,25 +929,13 @@ GLRProductionAdapter::ExecuteOrdinaryRefresh(
             "GLRProductionAdapter: ordinary-refresh KSK provider is "
             "secret-bearing, cross-parameter, or lacks sparse support");
     }
-    if (dft.level != kTransformMaterialLevel || dft.scale != kDftScale ||
-        dft.stc_weight_composed ||
-        dft.u_x_fwd.level != kTransformMaterialLevel ||
-        dft.u_x_inv.level != kTransformMaterialLevel ||
-        dft.u_w_fwd.level != kTransformMaterialLevel ||
-        dft.u_w_inv.level != kTransformMaterialLevel ||
-        dft.u_x_fwd.poly.level != kTransformMaterialLevel ||
-        dft.u_x_inv.poly.level != kTransformMaterialLevel ||
-        dft.u_w_fwd.poly.level != kTransformMaterialLevel ||
-        dft.u_w_inv.poly.level != kTransformMaterialLevel) {
-        throw GlrError(
-            "GLRProductionAdapter: ordinary-refresh execution requires the "
-            "unweighted level-17 DFT bank at exact scale 2^46");
-    }
-
     // These opaque sessions bind the caller's external envelopes to the
     // provider/manifest bytes before the input ciphertext is inspected or any
     // CtS arithmetic begins.  The endpoint receives the same sessions so it
     // does not reinterpret or re-author the bindings.
+    auto dftSession =
+        glscheme::rns::glr_open_dft_plaintext_provider_session(
+            m_context, *material.dftProvider, *material.dftBinding);
     auto gadgetSession =
         glscheme::rns::glr_open_ship_gadget_provider_session(
             m_context, *material.gadgetProvider, *material.gadgetBinding);
@@ -955,8 +947,42 @@ GLRProductionAdapter::ExecuteOrdinaryRefresh(
         m_context, selectorSession, gadgetSession.manifest(),
         keys.sparse_support_commitment(), keys.parameter_fingerprint());
 
+    const auto& dftManifest = dftSession.manifest();
     const auto& selectorManifest = selectorSession.manifest();
     const auto& gadgetManifest = gadgetSession.manifest();
+    static constexpr std::array<
+        glscheme::rns::GlrDftPlaintextKind, 4> kDftKinds{
+        glscheme::rns::GlrDftPlaintextKind::x_forward,
+        glscheme::rns::GlrDftPlaintextKind::x_inverse,
+        glscheme::rns::GlrDftPlaintextKind::w_forward,
+        glscheme::rns::GlrDftPlaintextKind::w_inverse};
+    static constexpr std::array<glscheme::rns::GlrRing, 4> kDftRings{
+        glscheme::rns::GlrRing::Rp,
+        glscheme::rns::GlrRing::Rp,
+        glscheme::rns::GlrRing::Raux,
+        glscheme::rns::GlrRing::Raux};
+    bool canonicalDft =
+        dftManifest.entries.size() == kDftKinds.size() &&
+        dftManifest.policy ==
+            glscheme::rns::GlrDftPlaintextMaterialPolicy::
+                owner_authored_immutable &&
+        !dftManifest.stc_weight_composed &&
+        !dftSession.binding().expected_stc_weight_composed;
+    for (std::size_t i = 0; canonicalDft && i < kDftKinds.size(); ++i) {
+        const auto& entry = dftManifest.entries[i];
+        canonicalDft =
+            entry.kind == kDftKinds[i] && entry.ring == kDftRings[i] &&
+            entry.domain == glscheme::rns::GlrDomain::Slot &&
+            entry.plaintext_level == kTransformMaterialLevel &&
+            entry.poly_level == kTransformMaterialLevel && !entry.extended &&
+            entry.scale_bits == std::bit_cast<std::uint64_t>(kDftScale);
+    }
+    if (!canonicalDft) {
+        throw GlrError(
+            "GLRProductionAdapter: ordinary-refresh execution requires an "
+            "authenticated unweighted four-entry level-17 DFT provider at "
+            "exact scale 2^46");
+    }
     if (selectorManifest.sparse_hamming_weight != kSparseHammingWeight ||
         selectorManifest.windows.size() != kSparseHammingWeight ||
         selectorManifest.key_level != kFoldKeyLevel ||
@@ -991,7 +1017,10 @@ GLRProductionAdapter::ExecuteOrdinaryRefresh(
     config.ship.gadget_binding = material.gadgetBinding;
     config.ship.validated_gadget_session = &gadgetSession;
     config.ship.production_mode = true;
-    config.dft_bank = material.dftBank;
+    config.dft_bank = nullptr;
+    config.dft_provider = material.dftProvider;
+    config.dft_binding = material.dftBinding;
+    config.validated_dft_session = &dftSession;
     config.normalization_relative_tolerance = kNormalizationTolerance;
     config.fold_level = kFoldKeyLevel;
     config.transform_material_level = kTransformMaterialLevel;
@@ -1012,14 +1041,21 @@ GLRProductionAdapter::ExecuteOrdinaryRefresh(
         !out.nativeEvidence.canonical_production_authorized ||
         !out.nativeEvidence.streamed_gadget_provider_used ||
         !out.nativeEvidence.compact_selector_binding_used ||
+        !out.nativeEvidence.streamed_dft_provider_used ||
         !out.nativeEvidence.provider_secret_free ||
+        !out.nativeEvidence.dft_owner_authored_immutable ||
+        !out.nativeEvidence.dft_provider_secret_free ||
+        out.nativeEvidence.dft_plaintext_visits != 4U ||
+        out.nativeEvidence.dft_peak_live_plaintexts != 1U ||
         out.nativeEvidence.fold_level != kFoldKeyLevel ||
         out.nativeEvidence.transform_material_level !=
             kTransformMaterialLevel ||
         out.nativeEvidence.gadget_manifest_commitment !=
             gadgetManifest.manifest_commitment ||
         out.nativeEvidence.selector_binding_commitment !=
-            selectorManifest.manifest_commitment) {
+            selectorManifest.manifest_commitment ||
+        out.nativeEvidence.dft_manifest_commitment !=
+            dftManifest.manifest_commitment) {
         throw GlrError(
             "GLRProductionAdapter: native ordinary-refresh execution returned "
             "incomplete canonical streamed-material evidence");

@@ -1,5 +1,6 @@
 #include "openfhe/pke/glr-production-adapter.h"
 
+#include <bit>
 #include <cmath>
 #include <cstdint>
 #include <iostream>
@@ -17,6 +18,12 @@ void Require(bool condition, std::string_view message) {
         throw std::runtime_error(std::string(message));
     }
 }
+
+template <typename T>
+concept HasResidentDftBank = requires(T value) { value.dftBank; };
+
+template <typename T>
+concept HasAuthorizationToken = requires(T value) { value.authorization; };
 
 glscheme::SecurityReport MakeGl128CorridorReport(
     const glscheme::rns::GlrParams& params,
@@ -91,6 +98,71 @@ private:
     glscheme::rns::GlrShipGadgetManifest manifest_;
 };
 
+// Authenticated manifest-only DFT provider used to prove the OpenFHE seam
+// accepts the new typed streamed endpoint without allocating the production
+// plaintext payload.  Any attempted lease still fails closed.
+class MetadataOnlyDftProvider final
+    : public glscheme::rns::GlrDftPlaintextProvider {
+public:
+    explicit MetadataOnlyDftProvider(
+        glscheme::rns::GlrDftPlaintextManifest manifest)
+        : manifest_(std::move(manifest)) {}
+
+    const glscheme::rns::GlrDftPlaintextManifest& manifest()
+        const noexcept override {
+        return manifest_;
+    }
+
+    glscheme::rns::GlrDftPlaintextMaterialPolicy policy()
+        const noexcept override {
+        return glscheme::rns::GlrDftPlaintextMaterialPolicy::
+            owner_authored_immutable;
+    }
+
+    bool secret_material_accessed() const noexcept override { return false; }
+
+    void visit_plaintext(
+        glscheme::rns::GlrDftPlaintextKind,
+        const glscheme::rns::GlrDftPlaintextVisitor&) const override {
+        throw glscheme::rns::GlrError(
+            "metadata-only DFT provider must never lease a plaintext");
+    }
+
+private:
+    glscheme::rns::GlrDftPlaintextManifest manifest_;
+};
+
+glscheme::rns::GlrDftPlaintextManifest MakeMetadataDftManifest(
+    const glscheme::rns::GlrContext& context,
+    std::uint32_t level,
+    double scale) {
+    auto census = glscheme::rns::glr_model_dft_plaintext_streaming_bytes(
+        context.params, level);
+    glscheme::rns::GlrDftPlaintextManifest manifest;
+    manifest.parameter_fingerprint =
+        glscheme::rns::glr_parameter_fingerprint(context.params);
+    manifest.entries.reserve(census.entries.size());
+    for (std::size_t i = 0; i < census.entries.size(); ++i) {
+        const auto& modeled = census.entries[i];
+        glscheme::rns::GlrDftPlaintextManifestEntry entry;
+        entry.kind = modeled.kind;
+        entry.ring = modeled.ring;
+        entry.domain = glscheme::rns::GlrDomain::Slot;
+        entry.plaintext_level = level;
+        entry.poly_level = level;
+        entry.extended = false;
+        entry.scale_bits = std::bit_cast<std::uint64_t>(scale);
+        entry.residue_word_count = modeled.residue_word_count;
+        entry.residue_bytes = modeled.residue_bytes;
+        entry.plaintext_commitment =
+            "sha256:" + std::string(64, static_cast<char>('a' + i));
+        manifest.entries.push_back(std::move(entry));
+    }
+    manifest.manifest_commitment =
+        glscheme::rns::glr_dft_plaintext_manifest_commitment(manifest);
+    return manifest;
+}
+
 }  // namespace
 
 int main() {
@@ -122,12 +194,18 @@ int main() {
                   Adapter::OrdinaryRefreshExecutionMaterialView>);
     using ExecutionMaterial =
         Adapter::OrdinaryRefreshExecutionMaterialView;
+    static_assert(!HasResidentDftBank<ExecutionMaterial>);
+    static_assert(!HasAuthorizationToken<ExecutionMaterial>);
+    static_assert(sizeof(ExecutionMaterial) == 8 * sizeof(const void*));
     static_assert(std::is_same_v<
                   decltype(std::declval<ExecutionMaterial>().keyProvider),
                   const Adapter::NativeKeyProvider*>);
     static_assert(std::is_same_v<
-                  decltype(std::declval<ExecutionMaterial>().dftBank),
-                  const Adapter::NativeRefreshDftBank*>);
+                  decltype(std::declval<ExecutionMaterial>().dftProvider),
+                  const Adapter::NativeRefreshDftPlaintextProvider*>);
+    static_assert(std::is_same_v<
+                  decltype(std::declval<ExecutionMaterial>().dftBinding),
+                  const Adapter::NativeRefreshDftPlaintextBinding*>);
     static_assert(std::is_same_v<
                   decltype(std::declval<ExecutionMaterial>().gadgetProvider),
                   const Adapter::NativeRefreshGadgetProvider*>);
@@ -452,10 +530,11 @@ int main() {
                 refresh.sparseKeyRequired &&
                 !refresh.encryptedSelectorBankRequired &&
                 !refresh.encryptedGadgetBankRequired &&
-                refresh.dftBankRequired &&
+                !refresh.dftBankRequired &&
                 !refresh.productionExecutionExposed &&
                 refresh.compactSelectorBindingRequired &&
-                refresh.streamedGadgetProviderRequired,
+                refresh.streamedGadgetProviderRequired &&
+                refresh.streamedDftProviderRequired,
             "refresh preflight overstates production execution readiness");
 
     const auto rejectedRefreshForgery = [&](auto mutate) {
@@ -533,6 +612,10 @@ int main() {
                 forged.streamedGadgetProviderRequired = false;
             }),
             "forged streamed-gadget requirement did not fail closed");
+    Require(rejectedRefreshForgery([](auto& forged) {
+                forged.streamedDftProviderRequired = false;
+            }),
+            "forged streamed-DFT requirement did not fail closed");
 
     // Production policy admission is typed evidence bound to the actual
     // support commitment and authenticated estimator report.  It deliberately
@@ -841,47 +924,76 @@ int main() {
     Require(!emptyKeys.HasKey({Direction::row_rotation, 1}),
             "empty evaluator provider invented a default rotation key");
 
-    // Non-null is not sufficient.  First an unpinned DFT bank, then a
-    // superficially level/scale-correct bank joined to an invalid external
-    // gadget opening, must both fail before the empty ciphertext is inspected
-    // and before MetadataOnlyGadgetProvider::visit_pair can run.
+    // Execution is exposed only through genuine typed non-owning material.
+    // The resident DFT-bank arm is absent from the OpenFHE view, and both the
+    // streamed provider and its independent external binding are mandatory.
+    // A valid authenticated metadata envelope then reaches the next typed
+    // gadget binding and fails before the empty ciphertext or either provider
+    // payload visitor can be inspected.
     MetadataOnlyGadgetProvider metadataGadgetProvider;
     Adapter::NativeRefreshGadgetBinding metadataGadgetBinding;
     Adapter::NativeRefreshCompactSelectorManifest metadataSelector;
     Adapter::NativeRefreshCompactSelectorBinding metadataSelectorBinding;
     Adapter::SecurityReport metadataReport;
-    Adapter::NativeRefreshDftBank metadataDft;
+    const auto metadataDftManifest = MakeMetadataDftManifest(
+        context, 17, std::ldexp(1.0, 46));
+    MetadataOnlyDftProvider metadataDftProvider(metadataDftManifest);
+    const auto metadataDftBinding =
+        glscheme::rns::glr_dft_plaintext_binding(metadataDftManifest);
     Adapter::OrdinaryRefreshExecutionMaterialView metadataMaterial{
         &emptyKeys.GetNativeProvider(),
-        &metadataDft,
+        &metadataDftProvider,
+        &metadataDftBinding,
         &metadataGadgetProvider,
         &metadataGadgetBinding,
         &metadataSelector,
         &metadataSelectorBinding,
         &metadataReport,
     };
-    std::string mismatchedDftError;
+    auto missingDftProvider = metadataMaterial;
+    missingDftProvider.dftProvider = nullptr;
+    std::string missingDftProviderError;
     try {
         (void)adapter.ExecuteOrdinaryRefresh(Adapter::Ciphertext{},
-                                             metadataMaterial);
+                                             missingDftProvider);
     }
     catch (const glscheme::rns::GlrError& error) {
-        mismatchedDftError = error.what();
+        missingDftProviderError = error.what();
     }
-    Require(mismatchedDftError.find("level-17 DFT bank") !=
+    Require(missingDftProviderError.find("streamed-DFT provider/binding") !=
                 std::string::npos,
-            "mismatched ordinary-refresh DFT material did not fail closed");
+            "missing ordinary-refresh DFT provider did not fail closed");
 
-    metadataDft.level = 17;
-    metadataDft.scale = std::ldexp(1.0, 46);
-    metadataDft.u_x_fwd.level = 17;
-    metadataDft.u_x_inv.level = 17;
-    metadataDft.u_w_fwd.level = 17;
-    metadataDft.u_w_inv.level = 17;
-    metadataDft.u_x_fwd.poly.level = 17;
-    metadataDft.u_x_inv.poly.level = 17;
-    metadataDft.u_w_fwd.poly.level = 17;
-    metadataDft.u_w_inv.poly.level = 17;
+    auto missingDftBinding = metadataMaterial;
+    missingDftBinding.dftBinding = nullptr;
+    std::string missingDftBindingError;
+    try {
+        (void)adapter.ExecuteOrdinaryRefresh(Adapter::Ciphertext{},
+                                             missingDftBinding);
+    }
+    catch (const glscheme::rns::GlrError& error) {
+        missingDftBindingError = error.what();
+    }
+    Require(missingDftBindingError.find("streamed-DFT provider/binding") !=
+                std::string::npos,
+            "missing ordinary-refresh DFT binding did not fail closed");
+
+    auto mismatchedDftBinding = metadataDftBinding;
+    mismatchedDftBinding.expected_manifest_commitment.front() = '0';
+    auto mismatchedDftMaterial = metadataMaterial;
+    mismatchedDftMaterial.dftBinding = &mismatchedDftBinding;
+    std::string mismatchedDftBindingError;
+    try {
+        (void)adapter.ExecuteOrdinaryRefresh(Adapter::Ciphertext{},
+                                             mismatchedDftMaterial);
+    }
+    catch (const glscheme::rns::GlrError& error) {
+        mismatchedDftBindingError = error.what();
+    }
+    Require(mismatchedDftBindingError.find("DFT plaintext provider") !=
+                std::string::npos,
+            "mismatched ordinary-refresh DFT binding did not fail closed");
+
     std::string mismatchedExternalBindingError;
     try {
         (void)adapter.ExecuteOrdinaryRefresh(Adapter::Ciphertext{},

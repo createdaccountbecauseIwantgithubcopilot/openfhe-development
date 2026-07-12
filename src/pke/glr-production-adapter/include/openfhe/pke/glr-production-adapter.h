@@ -8,6 +8,7 @@
 // are OpenFHE DCRT rows, and the adapter exposes no DCRT conversion seam.
 
 #include "glscheme/production_profiles.hpp"
+#include "glscheme/rns_dft_plaintext_provider.hpp"
 #include "glscheme/rns_encode.hpp"
 #include "glscheme/rns_hybrid_ks.hpp"
 #include "glscheme/rns_keygen.hpp"
@@ -49,7 +50,10 @@ public:
         glscheme::rns::GlrShipRefreshOnlyEndpointResult;
     using NativeRefreshEndpointEvidence =
         glscheme::rns::GlrShipRefreshOnlyEndpointEvidence;
-    using NativeRefreshDftBank = glscheme::rns::GlrDftPlaintextBank;
+    using NativeRefreshDftPlaintextProvider =
+        glscheme::rns::GlrDftPlaintextProvider;
+    using NativeRefreshDftPlaintextBinding =
+        glscheme::rns::GlrDftPlaintextBinding;
     using NativeRefreshGadgetProvider =
         glscheme::rns::GlrShipGadgetProvider;
     using NativeRefreshGadgetBinding =
@@ -160,6 +164,7 @@ public:
         // Append-only truth for the separately typed execution material view.
         bool compactSelectorBindingRequired = false;
         bool streamedGadgetProviderRequired = false;
+        bool streamedDftProviderRequired = false;
     };
 
     // Fixed, copyable result of validating one ACTUAL support commitment and
@@ -188,14 +193,17 @@ public:
     };
 
     // Non-owning view of one complete native ordinary-refresh opening.  Every
-    // pointer is mandatory and must outlive ExecuteOrdinaryRefresh.  The view
-    // carries no secret, admission bit, shared ownership, or copied
-    // OrdinaryRefreshAuthorization.  The adapter pins h=40, the reduced Q7+P14
-    // corridor, fold/key level 18, transform level 17, gamma=64, DFT scale
-    // 2^46, and tolerance 1e-12 internally.
+    // pointer is mandatory and must outlive ExecuteOrdinaryRefresh.  DFT
+    // plaintexts are supplied only through an owner-authored immutable
+    // provider plus an independently authenticated external binding; this seam
+    // accepts no resident DFT bank.  The view carries no secret, admission bit,
+    // shared ownership, or copied OrdinaryRefreshAuthorization.  The adapter
+    // pins h=40, the reduced Q7+P14 corridor, fold/key level 18, transform level
+    // 17, gamma=64, DFT scale 2^46, and tolerance 1e-12 internally.
     struct OrdinaryRefreshExecutionMaterialView {
         const NativeKeyProvider* keyProvider = nullptr;
-        const NativeRefreshDftBank* dftBank = nullptr;
+        const NativeRefreshDftPlaintextProvider* dftProvider = nullptr;
+        const NativeRefreshDftPlaintextBinding* dftBinding = nullptr;
         const NativeRefreshGadgetProvider* gadgetProvider = nullptr;
         const NativeRefreshGadgetBinding* gadgetBinding = nullptr;
         const NativeRefreshCompactSelectorManifest* compactSelector = nullptr;
@@ -315,10 +323,11 @@ public:
 
     // Executes the genuine native canonical endpoint on caller-owned native
     // material.  It validates both external bindings, joins the compact
-    // selector to the streamed gadget/KSK support, and recomputes the h40
-    // authorization from the actual selector support and SecurityReport before
-    // calling glr_ship_refresh_only_endpoint_prime.  This API is an execution
-    // seam, not evidence that a full GL-128 material/value run has occurred.
+    // selector to the streamed gadget/KSK support, opens the externally bound
+    // streamed DFT provider, and recomputes the h40 authorization from the
+    // actual selector support and SecurityReport before calling
+    // glr_ship_refresh_only_endpoint_prime.  This API is an execution seam, not
+    // evidence that a full GL-128 material/value run has occurred.
     OrdinaryRefreshExecutionResult ExecuteOrdinaryRefresh(
         const Ciphertext& canonicalCiphertext,
         const OrdinaryRefreshExecutionMaterialView& material) const;
