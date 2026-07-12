@@ -61,6 +61,36 @@ glscheme::SecurityReport MakeGl128CorridorReport(
     return report;
 }
 
+// Allocation-light non-owning placeholder used only to prove that malformed
+// execution material is rejected before the input ciphertext or any streamed
+// pair is consumed.  It is intentionally not a valid gadget opening.
+class MetadataOnlyGadgetProvider final
+    : public glscheme::rns::GlrShipGadgetProvider {
+public:
+    const glscheme::rns::GlrShipGadgetManifest& manifest()
+        const noexcept override {
+        return manifest_;
+    }
+
+    glscheme::rns::GlrShipGadgetMaterialPolicy policy()
+        const noexcept override {
+        return glscheme::rns::GlrShipGadgetMaterialPolicy::
+            owner_authored_immutable;
+    }
+
+    bool secret_material_accessed() const noexcept override { return false; }
+
+    void visit_pair(
+        std::size_t,
+        const glscheme::rns::GlrShipGadgetPairVisitor&) const override {
+        throw glscheme::rns::GlrError(
+            "metadata-only gadget provider must never lease a pair");
+    }
+
+private:
+    glscheme::rns::GlrShipGadgetManifest manifest_;
+};
+
 }  // namespace
 
 int main() {
@@ -86,6 +116,24 @@ int main() {
                   Adapter::OrdinaryRefreshPreflight>);
     static_assert(std::is_trivially_copyable_v<
                   Adapter::OrdinaryRefreshAuthorization>);
+    static_assert(std::is_aggregate_v<
+                  Adapter::OrdinaryRefreshExecutionMaterialView>);
+    static_assert(std::is_trivially_copyable_v<
+                  Adapter::OrdinaryRefreshExecutionMaterialView>);
+    using ExecutionMaterial =
+        Adapter::OrdinaryRefreshExecutionMaterialView;
+    static_assert(std::is_same_v<
+                  decltype(std::declval<ExecutionMaterial>().keyProvider),
+                  const Adapter::NativeKeyProvider*>);
+    static_assert(std::is_same_v<
+                  decltype(std::declval<ExecutionMaterial>().dftBank),
+                  const Adapter::NativeRefreshDftBank*>);
+    static_assert(std::is_same_v<
+                  decltype(std::declval<ExecutionMaterial>().gadgetProvider),
+                  const Adapter::NativeRefreshGadgetProvider*>);
+    static_assert(std::is_same_v<
+                  decltype(std::declval<ExecutionMaterial>().securityReport),
+                  const Adapter::SecurityReport*>);
     using AdapterRef = const Adapter&;
     using CiphertextRef = const Adapter::Ciphertext&;
     using PlaintextRef = const Adapter::Plaintext&;
@@ -95,6 +143,8 @@ int main() {
     using SecurityReportRef = const Adapter::SecurityReport&;
     using AuthorizationRef =
         const Adapter::OrdinaryRefreshAuthorization&;
+    using ExecutionMaterialRef =
+        const Adapter::OrdinaryRefreshExecutionMaterialView&;
     static_assert(std::is_same_v<
                   decltype(std::declval<AdapterRef>()
                                .PreflightOrdinaryRefresh()),
@@ -119,6 +169,12 @@ int main() {
                                    std::declval<SecurityReportRef>(), 40,
                                    true)),
                   void>);
+    static_assert(std::is_same_v<
+                  decltype(std::declval<AdapterRef>()
+                               .ExecuteOrdinaryRefresh(
+                                   std::declval<CiphertextRef>(),
+                                   std::declval<ExecutionMaterialRef>())),
+                  Adapter::OrdinaryRefreshExecutionResult>);
     static_assert(std::is_same_v<
                   decltype(std::declval<AdapterRef>().Sub(
                       std::declval<CiphertextRef>(),
@@ -220,10 +276,29 @@ int main() {
                 expectedPublicKeyBytes == 25ULL * 1024 * 1024,
             "compact production public-key byte model is wrong");
 
-    // The production ordinary-refresh surface is deliberately a fixed-size
-    // preflight, not an execution API.  It consumes the native prime-p census
-    // and exposes the exact logarithmic trace key list while keeping value
-    // execution unavailable until all owner/provider material seams exist.
+    // The execution API is link-visible, but an empty non-owning view must
+    // fail before inspecting the deliberately empty ciphertext.  Merely
+    // constructing a result cannot assert successful execution either.
+    Adapter::OrdinaryRefreshExecutionResult unopenedExecution;
+    Require(!unopenedExecution.productionExecutionExposed,
+            "default execution result overstates production execution");
+    std::string nullExecutionMaterialError;
+    try {
+        (void)adapter.ExecuteOrdinaryRefresh(
+            Adapter::Ciphertext{},
+            Adapter::OrdinaryRefreshExecutionMaterialView{});
+    }
+    catch (const glscheme::rns::GlrError& error) {
+        nullExecutionMaterialError = error.what();
+    }
+    Require(nullExecutionMaterialError.find("non-null KSK") !=
+                std::string::npos,
+            "null ordinary-refresh execution material did not fail closed");
+
+    // The production ordinary-refresh preflight remains a fixed-size planning
+    // object, independent of the separately typed execution API.  It consumes
+    // the native prime-p census and exposes the exact logarithmic trace key
+    // list without owning material or claiming that execution occurred.
     const Adapter::OrdinaryRefreshPreflight refresh =
         adapter.PreflightOrdinaryRefresh();
     adapter.ValidateOrdinaryRefreshPreflight(refresh);
@@ -249,8 +324,8 @@ int main() {
     // The native endpoint arithmetic is fixed to the reviewed Q7+P14
     // corridor: gamma=64, canonical input delta, DFT scale 2^46, refreshed
     // fold/key level 18, and level-17 transform material.  Feasible arithmetic
-    // remains preflight-only until an authenticated h40 authorization and all
-    // owner/provider seams exist.
+    // remains preflight-only; execution separately requires a complete
+    // caller-owned material view and a successful native endpoint call.
     const auto& endpoint = refresh.endpoint;
     Require(endpoint.total_q_primes == 25 &&
                 endpoint.rescale_stride == 2 &&
@@ -375,10 +450,12 @@ int main() {
                 refresh.reducedExposureCorridorRequired &&
                 refresh.securityAuthorizationRequired &&
                 refresh.sparseKeyRequired &&
-                refresh.encryptedSelectorBankRequired &&
-                refresh.encryptedGadgetBankRequired &&
+                !refresh.encryptedSelectorBankRequired &&
+                !refresh.encryptedGadgetBankRequired &&
                 refresh.dftBankRequired &&
-                !refresh.productionExecutionExposed,
+                !refresh.productionExecutionExposed &&
+                refresh.compactSelectorBindingRequired &&
+                refresh.streamedGadgetProviderRequired,
             "refresh preflight overstates production execution readiness");
 
     const auto rejectedRefreshForgery = [&](auto mutate) {
@@ -448,6 +525,14 @@ int main() {
                 forged.productionExecutionExposed = true;
             }),
             "forged production refresh readiness did not fail closed");
+    Require(rejectedRefreshForgery([](auto& forged) {
+                forged.compactSelectorBindingRequired = false;
+            }),
+            "forged compact-selector requirement did not fail closed");
+    Require(rejectedRefreshForgery([](auto& forged) {
+                forged.streamedGadgetProviderRequired = false;
+            }),
+            "forged streamed-gadget requirement did not fail closed");
 
     // Production policy admission is typed evidence bound to the actual
     // support commitment and authenticated estimator report.  It deliberately
@@ -755,6 +840,60 @@ int main() {
             "empty evaluator provider violated its public-material contract");
     Require(!emptyKeys.HasKey({Direction::row_rotation, 1}),
             "empty evaluator provider invented a default rotation key");
+
+    // Non-null is not sufficient.  First an unpinned DFT bank, then a
+    // superficially level/scale-correct bank joined to an invalid external
+    // gadget opening, must both fail before the empty ciphertext is inspected
+    // and before MetadataOnlyGadgetProvider::visit_pair can run.
+    MetadataOnlyGadgetProvider metadataGadgetProvider;
+    Adapter::NativeRefreshGadgetBinding metadataGadgetBinding;
+    Adapter::NativeRefreshCompactSelectorManifest metadataSelector;
+    Adapter::NativeRefreshCompactSelectorBinding metadataSelectorBinding;
+    Adapter::SecurityReport metadataReport;
+    Adapter::NativeRefreshDftBank metadataDft;
+    Adapter::OrdinaryRefreshExecutionMaterialView metadataMaterial{
+        &emptyKeys.GetNativeProvider(),
+        &metadataDft,
+        &metadataGadgetProvider,
+        &metadataGadgetBinding,
+        &metadataSelector,
+        &metadataSelectorBinding,
+        &metadataReport,
+    };
+    std::string mismatchedDftError;
+    try {
+        (void)adapter.ExecuteOrdinaryRefresh(Adapter::Ciphertext{},
+                                             metadataMaterial);
+    }
+    catch (const glscheme::rns::GlrError& error) {
+        mismatchedDftError = error.what();
+    }
+    Require(mismatchedDftError.find("level-17 DFT bank") !=
+                std::string::npos,
+            "mismatched ordinary-refresh DFT material did not fail closed");
+
+    metadataDft.level = 17;
+    metadataDft.scale = std::ldexp(1.0, 46);
+    metadataDft.u_x_fwd.level = 17;
+    metadataDft.u_x_inv.level = 17;
+    metadataDft.u_w_fwd.level = 17;
+    metadataDft.u_w_inv.level = 17;
+    metadataDft.u_x_fwd.poly.level = 17;
+    metadataDft.u_x_inv.poly.level = 17;
+    metadataDft.u_w_fwd.poly.level = 17;
+    metadataDft.u_w_inv.poly.level = 17;
+    std::string mismatchedExternalBindingError;
+    try {
+        (void)adapter.ExecuteOrdinaryRefresh(Adapter::Ciphertext{},
+                                             metadataMaterial);
+    }
+    catch (const glscheme::rns::GlrError& error) {
+        mismatchedExternalBindingError = error.what();
+    }
+    Require(mismatchedExternalBindingError.find("SHIP gadget provider") !=
+                std::string::npos,
+            "mismatched ordinary-refresh external binding did not fail "
+            "before execution");
 
     Adapter::Ciphertext malformed;
     bool rejectedMalformedCiphertext = false;

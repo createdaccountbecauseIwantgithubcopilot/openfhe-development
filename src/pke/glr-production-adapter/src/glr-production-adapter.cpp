@@ -595,10 +595,12 @@ MakeCanonicalOrdinaryRefreshPreflight(
     out.reducedExposureCorridorRequired = true;
     out.securityAuthorizationRequired = true;
     out.sparseKeyRequired = true;
-    out.encryptedSelectorBankRequired = true;
-    out.encryptedGadgetBankRequired = true;
+    out.encryptedSelectorBankRequired = false;
+    out.encryptedGadgetBankRequired = false;
     out.dftBankRequired = true;
     out.productionExecutionExposed = false;
+    out.compactSelectorBindingRequired = true;
+    out.streamedGadgetProviderRequired = true;
     return out;
 }
 
@@ -673,7 +675,11 @@ void RequireCanonicalOrdinaryRefreshPreflight(
             expected.encryptedGadgetBankRequired ||
         actual.dftBankRequired != expected.dftBankRequired ||
         actual.productionExecutionExposed !=
-            expected.productionExecutionExposed) {
+            expected.productionExecutionExposed ||
+        actual.compactSelectorBindingRequired !=
+            expected.compactSelectorBindingRequired ||
+        actual.streamedGadgetProviderRequired !=
+            expected.streamedGadgetProviderRequired) {
         throw GlrError(
             "GLRProductionAdapter: ordinary-refresh preflight is forged, "
             "cross-profile, or overstates production execution readiness");
@@ -740,8 +746,9 @@ MakeOrdinaryRefreshAuthorization(
     out.securityPolicyValidated = native.security_policy_validated;
     out.productionAuthorizationAdmitted =
         native.production_execution_admitted;
-    // Authorization proves policy metadata only.  OpenFHE still has no
-    // selector/gadget/DFT/report owner-provider execution seam.
+    // Authorization proves policy metadata only.  The separate execution
+    // seam must validate actual selector/gadget/DFT/provider material and
+    // recompute this authorization; this object cannot enable it.
     out.productionExecutionExposed = false;
     return out;
 }
@@ -882,6 +889,143 @@ void GLRProductionAdapter::ValidateOrdinaryRefreshAuthorization(
         MakeOrdinaryRefreshAuthorization(
             m_context, supportCommitment, securityReport,
             sparseHammingWeight, reducedExposureCorridor));
+}
+
+GLRProductionAdapter::OrdinaryRefreshExecutionResult
+GLRProductionAdapter::ExecuteOrdinaryRefresh(
+    const Ciphertext& canonicalCiphertext,
+    const OrdinaryRefreshExecutionMaterialView& material) const {
+    constexpr std::uint32_t kSparseHammingWeight = 40;
+    constexpr std::uint32_t kFoldKeyLevel = 18;
+    constexpr std::uint32_t kTransformMaterialLevel = 17;
+    constexpr double kRefreshGamma = 64.0;
+    constexpr double kDftScale = 70368744177664.0;  // 2^46
+    constexpr double kNormalizationTolerance = 1.0e-12;
+
+    if (material.keyProvider == nullptr || material.dftBank == nullptr ||
+        material.gadgetProvider == nullptr ||
+        material.gadgetBinding == nullptr ||
+        material.compactSelector == nullptr ||
+        material.compactSelectorBinding == nullptr ||
+        material.securityReport == nullptr) {
+        throw GlrError(
+            "GLRProductionAdapter: ordinary-refresh execution requires "
+            "non-null KSK, DFT, streamed-gadget/binding, compact-selector/"
+            "binding, and SecurityReport material");
+    }
+
+    const NativeKeyProvider& keys = *material.keyProvider;
+    const NativeRefreshDftBank& dft = *material.dftBank;
+    const std::string parameterFingerprint =
+        glscheme::rns::glr_parameter_fingerprint(m_context.params);
+    if (keys.secret_material_accessed() ||
+        keys.parameter_fingerprint() != parameterFingerprint ||
+        keys.sparse_support_commitment().empty()) {
+        throw GlrError(
+            "GLRProductionAdapter: ordinary-refresh KSK provider is "
+            "secret-bearing, cross-parameter, or lacks sparse support");
+    }
+    if (dft.level != kTransformMaterialLevel || dft.scale != kDftScale ||
+        dft.stc_weight_composed ||
+        dft.u_x_fwd.level != kTransformMaterialLevel ||
+        dft.u_x_inv.level != kTransformMaterialLevel ||
+        dft.u_w_fwd.level != kTransformMaterialLevel ||
+        dft.u_w_inv.level != kTransformMaterialLevel ||
+        dft.u_x_fwd.poly.level != kTransformMaterialLevel ||
+        dft.u_x_inv.poly.level != kTransformMaterialLevel ||
+        dft.u_w_fwd.poly.level != kTransformMaterialLevel ||
+        dft.u_w_inv.poly.level != kTransformMaterialLevel) {
+        throw GlrError(
+            "GLRProductionAdapter: ordinary-refresh execution requires the "
+            "unweighted level-17 DFT bank at exact scale 2^46");
+    }
+
+    // These opaque sessions bind the caller's external envelopes to the
+    // provider/manifest bytes before the input ciphertext is inspected or any
+    // CtS arithmetic begins.  The endpoint receives the same sessions so it
+    // does not reinterpret or re-author the bindings.
+    auto gadgetSession =
+        glscheme::rns::glr_open_ship_gadget_provider_session(
+            m_context, *material.gadgetProvider, *material.gadgetBinding);
+    auto selectorSession =
+        glscheme::rns::glr_open_ship_compact_selector_session(
+            m_context, *material.compactSelector,
+            *material.compactSelectorBinding);
+    glscheme::rns::glr_validate_ship_compact_selector_join(
+        m_context, selectorSession, gadgetSession.manifest(),
+        keys.sparse_support_commitment(), keys.parameter_fingerprint());
+
+    const auto& selectorManifest = selectorSession.manifest();
+    const auto& gadgetManifest = gadgetSession.manifest();
+    if (selectorManifest.sparse_hamming_weight != kSparseHammingWeight ||
+        selectorManifest.windows.size() != kSparseHammingWeight ||
+        selectorManifest.key_level != kFoldKeyLevel ||
+        gadgetManifest.windows.size() != kSparseHammingWeight ||
+        gadgetManifest.key_level != kFoldKeyLevel ||
+        selectorManifest.support_commitment !=
+            gadgetManifest.support_commitment) {
+        throw GlrError(
+            "GLRProductionAdapter: ordinary-refresh execution material is "
+            "not the exact h40/level-18 streamed opening");
+    }
+
+    // Policy-only authorization is recomputed from the support that survived
+    // both external bindings and the selector/gadget/KSK join.  It is not
+    // accepted as a caller parameter and is not copied into endpoint admission;
+    // the native endpoint independently recomputes the same authorization.
+    (void)MakeOrdinaryRefreshAuthorization(
+        m_context, selectorManifest.support_commitment,
+        *material.securityReport, kSparseHammingWeight,
+        /*reducedExposureCorridor=*/true);
+
+    glscheme::rns::GlrShipRefreshOnlyParameters parameters;
+    parameters.gamma = kRefreshGamma;
+    parameters.max_abs_coefficient = 1.0;
+
+    glscheme::rns::GlrShipRefreshOnlyEndpointConfig config;
+    config.ship.keys = material.keyProvider;
+    config.ship.compact_selector = material.compactSelector;
+    config.ship.compact_selector_binding = material.compactSelectorBinding;
+    config.ship.validated_compact_selector_session = &selectorSession;
+    config.ship.gadget_provider = material.gadgetProvider;
+    config.ship.gadget_binding = material.gadgetBinding;
+    config.ship.validated_gadget_session = &gadgetSession;
+    config.ship.production_mode = true;
+    config.dft_bank = material.dftBank;
+    config.normalization_relative_tolerance = kNormalizationTolerance;
+    config.fold_level = kFoldKeyLevel;
+    config.transform_material_level = kTransformMaterialLevel;
+    config.sparse_hamming_weight = kSparseHammingWeight;
+    config.corridor_exposure_reduced_keys = true;
+    config.security_report = material.securityReport;
+
+    OrdinaryRefreshExecutionResult out;
+    out.nativeResult =
+        glscheme::rns::glr_ship_refresh_only_endpoint_prime(
+            m_context, canonicalCiphertext, parameters, config,
+            &out.nativeEvidence);
+    if (out.nativeResult.representation !=
+            glscheme::rns::GlrShipRefreshOnlyEndpointRepresentation::
+                refreshed_xy ||
+        out.nativeResult.input_level != 18U ||
+        out.nativeResult.output_level != 22U ||
+        !out.nativeEvidence.canonical_production_authorized ||
+        !out.nativeEvidence.streamed_gadget_provider_used ||
+        !out.nativeEvidence.compact_selector_binding_used ||
+        !out.nativeEvidence.provider_secret_free ||
+        out.nativeEvidence.fold_level != kFoldKeyLevel ||
+        out.nativeEvidence.transform_material_level !=
+            kTransformMaterialLevel ||
+        out.nativeEvidence.gadget_manifest_commitment !=
+            gadgetManifest.manifest_commitment ||
+        out.nativeEvidence.selector_binding_commitment !=
+            selectorManifest.manifest_commitment) {
+        throw GlrError(
+            "GLRProductionAdapter: native ordinary-refresh execution returned "
+            "incomplete canonical streamed-material evidence");
+    }
+    out.productionExecutionExposed = true;
+    return out;
 }
 
 GLRProductionAdapter::SecretKey GLRProductionAdapter::KeyGen(

@@ -13,6 +13,8 @@
 #include "glscheme/rns_keygen.hpp"
 #include "glscheme/rns_public_key.hpp"
 #include "glscheme/rns_ship.hpp"
+#include "glscheme/rns_ship_compact_selector.hpp"
+#include "glscheme/rns_ship_gadget_provider.hpp"
 #include "glscheme/rns_w_algebra.hpp"
 
 #include <array>
@@ -43,6 +45,19 @@ public:
         glscheme::rns::GlrShipRefreshOnlyPackPreflight;
     using NativeRefreshEndpointPreflight =
         glscheme::rns::GlrShipRefreshOnlyEndpointPreflight;
+    using NativeRefreshEndpointResult =
+        glscheme::rns::GlrShipRefreshOnlyEndpointResult;
+    using NativeRefreshEndpointEvidence =
+        glscheme::rns::GlrShipRefreshOnlyEndpointEvidence;
+    using NativeRefreshDftBank = glscheme::rns::GlrDftPlaintextBank;
+    using NativeRefreshGadgetProvider =
+        glscheme::rns::GlrShipGadgetProvider;
+    using NativeRefreshGadgetBinding =
+        glscheme::rns::GlrShipGadgetBinding;
+    using NativeRefreshCompactSelectorManifest =
+        glscheme::rns::GlrShipCompactSelectorManifest;
+    using NativeRefreshCompactSelectorBinding =
+        glscheme::rns::GlrShipCompactSelectorBinding;
 
     // Fixed-capacity binding text keeps the refresh preflight itself free of
     // heap-owning strings while still carrying the exact canonical name and
@@ -60,8 +75,9 @@ public:
     };
 
     enum class OrdinaryRefreshAvailability : std::uint8_t {
-        // The adapter exposes no sparse-key, encrypted selector/gadget-bank,
-        // or DFT-bank owner/provider seam and no production value execution.
+        // This fixed census never owns or attests execution material.  The
+        // separately typed ExecuteOrdinaryRefresh seam remains contingent on
+        // caller-supplied material and a successful native endpoint call.
         preflight_only = 1,
     };
 
@@ -94,8 +110,8 @@ public:
     // sparse_to_primary, conjugation_to_sparse, the primary transform key,
     // and the auxiliary transform key required by a full endpoint.  endpoint
     // binds the canonical gamma=64, input-delta, DFT=2^46 strict arithmetic
-    // ledger.  The explicit Q7+P14/h40 corridor fields are requirements for a
-    // future authenticated authorization, never readiness claims.
+    // ledger.  The explicit Q7+P14/h40 corridor fields are requirements for
+    // separately supplied execution material, never readiness claims.
     struct OrdinaryRefreshPreflight {
         FixedProfileBindingText canonicalProfile;
         FixedProfileBindingText parameterFingerprint;
@@ -111,8 +127,8 @@ public:
         std::uint32_t endpointKeyDebtCount = 0;
         // Entries are level 18 (Q7) then level 17 (Q8).  The byte totals below
         // cover only the 15 listed trace rotations and five listed non-trace
-        // debts; encrypted selector/gadget banks remain absent owner/provider
-        // seams and are deliberately not implied by these planning numbers.
+        // debts; selector/gadget material is neither owned nor attested by the
+        // preflight and is deliberately not implied by these planning numbers.
         std::array<RefreshKeyLevelByteModel,
                    kCanonicalRefreshKeyLevelModelCount> keyLevelModels{};
         std::uint32_t keyLevelModelCount = 0;
@@ -134,17 +150,25 @@ public:
         bool reducedExposureCorridorRequired = false;
         bool securityAuthorizationRequired = false;
         bool sparseKeyRequired = false;
+        // Legacy resident-bank requirements.  The OpenFHE execution seam does
+        // not accept either material form; they remain false for its canonical
+        // compact/streamed opening.
         bool encryptedSelectorBankRequired = false;
         bool encryptedGadgetBankRequired = false;
         bool dftBankRequired = false;
         bool productionExecutionExposed = false;
+        // Append-only truth for the separately typed execution material view.
+        bool compactSelectorBindingRequired = false;
+        bool streamedGadgetProviderRequired = false;
     };
 
     // Fixed, copyable result of validating one ACTUAL support commitment and
     // authenticated SecurityReport against GLScheme's canonical GL-128
     // endpoint authorization gate.  `productionAuthorizationAdmitted` means
-    // that metadata passed the Q7+P14/h40 policy; it does not expose an
-    // OpenFHE value-execution seam, which remains false independently.
+    // that metadata passed the Q7+P14/h40 policy; it cannot be promoted or
+    // copied into execution admission.  ExecuteOrdinaryRefresh instead
+    // recomputes authorization from its actual material/report and calls the
+    // native endpoint, so this policy-only result always remains false.
     struct OrdinaryRefreshAuthorization {
         FixedProfileBindingText profileBindingFingerprint;
         FixedProfileBindingText supportCommitment;
@@ -160,6 +184,32 @@ public:
         bool supportCommitmentBound = false;
         bool securityPolicyValidated = false;
         bool productionAuthorizationAdmitted = false;
+        bool productionExecutionExposed = false;
+    };
+
+    // Non-owning view of one complete native ordinary-refresh opening.  Every
+    // pointer is mandatory and must outlive ExecuteOrdinaryRefresh.  The view
+    // carries no secret, admission bit, shared ownership, or copied
+    // OrdinaryRefreshAuthorization.  The adapter pins h=40, the reduced Q7+P14
+    // corridor, fold/key level 18, transform level 17, gamma=64, DFT scale
+    // 2^46, and tolerance 1e-12 internally.
+    struct OrdinaryRefreshExecutionMaterialView {
+        const NativeKeyProvider* keyProvider = nullptr;
+        const NativeRefreshDftBank* dftBank = nullptr;
+        const NativeRefreshGadgetProvider* gadgetProvider = nullptr;
+        const NativeRefreshGadgetBinding* gadgetBinding = nullptr;
+        const NativeRefreshCompactSelectorManifest* compactSelector = nullptr;
+        const NativeRefreshCompactSelectorBinding* compactSelectorBinding =
+            nullptr;
+        const SecurityReport* securityReport = nullptr;
+    };
+
+    // Returned only after the native endpoint completes and its canonical
+    // streamed-material evidence is checked.  A thrown call returns no result;
+    // the flag therefore cannot become true on validation or execution failure.
+    struct OrdinaryRefreshExecutionResult {
+        NativeRefreshEndpointResult nativeResult;
+        NativeRefreshEndpointEvidence nativeEvidence;
         bool productionExecutionExposed = false;
     };
 
@@ -262,6 +312,16 @@ public:
         const SecurityReport& securityReport,
         std::uint32_t sparseHammingWeight = 40,
         bool reducedExposureCorridor = true) const;
+
+    // Executes the genuine native canonical endpoint on caller-owned native
+    // material.  It validates both external bindings, joins the compact
+    // selector to the streamed gadget/KSK support, and recomputes the h40
+    // authorization from the actual selector support and SecurityReport before
+    // calling glr_ship_refresh_only_endpoint_prime.  This API is an execution
+    // seam, not evidence that a full GL-128 material/value run has occurred.
+    OrdinaryRefreshExecutionResult ExecuteOrdinaryRefresh(
+        const Ciphertext& canonicalCiphertext,
+        const OrdinaryRefreshExecutionMaterialView& material) const;
 
     // GLScheme's current owner-side encryption API is symmetric.  A zero seed
     // requests operating-system entropy; nonzero seeds are deterministic and
