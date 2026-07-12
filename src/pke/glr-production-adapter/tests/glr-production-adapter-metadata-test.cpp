@@ -196,10 +196,13 @@ int main() {
         Adapter::OrdinaryRefreshExecutionMaterialView;
     static_assert(!HasResidentDftBank<ExecutionMaterial>);
     static_assert(!HasAuthorizationToken<ExecutionMaterial>);
-    static_assert(sizeof(ExecutionMaterial) == 8 * sizeof(const void*));
+    static_assert(sizeof(ExecutionMaterial) == 9 * sizeof(const void*));
     static_assert(std::is_same_v<
                   decltype(std::declval<ExecutionMaterial>().keyProvider),
                   const Adapter::NativeKeyProvider*>);
+    static_assert(std::is_same_v<
+                  decltype(std::declval<ExecutionMaterial>().keyBinding),
+                  const Adapter::NativeLeasedKeyBinding*>);
     static_assert(std::is_same_v<
                   decltype(std::declval<ExecutionMaterial>().dftProvider),
                   const Adapter::NativeRefreshDftPlaintextProvider*>);
@@ -369,7 +372,8 @@ int main() {
     catch (const glscheme::rns::GlrError& error) {
         nullExecutionMaterialError = error.what();
     }
-    Require(nullExecutionMaterialError.find("non-null KSK") !=
+    Require(nullExecutionMaterialError.find(
+                "non-null authenticated leased KSK provider/binding") !=
                 std::string::npos,
             "null ordinary-refresh execution material did not fail closed");
 
@@ -533,6 +537,7 @@ int main() {
                 !refresh.dftBankRequired &&
                 !refresh.productionExecutionExposed &&
                 refresh.compactSelectorBindingRequired &&
+                refresh.authenticatedLeasedKskRequired &&
                 refresh.streamedGadgetProviderRequired &&
                 refresh.streamedDftProviderRequired,
             "refresh preflight overstates production execution readiness");
@@ -608,6 +613,10 @@ int main() {
                 forged.compactSelectorBindingRequired = false;
             }),
             "forged compact-selector requirement did not fail closed");
+    Require(rejectedRefreshForgery([](auto& forged) {
+                forged.authenticatedLeasedKskRequired = false;
+            }),
+            "forged authenticated-leased-KSK requirement did not fail closed");
     Require(rejectedRefreshForgery([](auto& forged) {
                 forged.streamedGadgetProviderRequired = false;
             }),
@@ -940,8 +949,10 @@ int main() {
     MetadataOnlyDftProvider metadataDftProvider(metadataDftManifest);
     const auto metadataDftBinding =
         glscheme::rns::glr_dft_plaintext_binding(metadataDftManifest);
+    Adapter::NativeLeasedKeyBinding metadataKeyBinding;
     Adapter::OrdinaryRefreshExecutionMaterialView metadataMaterial{
         &emptyKeys.GetNativeProvider(),
+        &metadataKeyBinding,
         &metadataDftProvider,
         &metadataDftBinding,
         &metadataGadgetProvider,
@@ -950,6 +961,21 @@ int main() {
         &metadataSelectorBinding,
         &metadataReport,
     };
+    auto missingKeyBinding = metadataMaterial;
+    missingKeyBinding.keyBinding = nullptr;
+    std::string missingKeyBindingError;
+    try {
+        (void)adapter.ExecuteOrdinaryRefresh(Adapter::Ciphertext{},
+                                             missingKeyBinding);
+    }
+    catch (const glscheme::rns::GlrError& error) {
+        missingKeyBindingError = error.what();
+    }
+    Require(missingKeyBindingError.find(
+                "authenticated leased KSK provider/binding") !=
+                std::string::npos,
+            "missing ordinary-refresh KSK binding did not fail closed");
+
     auto missingDftProvider = metadataMaterial;
     missingDftProvider.dftProvider = nullptr;
     std::string missingDftProviderError;

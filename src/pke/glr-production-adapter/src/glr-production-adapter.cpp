@@ -601,6 +601,7 @@ MakeCanonicalOrdinaryRefreshPreflight(
     out.dftBankRequired = false;
     out.productionExecutionExposed = false;
     out.compactSelectorBindingRequired = true;
+    out.authenticatedLeasedKskRequired = true;
     out.streamedGadgetProviderRequired = true;
     out.streamedDftProviderRequired = true;
     return out;
@@ -680,6 +681,8 @@ void RequireCanonicalOrdinaryRefreshPreflight(
             expected.productionExecutionExposed ||
         actual.compactSelectorBindingRequired !=
             expected.compactSelectorBindingRequired ||
+        actual.authenticatedLeasedKskRequired !=
+            expected.authenticatedLeasedKskRequired ||
         actual.streamedGadgetProviderRequired !=
             expected.streamedGadgetProviderRequired ||
         actual.streamedDftProviderRequired !=
@@ -906,7 +909,8 @@ GLRProductionAdapter::ExecuteOrdinaryRefresh(
     constexpr double kDftScale = 70368744177664.0;  // 2^46
     constexpr double kNormalizationTolerance = 1.0e-12;
 
-    if (material.keyProvider == nullptr || material.dftProvider == nullptr ||
+    if (material.keyProvider == nullptr || material.keyBinding == nullptr ||
+        material.dftProvider == nullptr ||
         material.dftBinding == nullptr ||
         material.gadgetProvider == nullptr ||
         material.gadgetBinding == nullptr ||
@@ -915,7 +919,7 @@ GLRProductionAdapter::ExecuteOrdinaryRefresh(
         material.securityReport == nullptr) {
         throw GlrError(
             "GLRProductionAdapter: ordinary-refresh execution requires "
-            "non-null KSK, streamed-DFT provider/binding, streamed-gadget/"
+            "non-null authenticated leased KSK provider/binding, streamed-DFT provider/binding, streamed-gadget/"
             "binding, compact-selector/binding, and SecurityReport material");
     }
 
@@ -946,6 +950,26 @@ GLRProductionAdapter::ExecuteOrdinaryRefresh(
     glscheme::rns::glr_validate_ship_compact_selector_join(
         m_context, selectorSession, gadgetSession.manifest(),
         keys.sparse_support_commitment(), keys.parameter_fingerprint());
+
+    const NativeLeasedKeyBinding& keyBinding = *material.keyBinding;
+    const std::string keyManifestCommitment =
+        glscheme::rns::glr_ksk_manifest_commitment(keys.manifest());
+    if (keys.policy() != "authenticated-leased-rns-hybrid" ||
+        keys.residency() != "synchronous-callback-lease" ||
+        keyManifestCommitment.rfind("sha256:", 0) != 0 ||
+        keyBinding.expected_manifest_commitment != keyManifestCommitment ||
+        keyBinding.expected_public_material_commitment !=
+            keys.public_material_commitment() ||
+        keyBinding.expected_parameter_fingerprint != parameterFingerprint ||
+        keyBinding.expected_parameter_fingerprint !=
+            keys.parameter_fingerprint() ||
+        keyBinding.expected_sparse_support_commitment !=
+            keys.sparse_support_commitment() ||
+        keyBinding.expected_record_count != keys.manifest().records.size()) {
+        throw GlrError(
+            "GLRProductionAdapter: ordinary-refresh execution requires an "
+            "externally pinned authenticated leased KSK opening");
+    }
 
     const auto& dftManifest = dftSession.manifest();
     const auto& selectorManifest = selectorSession.manifest();
@@ -1042,11 +1066,16 @@ GLRProductionAdapter::ExecuteOrdinaryRefresh(
         !out.nativeEvidence.streamed_gadget_provider_used ||
         !out.nativeEvidence.compact_selector_binding_used ||
         !out.nativeEvidence.streamed_dft_provider_used ||
+        !out.nativeEvidence.bounded_ksk_provider_used ||
+        !out.nativeEvidence.authenticated_ksk_payloads_used ||
         !out.nativeEvidence.provider_secret_free ||
+        !out.nativeEvidence.ksk_provider_secret_free ||
         !out.nativeEvidence.dft_owner_authored_immutable ||
         !out.nativeEvidence.dft_provider_secret_free ||
         out.nativeEvidence.dft_plaintext_visits != 4U ||
         out.nativeEvidence.dft_peak_live_plaintexts != 1U ||
+        out.nativeEvidence.ksk_manifest_commitment_sha256 !=
+            keyManifestCommitment ||
         out.nativeEvidence.fold_level != kFoldKeyLevel ||
         out.nativeEvidence.transform_material_level !=
             kTransformMaterialLevel ||

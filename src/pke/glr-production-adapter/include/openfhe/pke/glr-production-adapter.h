@@ -41,6 +41,7 @@ public:
     using KeyRing = glscheme::rns::GlrRing;
     using KeyManifest = glscheme::rns::GlrKskManifest;
     using NativeKeyProvider = glscheme::rns::GlrKskProvider;
+    using NativeLeasedKeyBinding = glscheme::rns::GlrLeasedKskBinding;
     using SecurityReport = ::glscheme::SecurityReport;
     using NativeRefreshTracePreflight =
         glscheme::rns::GlrShipRefreshOnlyPackPreflight;
@@ -163,6 +164,7 @@ public:
         bool productionExecutionExposed = false;
         // Append-only truth for the separately typed execution material view.
         bool compactSelectorBindingRequired = false;
+        bool authenticatedLeasedKskRequired = false;
         bool streamedGadgetProviderRequired = false;
         bool streamedDftProviderRequired = false;
     };
@@ -193,15 +195,17 @@ public:
     };
 
     // Non-owning view of one complete native ordinary-refresh opening.  Every
-    // pointer is mandatory and must outlive ExecuteOrdinaryRefresh.  DFT
-    // plaintexts are supplied only through an owner-authored immutable
-    // provider plus an independently authenticated external binding; this seam
+    // pointer is mandatory and must outlive ExecuteOrdinaryRefresh.  KSKs and
+    // DFT plaintexts are supplied only through authenticated bounded
+    // providers plus independently pinned external bindings.  DFT plaintexts
+    // additionally require the owner-authored immutable policy.  This seam
     // accepts no resident DFT bank.  The view carries no secret, admission bit,
     // shared ownership, or copied OrdinaryRefreshAuthorization.  The adapter
     // pins h=40, the reduced Q7+P14 corridor, fold/key level 18, transform level
     // 17, gamma=64, DFT scale 2^46, and tolerance 1e-12 internally.
     struct OrdinaryRefreshExecutionMaterialView {
         const NativeKeyProvider* keyProvider = nullptr;
+        const NativeLeasedKeyBinding* keyBinding = nullptr;
         const NativeRefreshDftPlaintextProvider* dftProvider = nullptr;
         const NativeRefreshDftPlaintextBinding* dftBinding = nullptr;
         const NativeRefreshGadgetProvider* gadgetProvider = nullptr;
