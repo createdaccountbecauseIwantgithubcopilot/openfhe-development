@@ -540,6 +540,28 @@ GLIntProductionSlotCiphertext GLIntProductionMatMulCore::Negate(
         std::move(output));
 }
 
+GLIntProductionSlotCiphertext GLIntProductionMatMulCore::RotateColumns(
+    const GLIntProductionSlotCiphertext& ciphertext, int32_t delta) const {
+    ValidateCiphertext(ciphertext, "production Slot ciphertext");
+    const auto n = static_cast<int64_t>(m_parameters.dimension);
+    auto normalized = static_cast<int64_t>(delta) % n;
+    if (normalized < 0) {
+        normalized += n;
+    }
+    auto output = ciphertext.GetValues();
+    for (auto& value : output) {
+        value.column = static_cast<uint32_t>(
+            (static_cast<int64_t>(value.column) + n - normalized) % n);
+    }
+    std::sort(output.begin(), output.end(), [](const auto& lhs,
+                                               const auto& rhs) {
+        return KeyOf(lhs) < KeyOf(rhs);
+    });
+    return GLIntProductionSlotCiphertext(
+        m_parameters, ciphertext.GetKeyTag(), m_compositeModulus,
+        ciphertext.GetPlaintextScale(), std::move(output));
+}
+
 GLIntProductionMatMulCore::Entry GLIntProductionMatMulCore::MakeEntry(
     const GLIntProductionSecretKey& key,
     GLIntProductionGadgetDirection direction, GLIntBranch branch,

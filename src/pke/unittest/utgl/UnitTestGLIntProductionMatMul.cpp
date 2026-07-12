@@ -32,6 +32,12 @@ TEST(GLIntProductionMatMul, GadgetTErrCrossLaneAndHadamard) {
     EXPECT_FALSE(capabilities.auxiliaryModulusKeySwitch);
     EXPECT_FALSE(capabilities.noiseScalingModSwitch);
     EXPECT_FALSE(capabilities.coefficientDomainBridge);
+    EXPECT_TRUE(capabilities.columnRotation);
+    EXPECT_FALSE(capabilities.rowRotation);
+    EXPECT_FALSE(capabilities.interMatrixRotation);
+    EXPECT_FALSE(capabilities.transpose);
+    EXPECT_FALSE(capabilities.conjugationFamilySwap);
+    EXPECT_FALSE(capabilities.auxiliaryAutomorphismSwitch);
     EXPECT_FALSE(capabilities.securityAuthorized);
     EXPECT_FALSE(capabilities.bootstrap);
 
@@ -58,6 +64,10 @@ TEST(GLIntProductionMatMul, GadgetTErrCrossLaneAndHadamard) {
     const auto negated =
         evaluator.Decrypt(primary, evaluator.Negate(encryptedLeft));
     EXPECT_EQ(negated.At(GLIntBranch::Plus, 9, 1, 4), 1579009 - 6);
+    const auto rotatedColumns = evaluator.Decrypt(
+        primary, evaluator.RotateColumns(encryptedLeft, 1));
+    EXPECT_EQ(rotatedColumns.At(GLIntBranch::Plus, 9, 1, 3), 6);
+    EXPECT_EQ(rotatedColumns.At(GLIntBranch::Minus, 9, 2, 4), 7);
     const auto matrixKeys = evaluator.EvalKeyGen(
         primary, encryptedLeft, encryptedRight, 0x4d41544b455953ULL);
     EXPECT_GT(matrixKeys.GetDigitCount(), 32u);

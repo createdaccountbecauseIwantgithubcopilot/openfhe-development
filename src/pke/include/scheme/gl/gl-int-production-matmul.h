@@ -120,6 +120,12 @@ struct GLIntProductionMatMulCapabilities {
     bool auxiliaryModulusKeySwitch{false};
     bool noiseScalingModSwitch{false};
     bool coefficientDomainBridge{false};
+    bool columnRotation{true};
+    bool rowRotation{false};
+    bool interMatrixRotation{false};
+    bool transpose{false};
+    bool conjugationFamilySwap{false};
+    bool auxiliaryAutomorphismSwitch{false};
     bool securityAuthorized{false};
     bool bootstrap{false};
 };
@@ -174,6 +180,10 @@ public:
         const GLIntProductionSlotCiphertext& rhs) const;
     GLIntProductionSlotCiphertext Negate(
         const GLIntProductionSlotCiphertext& ciphertext) const;
+    /** Output column k reads input column k+delta modulo n. */
+    GLIntProductionSlotCiphertext RotateColumns(
+        const GLIntProductionSlotCiphertext& ciphertext,
+        int32_t delta) const;
 
     GLIntProductionGadgetEvalKeys EvalKeyGen(
         const GLIntProductionSecretKey& primaryKey,
