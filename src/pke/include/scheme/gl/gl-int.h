@@ -94,7 +94,8 @@ struct GLIntOperationCensusEntry {
     uint8_t consumedLevels{0};
     uint16_t keyRequirements{GLIntKeyNone};
     bool section4Required{true};
-    bool wBatchedValuePathImplemented{false};
+    bool boundedPlaintextPathImplemented{false};
+    bool productionValuePathImplemented{false};
 };
 
 inline constexpr std::size_t kGLIntOperationCensusSize = 22;
@@ -119,18 +120,20 @@ struct GLIntWBatchedParameters {
 
     static GLIntWBatchedParameters GL128257N32(uint64_t plaintextModulus = 1579009,
                                                uint32_t multiplicativeDepth = 8);
+    static GLIntWBatchedParameters ConformanceN4P3T97(uint32_t multiplicativeDepth = 1);
     void Validate() const;
     bool IsGL128257N32Geometry() const noexcept;
+    bool IsConformanceN4P3T97() const noexcept;
 };
 
 /**
  * Fixed-size, trivially-copyable census for a validated W-batched profile.
  *
- * The derived dimensions are the exact Section-4 counts.  The four trailing
- * flags are intentionally false in the current implementation: this receipt
- * is not evidence of p>1 value execution, a security-authorized BGV chain,
- * GL aggregate/key serialization, or integer bootstrapping.  `operations`
- * records the implemented p=1 reference surface and the remaining p>1 gaps.
+ * The derived dimensions are the exact Section-4 counts.  Only the bounded
+ * n=4,p=3,t=97 receipt reports a plaintext codec; no receipt is evidence of
+ * W-batched ciphertext execution, a security-authorized BGV chain, GL
+ * aggregate/key serialization, or integer bootstrapping.  `operations`
+ * records the p=1 reference surface and remaining p>1 production gaps.
  */
 struct GLIntWBatchedCensus {
     GLIntWBatchedParameters parameters;
@@ -141,13 +144,17 @@ struct GLIntWBatchedCensus {
     uint64_t matrixCount{0};                        // 2*phi(p), (+) and (-)
     uint64_t matrixCellCount{0};                    // n*n per matrix
     uint64_t aggregatePlaintextValueCount{0};
+    uint64_t gaussianCoefficientCount{0};           // n*n*phi(p)
+    uint64_t encodedCoefficientStorageBytes{0};     // two int64 residues/coefficient
+    uint64_t decodedBranchPairStorageBytes{0};      // 2*phi(p)*n*n int64 residues
     uint64_t nonIdentityRowRotations{0};
     uint64_t nonIdentityColumnRotations{0};
     uint64_t nonIdentityInterMatrixRotations{0};
     uint64_t independentRowBootstrapCount{0};
     uint32_t logicalBigSwitchFamilyCount{3};  // K1, K2, K3
     uint32_t logicalSmallSwitchFamilyCount{1};
-    bool wBatchedValueExecutionImplemented{false};
+    bool boundedPlaintextCodecImplemented{false};
+    bool wBatchedCiphertextExecutionImplemented{false};
     bool securityAuthorized{false};
     bool aggregateSerializationImplemented{false};
     bool integerBootstrapImplemented{false};
@@ -156,6 +163,133 @@ struct GLIntWBatchedCensus {
 
 /** Validate parameters and derive the fixed-size Section-4 coverage receipt. */
 GLIntWBatchedCensus MakeGLIntWBatchedCensus(const GLIntWBatchedParameters& parameters);
+
+/** Typed branch selector for the two Section-4 evaluation families. */
+enum class GLIntBranch : uint8_t {
+    Plus,
+    Minus,
+};
+
+/** One coefficient a+bI in Z_t[I]/(I^2+1), stored canonically in [0,t). */
+struct GLIntGaussianResidue {
+    int64_t real{0};
+    int64_t imaginary{0};
+
+    bool operator==(const GLIntGaussianResidue& other) const noexcept {
+        return real == other.real && imaginary == other.imaginary;
+    }
+};
+
+static_assert(sizeof(GLIntGaussianResidue) == 2 * sizeof(int64_t),
+              "the W-batched allocation census assumes two packed int64 residues");
+
+/**
+ * Roots binding one exact finite-field codec instance.  zeta has order 4n
+ * and eta has order p.  The default conformance roots are zeta=8, eta=35
+ * for n=4,p=3,t=97; alternate valid roots are allowed but encoded artifacts
+ * remain bound to the exact pair that produced them.
+ */
+struct GLIntWBatchedCodecRoots {
+    uint64_t zeta{8};
+    uint64_t eta{35};
+
+    static GLIntWBatchedCodecRoots Pinned(const GLIntWBatchedParameters& parameters);
+    void Validate(const GLIntWBatchedParameters& parameters) const;
+    bool operator==(const GLIntWBatchedCodecRoots& other) const noexcept;
+    bool operator!=(const GLIntWBatchedCodecRoots& other) const noexcept;
+};
+
+/**
+ * Exact p>1 integer matrices for the bounded n=4,p=3,t=97 conformance codec.
+ * Each branch contains phi(p) row-major n*n matrices.  This class deliberately
+ * rejects production geometry before allocating or transforming any payload.
+ */
+class GLIntWBatchedPlaintext final {
+public:
+    GLIntWBatchedPlaintext(GLIntWBatchedParameters parameters, std::vector<int64_t> plusValues,
+                           std::vector<int64_t> minusValues);
+
+    const GLIntWBatchedParameters& GetParameters() const noexcept;
+    const std::vector<int64_t>& GetValues(GLIntBranch branch) const noexcept;
+    int64_t At(GLIntBranch branch, std::size_t matrix, std::size_t row,
+               std::size_t column) const;
+    void Validate() const;
+
+private:
+    GLIntWBatchedParameters m_parameters;
+    std::vector<int64_t> m_plusValues;
+    std::vector<int64_t> m_minusValues;
+};
+
+/**
+ * Exact coefficient form in
+ * Z_t[I,X,Y,W]/(I^2+1,X^n-I,Y^n-I,Phi_p(W)).  Coefficient index order is
+ * ((x*n+y)*phi+w), with one typed Gaussian residue per monomial.
+ */
+class GLIntWBatchedEncodedPlaintext final {
+public:
+    GLIntWBatchedEncodedPlaintext(GLIntWBatchedParameters parameters,
+                                  GLIntWBatchedCodecRoots roots,
+                                  std::vector<GLIntGaussianResidue> coefficients);
+
+    const GLIntWBatchedParameters& GetParameters() const noexcept;
+    const GLIntWBatchedCodecRoots& GetRoots() const noexcept;
+    const std::vector<GLIntGaussianResidue>& GetCoefficients() const noexcept;
+    const GLIntGaussianResidue& At(std::size_t x, std::size_t y, std::size_t w) const;
+    void Validate() const;
+
+private:
+    GLIntWBatchedParameters m_parameters;
+    GLIntWBatchedCodecRoots m_roots;
+    std::vector<GLIntGaussianResidue> m_coefficients;
+};
+
+/**
+ * Genuine Section-4 plaintext codec for the first p>1 conformance geometry.
+ *
+ * Encode/Decode implement Eq. (5) exactly over Z_97.  The + lane evaluates
+ * (I,zeta_j,zeta_k,eta_l); the - lane evaluates
+ * (-I,zeta_j^-1,zeta_k^-1,eta_l^-1).  ApplyWAutomorphism performs the actual
+ * coefficient substitution W -> W^(gamma^nu) modulo Phi_p(W), while
+ * RotateInterMatrix is its direct clear-matrix oracle.  No ciphertext,
+ * security, serialization, or bootstrap claim is attached to this class.
+ */
+class GLIntWBatchedPlaintextCodec final {
+public:
+    explicit GLIntWBatchedPlaintextCodec(GLIntWBatchedParameters parameters);
+    GLIntWBatchedPlaintextCodec(GLIntWBatchedParameters parameters,
+                                GLIntWBatchedCodecRoots roots);
+
+    const GLIntWBatchedParameters& GetParameters() const noexcept;
+    const GLIntWBatchedCodecRoots& GetRoots() const noexcept;
+    uint64_t GetGaussianUnit() const noexcept;
+
+    GLIntWBatchedEncodedPlaintext Encode(const GLIntWBatchedPlaintext& plaintext) const;
+    GLIntWBatchedPlaintext Decode(const GLIntWBatchedEncodedPlaintext& plaintext) const;
+    GLIntWBatchedPlaintext RotateInterMatrix(const GLIntWBatchedPlaintext& plaintext,
+                                             std::size_t amount) const;
+    GLIntWBatchedEncodedPlaintext ApplyWAutomorphism(
+        const GLIntWBatchedEncodedPlaintext& plaintext, std::size_t amount) const;
+
+private:
+    void ValidatePlaintext(const GLIntWBatchedPlaintext& plaintext, const char* objectName) const;
+    void ValidateEncoded(const GLIntWBatchedEncodedPlaintext& plaintext,
+                         const char* objectName) const;
+
+    GLIntWBatchedParameters m_parameters;
+    GLIntWBatchedCodecRoots m_roots;
+    uint64_t m_gaussianUnit{0};
+    uint64_t m_inverseGaussianUnit{0};
+    uint64_t m_inverseTwo{0};
+    std::array<uint64_t, 16> m_xPlusEval{};
+    std::array<uint64_t, 16> m_xMinusEval{};
+    std::array<uint64_t, 16> m_xPlusInv{};
+    std::array<uint64_t, 16> m_xMinusInv{};
+    std::array<uint64_t, 4> m_wPlusEval{};
+    std::array<uint64_t, 4> m_wMinusEval{};
+    std::array<uint64_t, 4> m_wPlusInv{};
+    std::array<uint64_t, 4> m_wMinusInv{};
+};
 
 /**
  * Parameters of the W-free integer (BGV-like) GL mode.

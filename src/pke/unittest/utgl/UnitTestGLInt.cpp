@@ -16,9 +16,10 @@
 // cross-port contract matrices A/B); n=8 checks every operation against a
 // clear oracle recomputed in-test with plain integers.  Toy dims n=4/8 with
 // HEStd_NotSet remain conformance geometry, not a security claim.  The
-// separate fixed-size W-batched census validates production-sized Section-4
-// geometry without claiming a p>1 value path, security, serialization, or
-// integer bootstrapping.
+// fixed-size W-batched census validates production-sized Section-4 geometry;
+// a separate n=4,p=3,t=97 codec exercises genuine p>1 plaintext semantics
+// without claiming ciphertext execution, security, serialization, or integer
+// bootstrapping.
 
 #include "gtest/gtest.h"
 
@@ -36,6 +37,7 @@ namespace lbcrypto {
 namespace {
 
 constexpr int64_t kModulus = 257;
+constexpr int64_t kWBatchedModulus = 97;
 
 static_assert(!std::is_default_constructible_v<GLIntEvalKey>,
               "the GL integer key bundle cannot be publicly constructed without key material");
@@ -53,6 +55,99 @@ using IntMatrix = std::vector<int64_t>;
 
 int64_t Canonical(int64_t value, int64_t modulus = kModulus) {
     return ((value % modulus) + modulus) % modulus;
+}
+
+uint64_t TestPowMod(uint64_t base, uint64_t exponent, uint64_t modulus) {
+    uint64_t result = 1;
+    while (exponent > 0) {
+        if (exponent & 1) {
+            result = (result * base) % modulus;
+        }
+        base = (base * base) % modulus;
+        exponent >>= 1;
+    }
+    return result;
+}
+
+std::vector<int64_t> WBatchedPlusValues() {
+    std::vector<int64_t> values(2 * 4 * 4);
+    for (std::size_t ell = 0; ell < 2; ++ell) {
+        for (std::size_t row = 0; row < 4; ++row) {
+            for (std::size_t column = 0; column < 4; ++column) {
+                values[(ell * 4 + row) * 4 + column] = Canonical(
+                    1 + 17 * static_cast<int64_t>(ell) + 3 * static_cast<int64_t>(row) +
+                        5 * static_cast<int64_t>(column) +
+                        2 * static_cast<int64_t>(row * column),
+                    kWBatchedModulus);
+            }
+        }
+    }
+    return values;
+}
+
+std::vector<int64_t> WBatchedMinusValues() {
+    std::vector<int64_t> values(2 * 4 * 4);
+    for (std::size_t ell = 0; ell < 2; ++ell) {
+        for (std::size_t row = 0; row < 4; ++row) {
+            for (std::size_t column = 0; column < 4; ++column) {
+                values[(ell * 4 + row) * 4 + column] = Canonical(
+                    -3 + 19 * static_cast<int64_t>(ell) + 7 * static_cast<int64_t>(row) -
+                        4 * static_cast<int64_t>(column) +
+                        3 * static_cast<int64_t>(row * column),
+                    kWBatchedModulus);
+            }
+        }
+    }
+    return values;
+}
+
+uint64_t EvaluateWBatchedEquation5(const GLIntWBatchedEncodedPlaintext& encoded,
+                                   GLIntBranch branch, std::size_t ell, std::size_t row,
+                                   std::size_t column) {
+    constexpr uint64_t t = kWBatchedModulus;
+    const auto& roots    = encoded.GetRoots();
+    auto i               = TestPowMod(roots.zeta, 4, t);
+    auto x = TestPowMod(roots.zeta, TestPowMod(5, row, 16), t);
+    auto y = TestPowMod(roots.zeta, TestPowMod(5, column, 16), t);
+    auto w = TestPowMod(roots.eta, TestPowMod(2, ell, 3), t);
+    if (branch == GLIntBranch::Minus) {
+        i = t - i;
+        x = TestPowMod(x, t - 2, t);
+        y = TestPowMod(y, t - 2, t);
+        w = TestPowMod(w, t - 2, t);
+    }
+
+    uint64_t result = 0;
+    for (std::size_t xDegree = 0; xDegree < 4; ++xDegree) {
+        for (std::size_t yDegree = 0; yDegree < 4; ++yDegree) {
+            for (std::size_t wDegree = 0; wDegree < 2; ++wDegree) {
+                const auto& coefficient = encoded.At(xDegree, yDegree, wDegree);
+                auto gaussian =
+                    (static_cast<uint64_t>(coefficient.real) +
+                     i * static_cast<uint64_t>(coefficient.imaginary)) %
+                    t;
+                gaussian = gaussian * TestPowMod(x, xDegree, t) % t;
+                gaussian = gaussian * TestPowMod(y, yDegree, t) % t;
+                gaussian = gaussian * TestPowMod(w, wDegree, t) % t;
+                result   = (result + gaussian) % t;
+            }
+        }
+    }
+    return result;
+}
+
+uint64_t WBatchedCoefficientHash(const GLIntWBatchedEncodedPlaintext& encoded) {
+    uint64_t hash = 14695981039346656037ULL;
+    for (const auto& coefficient : encoded.GetCoefficients()) {
+        for (const auto value : {static_cast<uint64_t>(coefficient.real),
+                                 static_cast<uint64_t>(coefficient.imaginary)}) {
+            for (uint32_t shift = 0; shift < 64; shift += 8) {
+                hash ^= (value >> shift) & 0xff;
+                hash *= 1099511628211ULL;
+            }
+        }
+    }
+    return hash;
 }
 
 // ---------------------------------------------------------------------------
@@ -317,6 +412,9 @@ TEST(GLInt, WBatchedProductionParameterAndOperationCensus) {
     EXPECT_EQ(census.matrixCount, 512u);  // 2*phi(257), unlike CKKS's 256
     EXPECT_EQ(census.matrixCellCount, 16384u);
     EXPECT_EQ(census.aggregatePlaintextValueCount, 8388608u);
+    EXPECT_EQ(census.gaussianCoefficientCount, 4194304u);
+    EXPECT_EQ(census.encodedCoefficientStorageBytes, 67108864u);
+    EXPECT_EQ(census.decodedBranchPairStorageBytes, 67108864u);
     EXPECT_EQ(census.rowRingDimension * census.ciphertextRowCount,
               census.aggregatePlaintextValueCount);
     EXPECT_EQ(census.nonIdentityRowRotations, 127u);
@@ -329,7 +427,8 @@ TEST(GLInt, WBatchedProductionParameterAndOperationCensus) {
     // These gates are the point of the census: production-sized arithmetic
     // is not silently upgraded from a shape calculation to an execution or
     // security claim.
-    EXPECT_FALSE(census.wBatchedValueExecutionImplemented);
+    EXPECT_FALSE(census.boundedPlaintextCodecImplemented);
+    EXPECT_FALSE(census.wBatchedCiphertextExecutionImplemented);
     EXPECT_FALSE(census.securityAuthorized);
     EXPECT_FALSE(census.aggregateSerializationImplemented);
     EXPECT_FALSE(census.integerBootstrapImplemented);
@@ -337,7 +436,8 @@ TEST(GLInt, WBatchedProductionParameterAndOperationCensus) {
     ASSERT_EQ(census.operations.size(), kGLIntOperationCensusSize);
     for (std::size_t index = 0; index < census.operations.size(); ++index) {
         EXPECT_EQ(static_cast<std::size_t>(census.operations[index].operation), index);
-        EXPECT_FALSE(census.operations[index].wBatchedValuePathImplemented);
+        EXPECT_FALSE(census.operations[index].boundedPlaintextPathImplemented);
+        EXPECT_FALSE(census.operations[index].productionValuePathImplemented);
     }
     const auto& encode = census.operations[static_cast<std::size_t>(GLIntOperation::Encode)];
     EXPECT_EQ(encode.wFreeCoverage, GLIntWFreeCoverage::PublicValuePath);
@@ -382,6 +482,9 @@ TEST(GLInt, WBatchedParameterCensusValidationAndHistoricalShape) {
     EXPECT_EQ(historicalCensus.matrixCount, 32u);
     EXPECT_EQ(historicalCensus.matrixCellCount, 65536u);
     EXPECT_EQ(historicalCensus.aggregatePlaintextValueCount, 2097152u);
+    EXPECT_EQ(historicalCensus.gaussianCoefficientCount, 1048576u);
+    EXPECT_EQ(historicalCensus.encodedCoefficientStorageBytes, 16777216u);
+    EXPECT_EQ(historicalCensus.decodedBranchPairStorageBytes, 16777216u);
 
     auto bad = GLIntWBatchedParameters::GL128257N32(257);
     EXPECT_THROW(bad.Validate(), GLIntParameterError);  // t is not 1 mod 4np
@@ -402,6 +505,170 @@ TEST(GLInt, WBatchedParameterCensusValidationAndHistoricalShape) {
     bad = GLIntWBatchedParameters::GL128257N32();
     bad.nativeRnsWordBits = 31;
     EXPECT_THROW(bad.Validate(), GLIntParameterError);
+}
+
+TEST(GLInt, WBatchedN4P3ExactCodecEquation5AndRoundTrip) {
+    const auto parameters = GLIntWBatchedParameters::ConformanceN4P3T97();
+    ASSERT_NO_THROW(parameters.Validate());
+    EXPECT_TRUE(parameters.IsConformanceN4P3T97());
+    const auto census = MakeGLIntWBatchedCensus(parameters);
+    EXPECT_EQ(census.phi, 2u);
+    EXPECT_EQ(census.rootOrder, 48u);
+    EXPECT_EQ(census.rowRingDimension, 16u);
+    EXPECT_EQ(census.ciphertextRowCount, 4u);
+    EXPECT_EQ(census.matrixCount, 4u);
+    EXPECT_EQ(census.aggregatePlaintextValueCount, 64u);
+    EXPECT_EQ(census.gaussianCoefficientCount, 32u);
+    EXPECT_EQ(census.encodedCoefficientStorageBytes, 512u);
+    EXPECT_EQ(census.decodedBranchPairStorageBytes, 512u);
+    EXPECT_TRUE(census.boundedPlaintextCodecImplemented);
+    EXPECT_FALSE(census.wBatchedCiphertextExecutionImplemented);
+    EXPECT_TRUE(census.operations[static_cast<std::size_t>(GLIntOperation::Encode)]
+                    .boundedPlaintextPathImplemented);
+    EXPECT_TRUE(census.operations[static_cast<std::size_t>(GLIntOperation::Decode)]
+                    .boundedPlaintextPathImplemented);
+    EXPECT_TRUE(census.operations[static_cast<std::size_t>(GLIntOperation::InterMatrixRotate)]
+                    .boundedPlaintextPathImplemented);
+    for (const auto& operation : census.operations) {
+        EXPECT_FALSE(operation.productionValuePathImplemented);
+    }
+
+    const GLIntWBatchedPlaintextCodec codec(parameters);
+    EXPECT_EQ(codec.GetRoots().zeta, 8u);  // minimum primitive 16th root mod 97
+    EXPECT_EQ(codec.GetRoots().eta, 35u);  // minimum primitive 3rd root mod 97
+    EXPECT_EQ(codec.GetGaussianUnit(), 22u);
+    EXPECT_EQ(codec.GetGaussianUnit() * codec.GetGaussianUnit() % 97, 96u);
+
+    const auto plus  = WBatchedPlusValues();
+    const auto minus = WBatchedMinusValues();
+    const GLIntWBatchedPlaintext input(parameters, plus, minus);
+    const auto encoded = codec.Encode(input);
+    ASSERT_EQ(encoded.GetCoefficients().size(), 32u);
+
+    // Independent pinned coefficient vector: generated from a direct modular
+    // inverse of the complete Eq. (5) evaluation matrix, not this codec's
+    // separable inverse implementation.
+    EXPECT_EQ(WBatchedCoefficientHash(encoded), 0x94e06bf917efac9aULL);
+    EXPECT_EQ(encoded.At(0, 0, 0), (GLIntGaussianResidue{6, 49}));
+    EXPECT_EQ(encoded.At(0, 0, 1), (GLIntGaussianResidue{41, 37}));
+    EXPECT_EQ(encoded.At(0, 1, 0), (GLIntGaussianResidue{55, 9}));
+    EXPECT_EQ(encoded.At(3, 3, 0), (GLIntGaussianResidue{23, 54}));
+    EXPECT_EQ(encoded.At(3, 3, 1), (GLIntGaussianResidue{0, 0}));
+
+    // Evaluate the encoded Gaussian polynomial directly at every point from
+    // Eq. (5).  This prevents a mutually-inverse-but-wrong Encode/Decode pair
+    // from satisfying the test by construction.
+    for (const auto branch : {GLIntBranch::Plus, GLIntBranch::Minus}) {
+        for (std::size_t ell = 0; ell < 2; ++ell) {
+            for (std::size_t row = 0; row < 4; ++row) {
+                for (std::size_t column = 0; column < 4; ++column) {
+                    EXPECT_EQ(EvaluateWBatchedEquation5(encoded, branch, ell, row, column),
+                              static_cast<uint64_t>(input.At(branch, ell, row, column)));
+                }
+            }
+        }
+    }
+
+    const auto decoded = codec.Decode(encoded);
+    EXPECT_EQ(decoded.GetValues(GLIntBranch::Plus), plus);
+    EXPECT_EQ(decoded.GetValues(GLIntBranch::Minus), minus);
+
+    // Construction canonicalizes signed values exactly mod t on both sides.
+    auto signedPlus = plus;
+    auto signedMinus = minus;
+    signedPlus.front() = -1;
+    signedMinus.back() = 100;
+    const GLIntWBatchedPlaintext canonical(parameters, signedPlus, signedMinus);
+    EXPECT_EQ(canonical.At(GLIntBranch::Plus, 0, 0, 0), 96);
+    EXPECT_EQ(canonical.At(GLIntBranch::Minus, 1, 3, 3), 3);
+}
+
+TEST(GLInt, WBatchedN4P3WAutomorphismMatchesInterMatrixRotation) {
+    const auto parameters = GLIntWBatchedParameters::ConformanceN4P3T97();
+    const GLIntWBatchedPlaintextCodec codec(parameters);
+    const GLIntWBatchedPlaintext input(parameters, WBatchedPlusValues(), WBatchedMinusValues());
+    const auto encoded = codec.Encode(input);
+
+    const auto oracle = codec.RotateInterMatrix(input, 1);
+    for (const auto branch : {GLIntBranch::Plus, GLIntBranch::Minus}) {
+        for (std::size_t row = 0; row < 4; ++row) {
+            for (std::size_t column = 0; column < 4; ++column) {
+                EXPECT_EQ(oracle.At(branch, 0, row, column), input.At(branch, 1, row, column));
+                EXPECT_EQ(oracle.At(branch, 1, row, column), input.At(branch, 0, row, column));
+            }
+        }
+    }
+
+    // gamma=2 and p=3: W -> W^2, then W^2=-1-W modulo Phi_3(W).
+    const auto transformed = codec.ApplyWAutomorphism(encoded, 1);
+    for (std::size_t x = 0; x < 4; ++x) {
+        for (std::size_t y = 0; y < 4; ++y) {
+            const auto& c0 = encoded.At(x, y, 0);
+            const auto& c1 = encoded.At(x, y, 1);
+            EXPECT_EQ(transformed.At(x, y, 0).real, Canonical(c0.real - c1.real, 97));
+            EXPECT_EQ(transformed.At(x, y, 0).imaginary,
+                      Canonical(c0.imaginary - c1.imaginary, 97));
+            EXPECT_EQ(transformed.At(x, y, 1).real, Canonical(-c1.real, 97));
+            EXPECT_EQ(transformed.At(x, y, 1).imaginary, Canonical(-c1.imaginary, 97));
+        }
+    }
+    const auto decoded = codec.Decode(transformed);
+    EXPECT_EQ(decoded.GetValues(GLIntBranch::Plus), oracle.GetValues(GLIntBranch::Plus));
+    EXPECT_EQ(decoded.GetValues(GLIntBranch::Minus), oracle.GetValues(GLIntBranch::Minus));
+
+    const auto twice = codec.ApplyWAutomorphism(transformed, 1);
+    EXPECT_EQ(twice.GetCoefficients(), encoded.GetCoefficients());
+    EXPECT_EQ(codec.ApplyWAutomorphism(encoded, 0).GetCoefficients(), encoded.GetCoefficients());
+    EXPECT_EQ(codec.RotateInterMatrix(input, 0).GetValues(GLIntBranch::Plus),
+              input.GetValues(GLIntBranch::Plus));
+}
+
+TEST(GLInt, WBatchedN4P3CodecNegativesAndProductionAllocationGate) {
+    const auto parameters = GLIntWBatchedParameters::ConformanceN4P3T97();
+    const GLIntWBatchedPlaintextCodec codec(parameters);
+    const GLIntWBatchedPlaintext input(parameters, WBatchedPlusValues(), WBatchedMinusValues());
+    const auto encoded = codec.Encode(input);
+
+    auto badParameters = parameters;
+    badParameters.plaintextModulus = 89;
+    EXPECT_THROW((void)GLIntWBatchedPlaintextCodec(badParameters), GLIntParameterError);
+    badParameters.plaintextModulus = 193;  // valid t=1 mod48, outside bounded codec
+    ASSERT_NO_THROW(badParameters.Validate());
+    EXPECT_THROW((void)GLIntWBatchedPlaintextCodec(badParameters), GLIntParameterError);
+    badParameters = parameters;
+    badParameters.wGenerator = 1;
+    EXPECT_THROW((void)GLIntWBatchedPlaintextCodec(badParameters), GLIntParameterError);
+
+    EXPECT_THROW((void)GLIntWBatchedPlaintextCodec(parameters, GLIntWBatchedCodecRoots{1, 35}),
+                 GLIntParameterError);
+    EXPECT_THROW((void)GLIntWBatchedPlaintextCodec(parameters, GLIntWBatchedCodecRoots{8, 1}),
+                 GLIntParameterError);
+    const GLIntWBatchedPlaintextCodec alternateRoots(
+        parameters, GLIntWBatchedCodecRoots{85, 61});
+    EXPECT_THROW((void)alternateRoots.Decode(encoded), GLContextMismatchError);
+
+    EXPECT_THROW((void)GLIntWBatchedPlaintext(parameters, std::vector<int64_t>(31),
+                                              std::vector<int64_t>(32)),
+                 GLDimensionError);
+    EXPECT_THROW((void)GLIntWBatchedEncodedPlaintext(parameters, codec.GetRoots(),
+                                                     std::vector<GLIntGaussianResidue>(31)),
+                 GLDimensionError);
+    EXPECT_THROW((void)input.At(GLIntBranch::Plus, 2, 0, 0), GLDimensionError);
+    EXPECT_THROW((void)encoded.At(4, 0, 0), GLDimensionError);
+    EXPECT_THROW((void)codec.RotateInterMatrix(input, 2), GLDimensionError);
+    EXPECT_THROW((void)codec.ApplyWAutomorphism(encoded, 2), GLDimensionError);
+
+    auto depthTwo = GLIntWBatchedParameters::ConformanceN4P3T97(2);
+    const GLIntWBatchedPlaintext foreign(depthTwo, WBatchedPlusValues(), WBatchedMinusValues());
+    EXPECT_THROW((void)codec.Encode(foreign), GLContextMismatchError);
+
+    // Production geometry is admitted only by the allocation census.  The
+    // value codec fails before constructing transform tables or payloads.
+    const auto production = GLIntWBatchedParameters::GL128257N32();
+    const auto productionCensus = MakeGLIntWBatchedCensus(production);
+    EXPECT_EQ(productionCensus.gaussianCoefficientCount, 4194304u);
+    EXPECT_EQ(productionCensus.encodedCoefficientStorageBytes, 67108864u);
+    EXPECT_THROW((void)GLIntWBatchedPlaintextCodec(production), GLIntParameterError);
 }
 
 TEST(GLInt, ParameterSurfacePins) {

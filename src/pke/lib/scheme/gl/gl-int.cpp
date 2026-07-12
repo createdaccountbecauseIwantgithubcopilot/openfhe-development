@@ -110,6 +110,72 @@ bool IsGeneratorModPrime(uint64_t generator, uint64_t prime) {
     return remaining == 1 || PowModT(generator, order / remaining, prime) != 1;
 }
 
+bool HasExactMultiplicativeOrder(uint64_t value, uint64_t order, uint64_t modulus) {
+    if (value == 0 || value >= modulus || order == 0 || PowModT(value, order, modulus) != 1) {
+        return false;
+    }
+    auto remaining = order;
+    for (uint64_t factor = 2; factor * factor <= remaining; ++factor) {
+        if (remaining % factor != 0) {
+            continue;
+        }
+        if (PowModT(value, order / factor, modulus) == 1) {
+            return false;
+        }
+        do {
+            remaining /= factor;
+        } while (remaining % factor == 0);
+    }
+    return remaining == 1 || PowModT(value, order / remaining, modulus) != 1;
+}
+
+uint64_t MinimumElementOfOrder(uint64_t order, uint64_t modulus) {
+    for (uint64_t candidate = 2; candidate < modulus; ++candidate) {
+        if (HasExactMultiplicativeOrder(candidate, order, modulus)) {
+            return candidate;
+        }
+    }
+    return 0;
+}
+
+uint64_t AddModT(uint64_t lhs, uint64_t rhs, uint64_t modulus) {
+    return (lhs + rhs) % modulus;
+}
+
+uint64_t SubModT(uint64_t lhs, uint64_t rhs, uint64_t modulus) {
+    return lhs >= rhs ? lhs - rhs : modulus - (rhs - lhs);
+}
+
+uint64_t MulModT(uint64_t lhs, uint64_t rhs, uint64_t modulus) {
+    return (lhs * rhs) % modulus;
+}
+
+bool SameWBatchedParameters(const GLIntWBatchedParameters& lhs,
+                            const GLIntWBatchedParameters& rhs) {
+    return lhs.dimension == rhs.dimension && lhs.cyclotomicPrime == rhs.cyclotomicPrime &&
+           lhs.wGenerator == rhs.wGenerator && lhs.plaintextModulus == rhs.plaintextModulus &&
+           lhs.multiplicativeDepth == rhs.multiplicativeDepth &&
+           lhs.nativeRnsWordBits == rhs.nativeRnsWordBits;
+}
+
+void RequireConformanceWBatchedCodec(const GLIntWBatchedParameters& parameters) {
+    parameters.Validate();
+    if (!parameters.IsConformanceN4P3T97()) {
+        throw GLIntParameterError(
+            "GL integer W-batched value codec supports only n=4,p=3,gamma=2,t=97,N32");
+    }
+}
+
+std::size_t WBatchedValueIndex(std::size_t n, std::size_t matrix, std::size_t row,
+                               std::size_t column) {
+    return (matrix * n + row) * n + column;
+}
+
+std::size_t WBatchedCoefficientIndex(std::size_t n, std::size_t phi, std::size_t x,
+                                     std::size_t y, std::size_t w) {
+    return (x * n + y) * phi + w;
+}
+
 uint64_t CheckedMultiply(uint64_t lhs, uint64_t rhs, const char* quantity) {
     if (rhs != 0 && lhs > std::numeric_limits<uint64_t>::max() / rhs) {
         throw GLIntParameterError(std::string("GL integer W-batched ") + quantity + " overflows uint64");
@@ -121,7 +187,7 @@ GLIntOperationCensusEntry CensusEntry(GLIntOperation operation, GLIntWFreeCovera
                                       uint8_t consumedLevels, uint16_t keyRequirements,
                                       bool section4Required = true) {
     return GLIntOperationCensusEntry{operation, coverage, consumedLevels, keyRequirements,
-                                     section4Required, false};
+                                     section4Required, false, false};
 }
 
 std::array<GLIntOperationCensusEntry, kGLIntOperationCensusSize> WFreeOperationCensus() {
@@ -544,6 +610,18 @@ GLIntWBatchedParameters GLIntWBatchedParameters::GL128257N32(uint64_t plaintextM
     return parameters;
 }
 
+GLIntWBatchedParameters GLIntWBatchedParameters::ConformanceN4P3T97(
+    uint32_t multiplicativeDepth) {
+    GLIntWBatchedParameters parameters;
+    parameters.dimension           = 4;
+    parameters.cyclotomicPrime     = 3;
+    parameters.wGenerator          = 2;
+    parameters.plaintextModulus    = 97;
+    parameters.multiplicativeDepth = multiplicativeDepth;
+    parameters.nativeRnsWordBits   = 32;
+    return parameters;
+}
+
 void GLIntWBatchedParameters::Validate() const {
     if (!IsPowerOfTwoIntCensus(dimension)) {
         throw GLDimensionError("GL integer W-batched mode requires power-of-two n");
@@ -584,6 +662,11 @@ bool GLIntWBatchedParameters::IsGL128257N32Geometry() const noexcept {
            nativeRnsWordBits == 32;
 }
 
+bool GLIntWBatchedParameters::IsConformanceN4P3T97() const noexcept {
+    return dimension == 4 && cyclotomicPrime == 3 && wGenerator == 2 &&
+           plaintextModulus == 97 && nativeRnsWordBits == 32;
+}
+
 GLIntWBatchedCensus MakeGLIntWBatchedCensus(const GLIntWBatchedParameters& parameters) {
     parameters.Validate();
 
@@ -602,6 +685,14 @@ GLIntWBatchedCensus MakeGLIntWBatchedCensus(const GLIntWBatchedParameters& param
                                                 "n*n matrix cell count");
     census.aggregatePlaintextValueCount = CheckedMultiply(
         census.matrixCount, census.matrixCellCount, "aggregate plaintext value count");
+    census.gaussianCoefficientCount = CheckedMultiply(
+        census.matrixCellCount, census.phi, "Gaussian coefficient count");
+    census.encodedCoefficientStorageBytes = CheckedMultiply(
+        census.gaussianCoefficientCount, sizeof(GLIntGaussianResidue),
+        "encoded Gaussian coefficient storage bytes");
+    census.decodedBranchPairStorageBytes = CheckedMultiply(
+        census.aggregatePlaintextValueCount, sizeof(int64_t),
+        "decoded branch storage bytes");
     const auto rowRepresentationValueCount = CheckedMultiply(
         census.rowRingDimension, census.ciphertextRowCount,
         "row-representation plaintext value count");
@@ -615,7 +706,488 @@ GLIntWBatchedCensus MakeGLIntWBatchedCensus(const GLIntWBatchedParameters& param
     census.nonIdentityInterMatrixRotations = census.phi - 1;
     census.independentRowBootstrapCount   = parameters.dimension;
     census.operations                     = WFreeOperationCensus();
+    if (parameters.IsConformanceN4P3T97()) {
+        census.boundedPlaintextCodecImplemented = true;
+        census.operations[static_cast<std::size_t>(GLIntOperation::Encode)]
+            .boundedPlaintextPathImplemented = true;
+        census.operations[static_cast<std::size_t>(GLIntOperation::Decode)]
+            .boundedPlaintextPathImplemented = true;
+        census.operations[static_cast<std::size_t>(GLIntOperation::InterMatrixRotate)]
+            .boundedPlaintextPathImplemented = true;
+    }
     return census;
+}
+
+// ---------------------------------------------------------------------------
+// Exact n=4,p=3,t=97 W-batched plaintext codec
+// ---------------------------------------------------------------------------
+
+GLIntWBatchedCodecRoots GLIntWBatchedCodecRoots::Pinned(
+    const GLIntWBatchedParameters& parameters) {
+    RequireConformanceWBatchedCodec(parameters);
+    GLIntWBatchedCodecRoots roots;
+    roots.zeta = MinimumElementOfOrder(4 * parameters.dimension, parameters.plaintextModulus);
+    roots.eta  = MinimumElementOfOrder(parameters.cyclotomicPrime, parameters.plaintextModulus);
+    if (roots.zeta == 0 || roots.eta == 0) {
+        throw GLIntParameterError("GL integer W-batched codec could not find its pinned roots");
+    }
+    roots.Validate(parameters);
+    return roots;
+}
+
+void GLIntWBatchedCodecRoots::Validate(const GLIntWBatchedParameters& parameters) const {
+    parameters.Validate();
+    const auto t          = parameters.plaintextModulus;
+    const auto zetaOrder  = CheckedMultiply(4, parameters.dimension, "codec zeta order");
+    if (!HasExactMultiplicativeOrder(zeta, zetaOrder, t)) {
+        throw GLIntParameterError(
+            "GL integer W-batched codec zeta does not have exact order 4n mod t");
+    }
+    if (!HasExactMultiplicativeOrder(eta, parameters.cyclotomicPrime, t)) {
+        throw GLIntParameterError(
+            "GL integer W-batched codec eta does not have exact order p mod t");
+    }
+    const auto gaussianUnit = PowModT(zeta, parameters.dimension, t);
+    if (MulModT(gaussianUnit, gaussianUnit, t) != t - 1) {
+        throw GLIntParameterError(
+            "GL integer W-batched codec zeta^n does not square to -1 mod t");
+    }
+}
+
+bool GLIntWBatchedCodecRoots::operator==(const GLIntWBatchedCodecRoots& other) const noexcept {
+    return zeta == other.zeta && eta == other.eta;
+}
+
+bool GLIntWBatchedCodecRoots::operator!=(const GLIntWBatchedCodecRoots& other) const noexcept {
+    return !(*this == other);
+}
+
+GLIntWBatchedPlaintext::GLIntWBatchedPlaintext(GLIntWBatchedParameters parameters,
+                                               std::vector<int64_t> plusValues,
+                                               std::vector<int64_t> minusValues)
+    : m_parameters(std::move(parameters)),
+      m_plusValues(std::move(plusValues)),
+      m_minusValues(std::move(minusValues)) {
+    RequireConformanceWBatchedCodec(m_parameters);
+    const auto t = m_parameters.plaintextModulus;
+    for (auto& value : m_plusValues) {
+        value = CanonicalModT(value, t);
+    }
+    for (auto& value : m_minusValues) {
+        value = CanonicalModT(value, t);
+    }
+    Validate();
+}
+
+const GLIntWBatchedParameters& GLIntWBatchedPlaintext::GetParameters() const noexcept {
+    return m_parameters;
+}
+
+const std::vector<int64_t>& GLIntWBatchedPlaintext::GetValues(GLIntBranch branch) const noexcept {
+    return branch == GLIntBranch::Plus ? m_plusValues : m_minusValues;
+}
+
+int64_t GLIntWBatchedPlaintext::At(GLIntBranch branch, std::size_t matrix, std::size_t row,
+                                   std::size_t column) const {
+    const auto n   = static_cast<std::size_t>(m_parameters.dimension);
+    const auto phi = static_cast<std::size_t>(m_parameters.cyclotomicPrime - 1);
+    if (matrix >= phi || row >= n || column >= n) {
+        throw GLDimensionError("GL integer W-batched plaintext index is outside its matrix batch");
+    }
+    return GetValues(branch)[WBatchedValueIndex(n, matrix, row, column)];
+}
+
+void GLIntWBatchedPlaintext::Validate() const {
+    RequireConformanceWBatchedCodec(m_parameters);
+    const auto n        = static_cast<uint64_t>(m_parameters.dimension);
+    const auto phi      = static_cast<uint64_t>(m_parameters.cyclotomicPrime - 1);
+    const auto expected = CheckedMultiply(CheckedMultiply(n, n, "plaintext n*n cells"), phi,
+                                          "plaintext branch values");
+    if (m_plusValues.size() != expected || m_minusValues.size() != expected) {
+        throw GLDimensionError("GL integer W-batched plaintext requires phi(p)*n*n values per branch");
+    }
+    for (const auto* values : {&m_plusValues, &m_minusValues}) {
+        for (const auto value : *values) {
+            if (value < 0 || static_cast<uint64_t>(value) >= m_parameters.plaintextModulus) {
+                throw GLIntParameterError(
+                    "GL integer W-batched plaintext contains a noncanonical residue");
+            }
+        }
+    }
+}
+
+GLIntWBatchedEncodedPlaintext::GLIntWBatchedEncodedPlaintext(
+    GLIntWBatchedParameters parameters, GLIntWBatchedCodecRoots roots,
+    std::vector<GLIntGaussianResidue> coefficients)
+    : m_parameters(std::move(parameters)),
+      m_roots(std::move(roots)),
+      m_coefficients(std::move(coefficients)) {
+    RequireConformanceWBatchedCodec(m_parameters);
+    m_roots.Validate(m_parameters);
+    const auto t = m_parameters.plaintextModulus;
+    for (auto& coefficient : m_coefficients) {
+        coefficient.real      = CanonicalModT(coefficient.real, t);
+        coefficient.imaginary = CanonicalModT(coefficient.imaginary, t);
+    }
+    Validate();
+}
+
+const GLIntWBatchedParameters& GLIntWBatchedEncodedPlaintext::GetParameters() const noexcept {
+    return m_parameters;
+}
+
+const GLIntWBatchedCodecRoots& GLIntWBatchedEncodedPlaintext::GetRoots() const noexcept {
+    return m_roots;
+}
+
+const std::vector<GLIntGaussianResidue>&
+GLIntWBatchedEncodedPlaintext::GetCoefficients() const noexcept {
+    return m_coefficients;
+}
+
+const GLIntGaussianResidue& GLIntWBatchedEncodedPlaintext::At(std::size_t x, std::size_t y,
+                                                              std::size_t w) const {
+    const auto n   = static_cast<std::size_t>(m_parameters.dimension);
+    const auto phi = static_cast<std::size_t>(m_parameters.cyclotomicPrime - 1);
+    if (x >= n || y >= n || w >= phi) {
+        throw GLDimensionError("GL integer W-batched coefficient index is outside R'_t");
+    }
+    return m_coefficients[WBatchedCoefficientIndex(n, phi, x, y, w)];
+}
+
+void GLIntWBatchedEncodedPlaintext::Validate() const {
+    RequireConformanceWBatchedCodec(m_parameters);
+    m_roots.Validate(m_parameters);
+    const auto n        = static_cast<uint64_t>(m_parameters.dimension);
+    const auto phi      = static_cast<uint64_t>(m_parameters.cyclotomicPrime - 1);
+    const auto expected = CheckedMultiply(CheckedMultiply(n, n, "encoded n*n cells"), phi,
+                                          "encoded Gaussian coefficients");
+    if (m_coefficients.size() != expected) {
+        throw GLDimensionError(
+            "GL integer W-batched encoded plaintext requires n*n*phi(p) Gaussian coefficients");
+    }
+    for (const auto& coefficient : m_coefficients) {
+        if (coefficient.real < 0 || coefficient.imaginary < 0 ||
+            static_cast<uint64_t>(coefficient.real) >= m_parameters.plaintextModulus ||
+            static_cast<uint64_t>(coefficient.imaginary) >= m_parameters.plaintextModulus) {
+            throw GLIntParameterError(
+                "GL integer W-batched encoded plaintext contains a noncanonical residue");
+        }
+    }
+}
+
+GLIntWBatchedPlaintextCodec::GLIntWBatchedPlaintextCodec(GLIntWBatchedParameters parameters)
+    : GLIntWBatchedPlaintextCodec(parameters, GLIntWBatchedCodecRoots::Pinned(parameters)) {}
+
+GLIntWBatchedPlaintextCodec::GLIntWBatchedPlaintextCodec(GLIntWBatchedParameters parameters,
+                                                         GLIntWBatchedCodecRoots roots)
+    : m_parameters(std::move(parameters)), m_roots(std::move(roots)) {
+    RequireConformanceWBatchedCodec(m_parameters);
+    m_roots.Validate(m_parameters);
+
+    const auto n     = static_cast<std::size_t>(m_parameters.dimension);
+    const auto phi   = static_cast<std::size_t>(m_parameters.cyclotomicPrime - 1);
+    const auto t     = m_parameters.plaintextModulus;
+    const auto order = static_cast<uint64_t>(4 * n);
+    const auto invN  = PowModT(n, t - 2, t);
+    const auto invP  = PowModT(m_parameters.cyclotomicPrime, t - 2, t);
+
+    m_gaussianUnit        = PowModT(m_roots.zeta, n, t);
+    m_inverseGaussianUnit = PowModT(m_gaussianUnit, t - 2, t);
+    m_inverseTwo          = PowModT(2, t - 2, t);
+
+    uint64_t exponent = 1;
+    for (std::size_t j = 0; j < n; ++j) {
+        const auto point        = PowModT(m_roots.zeta, exponent, t);
+        const auto inversePoint = PowModT(point, t - 2, t);
+        for (std::size_t x = 0; x < n; ++x) {
+            m_xPlusEval[j * n + x]  = PowModT(point, x, t);
+            m_xMinusEval[j * n + x] = PowModT(inversePoint, x, t);
+            m_xPlusInv[x * n + j] = MulModT(invN, PowModT(inversePoint, x, t), t);
+            m_xMinusInv[x * n + j] = MulModT(invN, PowModT(point, x, t), t);
+        }
+        exponent = (exponent * 5) % order;
+    }
+
+    exponent = 1;
+    for (std::size_t ell = 0; ell < phi; ++ell) {
+        const auto plusBase  = PowModT(m_roots.eta, exponent, t);
+        const auto minusBase = PowModT(plusBase, t - 2, t);
+        for (std::size_t w = 0; w < phi; ++w) {
+            m_wPlusEval[ell * phi + w]  = PowModT(plusBase, w, t);
+            m_wMinusEval[ell * phi + w] = PowModT(minusBase, w, t);
+            // Same exact inverse used by the core RNS W-axis plan:
+            // F^-1[w,l] = p^-1(eta_l^-w - eta_l).  The minus lane simply
+            // replaces eta with eta^-1, exactly as Eq. (5) requires.
+            const auto plusInversePower  = PowModT(plusBase, (t - 1 - w) % (t - 1), t);
+            const auto minusInversePower = PowModT(minusBase, (t - 1 - w) % (t - 1), t);
+            m_wPlusInv[w * phi + ell] =
+                MulModT(invP, SubModT(plusInversePower, plusBase, t), t);
+            m_wMinusInv[w * phi + ell] =
+                MulModT(invP, SubModT(minusInversePower, minusBase, t), t);
+        }
+        exponent = (exponent * m_parameters.wGenerator) % m_parameters.cyclotomicPrime;
+    }
+}
+
+const GLIntWBatchedParameters& GLIntWBatchedPlaintextCodec::GetParameters() const noexcept {
+    return m_parameters;
+}
+
+const GLIntWBatchedCodecRoots& GLIntWBatchedPlaintextCodec::GetRoots() const noexcept {
+    return m_roots;
+}
+
+uint64_t GLIntWBatchedPlaintextCodec::GetGaussianUnit() const noexcept {
+    return m_gaussianUnit;
+}
+
+void GLIntWBatchedPlaintextCodec::ValidatePlaintext(const GLIntWBatchedPlaintext& plaintext,
+                                                    const char* objectName) const {
+    plaintext.Validate();
+    if (!SameWBatchedParameters(m_parameters, plaintext.GetParameters())) {
+        throw GLContextMismatchError(std::string(objectName) + " parameters do not match the codec");
+    }
+}
+
+void GLIntWBatchedPlaintextCodec::ValidateEncoded(
+    const GLIntWBatchedEncodedPlaintext& plaintext, const char* objectName) const {
+    plaintext.Validate();
+    if (!SameWBatchedParameters(m_parameters, plaintext.GetParameters())) {
+        throw GLContextMismatchError(std::string(objectName) + " parameters do not match the codec");
+    }
+    if (m_roots != plaintext.GetRoots()) {
+        throw GLContextMismatchError(std::string(objectName) + " roots do not match the codec");
+    }
+}
+
+GLIntWBatchedEncodedPlaintext GLIntWBatchedPlaintextCodec::Encode(
+    const GLIntWBatchedPlaintext& plaintext) const {
+    ValidatePlaintext(plaintext, "GL integer W-batched plaintext");
+    const auto n   = static_cast<std::size_t>(m_parameters.dimension);
+    const auto phi = static_cast<std::size_t>(m_parameters.cyclotomicPrime - 1);
+    const auto t   = m_parameters.plaintextModulus;
+    const auto coefficientCount = n * n * phi;
+
+    const auto inverseBranch = [&](const std::vector<int64_t>& values,
+                                   const std::array<uint64_t, 16>& xInverse,
+                                   const std::array<uint64_t, 4>& wInverse) {
+        // Reuse the complex codec's separable inverse order W -> Y -> X;
+        // every multiply/add here is exact in Z_t rather than approximate.
+        std::vector<uint64_t> afterW(coefficientCount, 0);
+        std::vector<uint64_t> afterY(coefficientCount, 0);
+        std::vector<uint64_t> coefficients(coefficientCount, 0);
+        for (std::size_t row = 0; row < n; ++row) {
+            for (std::size_t column = 0; column < n; ++column) {
+                for (std::size_t w = 0; w < phi; ++w) {
+                    uint64_t sum = 0;
+                    for (std::size_t ell = 0; ell < phi; ++ell) {
+                        const auto value = static_cast<uint64_t>(
+                            values[WBatchedValueIndex(n, ell, row, column)]);
+                        sum = AddModT(sum, MulModT(wInverse[w * phi + ell], value, t), t);
+                    }
+                    afterW[WBatchedCoefficientIndex(n, phi, row, column, w)] = sum;
+                }
+            }
+        }
+        for (std::size_t row = 0; row < n; ++row) {
+            for (std::size_t y = 0; y < n; ++y) {
+                for (std::size_t w = 0; w < phi; ++w) {
+                    uint64_t sum = 0;
+                    for (std::size_t column = 0; column < n; ++column) {
+                        sum = AddModT(
+                            sum,
+                            MulModT(xInverse[y * n + column],
+                                    afterW[WBatchedCoefficientIndex(n, phi, row, column, w)], t),
+                            t);
+                    }
+                    afterY[WBatchedCoefficientIndex(n, phi, row, y, w)] = sum;
+                }
+            }
+        }
+        for (std::size_t x = 0; x < n; ++x) {
+            for (std::size_t y = 0; y < n; ++y) {
+                for (std::size_t w = 0; w < phi; ++w) {
+                    uint64_t sum = 0;
+                    for (std::size_t row = 0; row < n; ++row) {
+                        sum = AddModT(
+                            sum,
+                            MulModT(xInverse[x * n + row],
+                                    afterY[WBatchedCoefficientIndex(n, phi, row, y, w)], t),
+                            t);
+                    }
+                    coefficients[WBatchedCoefficientIndex(n, phi, x, y, w)] = sum;
+                }
+            }
+        }
+        return coefficients;
+    };
+
+    const auto plus = inverseBranch(plaintext.GetValues(GLIntBranch::Plus), m_xPlusInv,
+                                    m_wPlusInv);
+    const auto minus = inverseBranch(plaintext.GetValues(GLIntBranch::Minus), m_xMinusInv,
+                                     m_wMinusInv);
+    std::vector<GLIntGaussianResidue> coefficients(coefficientCount);
+    for (std::size_t index = 0; index < coefficientCount; ++index) {
+        const auto real = MulModT(AddModT(plus[index], minus[index], t), m_inverseTwo, t);
+        const auto difference = SubModT(plus[index], minus[index], t);
+        const auto imaginary =
+            MulModT(MulModT(difference, m_inverseTwo, t), m_inverseGaussianUnit, t);
+        coefficients[index] =
+            GLIntGaussianResidue{static_cast<int64_t>(real), static_cast<int64_t>(imaginary)};
+    }
+    return GLIntWBatchedEncodedPlaintext(m_parameters, m_roots, std::move(coefficients));
+}
+
+GLIntWBatchedPlaintext GLIntWBatchedPlaintextCodec::Decode(
+    const GLIntWBatchedEncodedPlaintext& plaintext) const {
+    ValidateEncoded(plaintext, "GL integer W-batched encoded plaintext");
+    const auto n   = static_cast<std::size_t>(m_parameters.dimension);
+    const auto phi = static_cast<std::size_t>(m_parameters.cyclotomicPrime - 1);
+    const auto t   = m_parameters.plaintextModulus;
+    const auto coefficientCount = n * n * phi;
+
+    std::vector<uint64_t> plusCoefficients(coefficientCount);
+    std::vector<uint64_t> minusCoefficients(coefficientCount);
+    for (std::size_t index = 0; index < coefficientCount; ++index) {
+        const auto real = static_cast<uint64_t>(plaintext.GetCoefficients()[index].real);
+        const auto imaginary =
+            static_cast<uint64_t>(plaintext.GetCoefficients()[index].imaginary);
+        const auto iImaginary = MulModT(m_gaussianUnit, imaginary, t);
+        plusCoefficients[index]  = AddModT(real, iImaginary, t);
+        minusCoefficients[index] = SubModT(real, iImaginary, t);
+    }
+
+    const auto forwardBranch = [&](const std::vector<uint64_t>& coefficients,
+                                   const std::array<uint64_t, 16>& xEvaluation,
+                                   const std::array<uint64_t, 4>& wEvaluation) {
+        std::vector<uint64_t> afterX(coefficientCount, 0);
+        std::vector<uint64_t> afterY(coefficientCount, 0);
+        std::vector<int64_t> values(coefficientCount, 0);
+        for (std::size_t row = 0; row < n; ++row) {
+            for (std::size_t y = 0; y < n; ++y) {
+                for (std::size_t w = 0; w < phi; ++w) {
+                    uint64_t sum = 0;
+                    for (std::size_t x = 0; x < n; ++x) {
+                        sum = AddModT(
+                            sum,
+                            MulModT(xEvaluation[row * n + x],
+                                    coefficients[WBatchedCoefficientIndex(n, phi, x, y, w)], t),
+                            t);
+                    }
+                    afterX[WBatchedCoefficientIndex(n, phi, row, y, w)] = sum;
+                }
+            }
+        }
+        for (std::size_t row = 0; row < n; ++row) {
+            for (std::size_t column = 0; column < n; ++column) {
+                for (std::size_t w = 0; w < phi; ++w) {
+                    uint64_t sum = 0;
+                    for (std::size_t y = 0; y < n; ++y) {
+                        sum = AddModT(
+                            sum,
+                            MulModT(xEvaluation[column * n + y],
+                                    afterX[WBatchedCoefficientIndex(n, phi, row, y, w)], t),
+                            t);
+                    }
+                    afterY[WBatchedCoefficientIndex(n, phi, row, column, w)] = sum;
+                }
+            }
+        }
+        for (std::size_t ell = 0; ell < phi; ++ell) {
+            for (std::size_t row = 0; row < n; ++row) {
+                for (std::size_t column = 0; column < n; ++column) {
+                    uint64_t sum = 0;
+                    for (std::size_t w = 0; w < phi; ++w) {
+                        sum = AddModT(
+                            sum,
+                            MulModT(wEvaluation[ell * phi + w],
+                                    afterY[WBatchedCoefficientIndex(n, phi, row, column, w)], t),
+                            t);
+                    }
+                    values[WBatchedValueIndex(n, ell, row, column)] = static_cast<int64_t>(sum);
+                }
+            }
+        }
+        return values;
+    };
+
+    auto plus  = forwardBranch(plusCoefficients, m_xPlusEval, m_wPlusEval);
+    auto minus = forwardBranch(minusCoefficients, m_xMinusEval, m_wMinusEval);
+    return GLIntWBatchedPlaintext(m_parameters, std::move(plus), std::move(minus));
+}
+
+GLIntWBatchedPlaintext GLIntWBatchedPlaintextCodec::RotateInterMatrix(
+    const GLIntWBatchedPlaintext& plaintext, std::size_t amount) const {
+    ValidatePlaintext(plaintext, "GL integer W-batched plaintext");
+    const auto n   = static_cast<std::size_t>(m_parameters.dimension);
+    const auto phi = static_cast<std::size_t>(m_parameters.cyclotomicPrime - 1);
+    if (amount >= phi) {
+        throw GLDimensionError("GL integer W-batched inter-matrix rotation amount is out of range");
+    }
+    std::vector<int64_t> plus(phi * n * n);
+    std::vector<int64_t> minus(phi * n * n);
+    for (std::size_t ell = 0; ell < phi; ++ell) {
+        const auto source = (ell + amount) % phi;
+        for (std::size_t row = 0; row < n; ++row) {
+            for (std::size_t column = 0; column < n; ++column) {
+                plus[WBatchedValueIndex(n, ell, row, column)] =
+                    plaintext.At(GLIntBranch::Plus, source, row, column);
+                minus[WBatchedValueIndex(n, ell, row, column)] =
+                    plaintext.At(GLIntBranch::Minus, source, row, column);
+            }
+        }
+    }
+    return GLIntWBatchedPlaintext(m_parameters, std::move(plus), std::move(minus));
+}
+
+GLIntWBatchedEncodedPlaintext GLIntWBatchedPlaintextCodec::ApplyWAutomorphism(
+    const GLIntWBatchedEncodedPlaintext& plaintext, std::size_t amount) const {
+    ValidateEncoded(plaintext, "GL integer W-batched encoded plaintext");
+    const auto n   = static_cast<std::size_t>(m_parameters.dimension);
+    const auto p   = static_cast<std::size_t>(m_parameters.cyclotomicPrime);
+    const auto phi = p - 1;
+    const auto t   = m_parameters.plaintextModulus;
+    if (amount >= phi) {
+        throw GLDimensionError("GL integer W-batched W-automorphism amount is out of range");
+    }
+    const auto multiplier = PowModT(m_parameters.wGenerator, amount, p);
+    std::vector<GLIntGaussianResidue> output(n * n * phi);
+    const auto add = [t](GLIntGaussianResidue& destination,
+                         const GLIntGaussianResidue& source) {
+        destination.real = static_cast<int64_t>(AddModT(
+            static_cast<uint64_t>(destination.real), static_cast<uint64_t>(source.real), t));
+        destination.imaginary = static_cast<int64_t>(AddModT(
+            static_cast<uint64_t>(destination.imaginary),
+            static_cast<uint64_t>(source.imaginary), t));
+    };
+    const auto subtract = [t](GLIntGaussianResidue& destination,
+                              const GLIntGaussianResidue& source) {
+        destination.real = static_cast<int64_t>(SubModT(
+            static_cast<uint64_t>(destination.real), static_cast<uint64_t>(source.real), t));
+        destination.imaginary = static_cast<int64_t>(SubModT(
+            static_cast<uint64_t>(destination.imaginary),
+            static_cast<uint64_t>(source.imaginary), t));
+    };
+
+    for (std::size_t x = 0; x < n; ++x) {
+        for (std::size_t y = 0; y < n; ++y) {
+            for (std::size_t w = 0; w < phi; ++w) {
+                const auto& source = plaintext.At(x, y, w);
+                const auto exponent = (w * multiplier) % p;
+                if (exponent < phi) {
+                    add(output[WBatchedCoefficientIndex(n, phi, x, y, exponent)], source);
+                }
+                else {
+                    // W^(p-1) = -(1+W+...+W^(p-2)) modulo Phi_p(W).
+                    for (std::size_t target = 0; target < phi; ++target) {
+                        subtract(output[WBatchedCoefficientIndex(n, phi, x, y, target)], source);
+                    }
+                }
+            }
+        }
+    }
+    return GLIntWBatchedEncodedPlaintext(m_parameters, m_roots, std::move(output));
 }
 
 // ---------------------------------------------------------------------------
