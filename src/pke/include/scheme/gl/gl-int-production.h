@@ -17,6 +17,8 @@
 
 namespace lbcrypto {
 
+class GLIntProductionRLWECore;
+
 inline constexpr std::size_t kGLIntProductionMaxLogicalValues = 64;
 inline constexpr std::size_t kGLIntProductionMaxEncodedLogicalValues = 8;
 
@@ -70,6 +72,7 @@ public:
 
 private:
     friend class GLIntProductionCore;
+    friend class GLIntProductionRLWECore;
 
     GLIntProductionEncodedPlaintext(
         GLIntWBatchedParameters parameters, GLIntWBatchedCodecRoots roots,
