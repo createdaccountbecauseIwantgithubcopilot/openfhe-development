@@ -1077,6 +1077,441 @@ void RequireOrdinaryRefreshEvidenceMatchesAllYReceipt(
     }
 }
 
+bool DirectVectorPlanEquals(
+    const GLRProductionAdapter::NativeDirectVectorPlan& lhs,
+    const GLRProductionAdapter::NativeDirectVectorPlan& rhs) {
+    return lhs.n == rhs.n && lhs.p == rhs.p && lhs.phi == rhs.phi &&
+           lhs.hamming_weight == rhs.hamming_weight &&
+           lhs.selector_level == rhs.selector_level &&
+           lhs.active_q_primes == rhs.active_q_primes &&
+           lhs.logical_slots == rhs.logical_slots &&
+           lhs.unsigned_candidate_count == rhs.unsigned_candidate_count &&
+           lhs.max_unsigned_candidates_per_ordinal ==
+               rhs.max_unsigned_candidates_per_ordinal &&
+           lhs.signed_selector_count == rhs.signed_selector_count &&
+           lhs.bytes_per_selector_ciphertext ==
+               rhs.bytes_per_selector_ciphertext &&
+           lhs.exact_resident_selector_bytes ==
+               rhs.exact_resident_selector_bytes &&
+           lhs.streamed_peak_selector_bytes ==
+               rhs.streamed_peak_selector_bytes &&
+           lhs.bytes_per_compact_selector_record ==
+               rhs.bytes_per_compact_selector_record &&
+           lhs.exact_compact_selector_bytes ==
+               rhs.exact_compact_selector_bytes &&
+           lhs.bytes_per_encoded_compact_selector_record ==
+               rhs.bytes_per_encoded_compact_selector_record &&
+           lhs.exact_encoded_compact_selector_bytes ==
+               rhs.exact_encoded_compact_selector_bytes &&
+           lhs.compact_streamed_peak_selector_bytes ==
+               rhs.compact_streamed_peak_selector_bytes &&
+           lhs.compact_payload_reduction_bytes ==
+               rhs.compact_payload_reduction_bytes &&
+           lhs.plaintext_ciphertext_products ==
+               rhs.plaintext_ciphertext_products &&
+           lhs.tree_product_nodes == rhs.tree_product_nodes &&
+           lhs.multiplicative_depth == rhs.multiplicative_depth &&
+           lhs.rescale_stride == rhs.rescale_stride &&
+           lhs.physical_q_prime_drops == rhs.physical_q_prime_drops &&
+           lhs.output_level == rhs.output_level &&
+           lhs.q_depth_sufficient == rhs.q_depth_sufficient;
+}
+
+GLRProductionAdapter::DirectVectorAllYReturnPreflight
+MakeDirectVectorPrimaryAllYReturnPreflight(
+    const GLRProductionAdapter::Context& context) {
+    constexpr std::uint32_t kHammingWeight = 40;
+    constexpr std::uint32_t kSelectorLevel = 4;
+    const auto windows = glscheme::rns::glr_ship_make_windows(
+        128, 256, kHammingWeight, 0, 2, 2, 2);
+    const auto plan = glscheme::rns::glr_model_ship_direct_vector_plan(
+        context.params, kHammingWeight, kSelectorLevel, windows);
+    if (plan.n != 128 || plan.p != 257 || plan.phi != 256 ||
+        plan.hamming_weight != 40 || plan.selector_level != 4 ||
+        plan.active_q_primes != 21 || plan.logical_slots != 32768ULL ||
+        plan.unsigned_candidate_count != 320ULL ||
+        plan.signed_selector_count != 640ULL ||
+        plan.plaintext_ciphertext_products != 1280ULL ||
+        plan.tree_product_nodes != 78ULL ||
+        plan.multiplicative_depth != 7 || plan.rescale_stride != 2 ||
+        plan.physical_q_prime_drops != 14 || plan.output_level != 18 ||
+        !plan.q_depth_sufficient) {
+        throw GlrError(
+            "GLRProductionAdapter: native direct-vector h40 plan diverged "
+            "from the canonical L4/Q21 -> L18 ledger");
+    }
+
+    GLRProductionAdapter::DirectVectorAllYReturnPreflight out;
+    out.yRows = context.n();
+    out.selectorLevel = plan.selector_level;
+    out.activeSelectorQPrimes = plan.active_q_primes;
+    out.directOutputLevel = plan.output_level;
+    out.directMultiplicativeDepth = plan.multiplicative_depth;
+    out.rescaleStride = plan.rescale_stride;
+    out.physicalQPrimeDropsPerRow = plan.physical_q_prime_drops;
+    out.logicalXwSlotsPerRow = plan.logical_slots;
+    out.totalXwSlots = CheckedMul(out.yRows, plan.logical_slots,
+                                  "modeling direct-vector all-Y slots");
+    out.selectorCiphertextsVisited = CheckedMul(
+        out.yRows, plan.plaintext_ciphertext_products,
+        "modeling direct-vector selector visits");
+    out.selectorProviderLeases = out.selectorCiphertextsVisited;
+    out.plaintextCiphertextProducts = out.selectorCiphertextsVisited;
+    out.leafRescales = CheckedMul(
+        out.yRows, 2ULL * kHammingWeight,
+        "modeling direct-vector leaf rescales");
+    out.treeProductNodes = CheckedMul(
+        out.yRows, plan.tree_product_nodes,
+        "modeling direct-vector tree products");
+    out.treeRelinearizations = out.treeProductNodes;
+    // Two branches, six balanced tree frontiers per branch for h=40.
+    out.treeRelinearizationKeyProviderLeases = CheckedMul(
+        out.yRows, 12, "modeling direct-vector relin leases");
+    // h=40 has one carried node at each of the 5->3 and 3->2 frontiers,
+    // independently in both real/imaginary branches.
+    out.treeCarryLevelAlignments = CheckedMul(
+        out.yRows, 4, "modeling direct-vector carry alignments");
+    out.treeRescales = out.treeProductNodes;
+    out.conjugationKeySwitches = CheckedMul(
+        out.yRows, 2, "modeling direct-vector conjugations");
+    out.expectedMaxLiveYRows = 1;
+    out.representationScaleFactor =
+        CheckedMul(context.n(), context.phi(),
+                   "modeling direct-vector trace scale restoration");
+    out.packedInputLevel = 18;
+    out.transformMaterialLevel = 17;
+    out.transformKeyLevel = 18;
+    out.outputLevel = 22;
+    out.forwardPhysicalQPrimeDrops = 4;
+    out.expectedDftPlaintextVisits = 2;
+    out.strictYOrderRequired = true;
+    out.fullYCoverageRequired = true;
+    out.primaryRingRSlotRowsRequired = true;
+    out.slotToCoeffPerRowRequired = true;
+    out.traceRepresentationScaleRestored = true;
+    out.boundedRowPackBoundaryImplemented = true;
+    out.fullReturnBoundaryImplemented = true;
+    out.canonicalH40CiphertextValueExecutionPerformed = false;
+    out.canonicalH40DecryptedValueNoiseAcceptanceRecorded = false;
+    return out;
+}
+
+bool DirectVectorAllYReturnPreflightEquals(
+    const GLRProductionAdapter::DirectVectorAllYReturnPreflight& lhs,
+    const GLRProductionAdapter::DirectVectorAllYReturnPreflight& rhs) {
+    return lhs.yRows == rhs.yRows &&
+           lhs.selectorLevel == rhs.selectorLevel &&
+           lhs.activeSelectorQPrimes == rhs.activeSelectorQPrimes &&
+           lhs.directOutputLevel == rhs.directOutputLevel &&
+           lhs.directMultiplicativeDepth == rhs.directMultiplicativeDepth &&
+           lhs.rescaleStride == rhs.rescaleStride &&
+           lhs.physicalQPrimeDropsPerRow ==
+               rhs.physicalQPrimeDropsPerRow &&
+           lhs.logicalXwSlotsPerRow == rhs.logicalXwSlotsPerRow &&
+           lhs.totalXwSlots == rhs.totalXwSlots &&
+           lhs.selectorCiphertextsVisited ==
+               rhs.selectorCiphertextsVisited &&
+           lhs.selectorProviderLeases == rhs.selectorProviderLeases &&
+           lhs.plaintextCiphertextProducts ==
+               rhs.plaintextCiphertextProducts &&
+           lhs.leafRescales == rhs.leafRescales &&
+           lhs.treeProductNodes == rhs.treeProductNodes &&
+           lhs.treeRelinearizations == rhs.treeRelinearizations &&
+           lhs.treeRelinearizationKeyProviderLeases ==
+               rhs.treeRelinearizationKeyProviderLeases &&
+           lhs.treeCarryLevelAlignments ==
+               rhs.treeCarryLevelAlignments &&
+           lhs.treeRescales == rhs.treeRescales &&
+           lhs.conjugationKeySwitches == rhs.conjugationKeySwitches &&
+           lhs.expectedMaxLiveYRows == rhs.expectedMaxLiveYRows &&
+           lhs.representationScaleFactor == rhs.representationScaleFactor &&
+           lhs.packedInputLevel == rhs.packedInputLevel &&
+           lhs.transformMaterialLevel == rhs.transformMaterialLevel &&
+           lhs.transformKeyLevel == rhs.transformKeyLevel &&
+           lhs.outputLevel == rhs.outputLevel &&
+           lhs.forwardPhysicalQPrimeDrops ==
+               rhs.forwardPhysicalQPrimeDrops &&
+           lhs.expectedDftPlaintextVisits ==
+               rhs.expectedDftPlaintextVisits &&
+           lhs.strictYOrderRequired == rhs.strictYOrderRequired &&
+           lhs.fullYCoverageRequired == rhs.fullYCoverageRequired &&
+           lhs.primaryRingRSlotRowsRequired ==
+               rhs.primaryRingRSlotRowsRequired &&
+           lhs.slotToCoeffPerRowRequired == rhs.slotToCoeffPerRowRequired &&
+           lhs.traceRepresentationScaleRestored ==
+               rhs.traceRepresentationScaleRestored &&
+           lhs.boundedRowPackBoundaryImplemented ==
+               rhs.boundedRowPackBoundaryImplemented &&
+           lhs.fullReturnBoundaryImplemented ==
+               rhs.fullReturnBoundaryImplemented &&
+           lhs.canonicalH40CiphertextValueExecutionPerformed ==
+               rhs.canonicalH40CiphertextValueExecutionPerformed &&
+           lhs.canonicalH40DecryptedValueNoiseAcceptanceRecorded ==
+               rhs.canonicalH40DecryptedValueNoiseAcceptanceRecorded;
+}
+
+GLRProductionAdapter::DirectVectorPrimaryAuthorization
+MakeDirectVectorPrimaryAuthorization(
+    const GLRProductionAdapter::Context& context,
+    const std::string& supportCommitment,
+    const GLRProductionAdapter::SecurityReport& sparseReport,
+    const GLRProductionAdapter::NativeDirectVectorDensePrimarySecurityEvidence&
+        denseEvidence) {
+    constexpr std::uint32_t kHammingWeight = 40;
+    auto windows = glscheme::rns::glr_ship_make_windows(
+        128, 256, kHammingWeight, 0, 2, 2, 2);
+    const std::string expectedSupport =
+        glscheme::rns::glr_ship_support_commitment(128, 256, windows);
+    if (supportCommitment != expectedSupport) {
+        throw GlrError(
+            "GLRProductionAdapter: direct-vector authorization requires "
+            "the exact canonical practical h40 support commitment");
+    }
+    glscheme::rns::GlrShipDirectVectorProductionCandidateMetadata candidate;
+    candidate.hamming_weight = kHammingWeight;
+    candidate.sparse_public_input_level = context.params.levels() - 1;
+    candidate.sparse_public_input_active_q_primes = 1;
+    candidate.sparse_public_input_key_domain =
+        glscheme::rns::GlrShipDirectVectorCiphertextKeyDomain::sparse;
+    candidate.selector_level = 4;
+    candidate.selector_key_domain =
+        glscheme::rns::GlrShipDirectVectorCiphertextKeyDomain::primary;
+    candidate.relinearization_key = {
+        GlrKsDirection::primary_sq_to_primary, 0};
+    candidate.relinearization_first_frontier_level = 6;
+    candidate.conjugation_key = {
+        GlrKsDirection::conjugation_to_primary, 0};
+    candidate.conjugation_level = 18;
+    candidate.reserved_xw_forward_return_output_level = 22;
+    candidate.reserved_transform_material_level = 17;
+    candidate.windows = std::move(windows);
+    candidate.support_commitment = supportCommitment;
+
+    GLRProductionAdapter::DirectVectorPrimaryAuthorization out;
+    out.native =
+        glscheme::rns::glr_authorize_ship_direct_vector_gl128_primary_candidate(
+            context.params, candidate, sparseReport, denseEvidence);
+    out.allYReturn = MakeDirectVectorPrimaryAllYReturnPreflight(context);
+    out.metadataAuthorizationOnly = true;
+    out.productionH40CiphertextValueExecutionPerformed = false;
+    out.productionH40DecryptedValueNoiseAcceptanceRecorded = false;
+    return out;
+}
+
+bool DirectSparseSecurityEquals(
+    const glscheme::rns::GlrShipDirectVectorSparseH40SecurityEvidence& lhs,
+    const glscheme::rns::GlrShipDirectVectorSparseH40SecurityEvidence& rhs) {
+    return lhs.report_artifact == rhs.report_artifact &&
+           lhs.estimator_transcript_sha256 ==
+               rhs.estimator_transcript_sha256 &&
+           lhs.estimator_commit == rhs.estimator_commit &&
+           lhs.secret_distribution == rhs.secret_distribution &&
+           lhs.bootstrap_profile_fingerprint ==
+               rhs.bootstrap_profile_fingerprint &&
+           lhs.estimated_security_bits == rhs.estimated_security_bits &&
+           lhs.sparse_estimate_modulus_bits ==
+               rhs.sparse_estimate_modulus_bits &&
+           lhs.hamming_weight == rhs.hamming_weight &&
+           lhs.exposed_q_primes == rhs.exposed_q_primes &&
+           lhs.exposed_special_primes == rhs.exposed_special_primes;
+}
+
+bool DirectDenseSecurityEquals(
+    const GLRProductionAdapter::NativeDirectVectorDensePrimarySecurityEvidence&
+        lhs,
+    const GLRProductionAdapter::NativeDirectVectorDensePrimarySecurityEvidence&
+        rhs) {
+    return lhs.transcript_artifact == rhs.transcript_artifact &&
+           lhs.transcript_sha256 == rhs.transcript_sha256 &&
+           lhs.estimator_name == rhs.estimator_name &&
+           lhs.estimator_commit == rhs.estimator_commit &&
+           lhs.estimator_backend == rhs.estimator_backend &&
+           lhs.security_model == rhs.security_model &&
+           lhs.secret_distribution == rhs.secret_distribution &&
+           lhs.estimated_security_bits == rhs.estimated_security_bits &&
+           lhs.ring_dimension == rhs.ring_dimension &&
+           lhs.q_bits == rhs.q_bits && lhs.qp_bits == rhs.qp_bits;
+}
+
+void RequireDirectVectorPrimaryAuthorization(
+    const GLRProductionAdapter::DirectVectorPrimaryAuthorization& actual,
+    const GLRProductionAdapter::DirectVectorPrimaryAuthorization& expected) {
+    const auto& lhs = actual.native;
+    const auto& rhs = expected.native;
+    if (lhs.schema != rhs.schema ||
+        !DirectVectorPlanEquals(lhs.plan, rhs.plan) ||
+        !DirectSparseSecurityEquals(lhs.sparse_h40_security,
+                                    rhs.sparse_h40_security) ||
+        !DirectDenseSecurityEquals(lhs.dense_primary_security,
+                                   rhs.dense_primary_security) ||
+        lhs.parameter_fingerprint != rhs.parameter_fingerprint ||
+        lhs.support_commitment != rhs.support_commitment ||
+        lhs.sparse_public_input_q0 != rhs.sparse_public_input_q0 ||
+        lhs.sparse_public_input_level != rhs.sparse_public_input_level ||
+        lhs.sparse_public_input_active_q_primes !=
+            rhs.sparse_public_input_active_q_primes ||
+        lhs.sparse_public_input_key_domain !=
+            rhs.sparse_public_input_key_domain ||
+        lhs.selector_key_domain != rhs.selector_key_domain ||
+        lhs.relinearization_key != rhs.relinearization_key ||
+        lhs.relinearization_first_frontier_level !=
+            rhs.relinearization_first_frontier_level ||
+        lhs.conjugation_key != rhs.conjugation_key ||
+        lhs.conjugation_level != rhs.conjugation_level ||
+        lhs.reserved_xw_forward_return_output_level !=
+            rhs.reserved_xw_forward_return_output_level ||
+        lhs.reserved_transform_material_level !=
+            rhs.reserved_transform_material_level ||
+        lhs.production_candidate_metadata_authorized !=
+            rhs.production_candidate_metadata_authorized ||
+        lhs.sparse_h40_q7_p14_report_bound !=
+            rhs.sparse_h40_q7_p14_report_bound ||
+        lhs.dense_primary_full_qp_report_bound !=
+            rhs.dense_primary_full_qp_report_bound ||
+        lhs.q0_only_sparse_public_input !=
+            rhs.q0_only_sparse_public_input ||
+        lhs.primary_selector_ciphertexts !=
+            rhs.primary_selector_ciphertexts ||
+        lhs.primary_relinearization_key != rhs.primary_relinearization_key ||
+        lhs.primary_conjugation_key != rhs.primary_conjugation_key ||
+        lhs.direct_output_ring_r_slot_state !=
+            rhs.direct_output_ring_r_slot_state ||
+        lhs.xw_forward_return_composition_implemented !=
+            rhs.xw_forward_return_composition_implemented ||
+        lhs.y_coefficient_pack_implemented !=
+            rhs.y_coefficient_pack_implemented ||
+        lhs.context_ciphertext_or_key_allocation_required !=
+            rhs.context_ciphertext_or_key_allocation_required ||
+        lhs.selector_storage_admitted != rhs.selector_storage_admitted ||
+        lhs.selector_material_generated != rhs.selector_material_generated ||
+        lhs.value_execution != rhs.value_execution ||
+        !DirectVectorAllYReturnPreflightEquals(actual.allYReturn,
+                                               expected.allYReturn) ||
+        actual.metadataAuthorizationOnly != expected.metadataAuthorizationOnly ||
+        actual.productionH40CiphertextValueExecutionPerformed !=
+            expected.productionH40CiphertextValueExecutionPerformed ||
+        actual.productionH40DecryptedValueNoiseAcceptanceRecorded !=
+            expected.productionH40DecryptedValueNoiseAcceptanceRecorded) {
+        throw GlrError(
+            "GLRProductionAdapter: direct-vector authorization receipt is "
+            "forged, cross-report, or overstates canonical h40 execution");
+    }
+}
+
+double ExpectedDirectVectorH2OutputScale(
+    const GLRProductionAdapter::Context& context) {
+    double leafScale = context.params.delta * context.params.delta;
+    for (std::uint32_t step = 0; step < 2; ++step) {
+        leafScale /= static_cast<double>(
+            context.modulus_at(context.active_q_primes(4 + step) - 1).q);
+    }
+    double outputScale = leafScale * leafScale;
+    for (std::uint32_t step = 0; step < 2; ++step) {
+        outputScale /= static_cast<double>(
+            context.modulus_at(context.active_q_primes(6 + step) - 1).q);
+    }
+    return outputScale;
+}
+
+void RequireDirectVectorH2Evidence(
+    const GLRProductionAdapter::Context& context,
+    const GLRProductionAdapter::NativeDirectVectorEvidence& evidence) {
+    if (!evidence.insecure_toy_only || !evidence.evaluator_secret_free ||
+        !evidence.all_xw_coefficients_simultaneous ||
+        !evidence.simultaneous_x_i_wrap_w_phi_table_covered ||
+        !evidence.randomized_nonzero_a || evidence.logical_slots != 32768 ||
+        evidence.scalar_center_refreshes != 0 ||
+        evidence.selector_ciphertexts_visited != 8 ||
+        evidence.selector_provider_leases != 8 ||
+        evidence.selector_window_count != 2 ||
+        evidence.unsigned_selector_candidates != 2 ||
+        !evidence.selector_manifest_authenticated ||
+        !evidence.selector_provider_secret_free ||
+        evidence.plaintext_ciphertext_products != 8 ||
+        evidence.leaf_rescales != 4 || evidence.tree_product_nodes != 2 ||
+        evidence.tree_relinearizations != 2 ||
+        evidence.tree_relinearization_key_provider_leases != 2 ||
+        evidence.tree_carry_level_alignments != 0 ||
+        evidence.tree_rescales != 2 ||
+        evidence.conjugation_key_switches != 2 ||
+        evidence.multiplicative_depth != 2 || evidence.selector_level != 4 ||
+        evidence.rescale_stride != 2 ||
+        evidence.physical_q_prime_drops != 4 || evidence.output_level != 8 ||
+        evidence.output_scale != ExpectedDirectVectorH2OutputScale(context)) {
+        throw GlrError(
+            "GLRProductionAdapter: insecure h2 smoke evidence does not bind "
+            "the exact GL-128-257-N32 L4 -> L8 stride-2 stage");
+    }
+}
+
+GLRProductionAdapter::DirectVectorH2Stride2SmokeReceipt
+MakeDirectVectorH2Stride2SmokeReceipt(
+    const GLRProductionAdapter::Context& context,
+    const GLRProductionAdapter::NativeDirectVectorEvidence& evidence,
+    std::uint64_t ownerCheckedSlots, double worstOwnerSlotError,
+    double runtimeSeconds, std::uint64_t peakRssBytes,
+    std::uint32_t compactSelectorMaxLive,
+    std::uint32_t evaluationKeyMaxLive) {
+    constexpr double kErrorCap = 1.0e-6;
+    constexpr double kRuntimeCapSeconds = 120.0;
+    constexpr std::uint64_t kPeakRssCapBytes = UINT64_C(768) << 20;
+    RequireDirectVectorH2Evidence(context, evidence);
+    if (ownerCheckedSlots != 32768 ||
+        !std::isfinite(worstOwnerSlotError) || worstOwnerSlotError < 0.0 ||
+        worstOwnerSlotError >= kErrorCap || !std::isfinite(runtimeSeconds) ||
+        runtimeSeconds <= 0.0 || runtimeSeconds >= kRuntimeCapSeconds ||
+        peakRssBytes == 0 || peakRssBytes >= kPeakRssCapBytes ||
+        compactSelectorMaxLive != 1 || evaluationKeyMaxLive != 1) {
+        throw GlrError(
+            "GLRProductionAdapter: insecure h2 owner observation exceeds "
+            "the exact 32768-slot/error/runtime/RSS/max-live smoke bounds");
+    }
+
+    GLRProductionAdapter::DirectVectorH2Stride2SmokeReceipt out;
+    out.native = evidence;
+    out.ownerCheckedSlots = ownerCheckedSlots;
+    out.worstOwnerSlotError = worstOwnerSlotError;
+    out.runtimeSeconds = runtimeSeconds;
+    out.peakRssBytes = peakRssBytes;
+    out.compactSelectorMaxLive = compactSelectorMaxLive;
+    out.evaluationKeyMaxLive = evaluationKeyMaxLive;
+    out.targetGl128GeometryAndStrideBound = true;
+    out.ownerValueObservationBound = true;
+    out.explicitlyInsecure = true;
+    out.adapterExecutedSmoke = false;
+    out.productionH40AuthorizationAdmitted = false;
+    out.productionH40ValueExecutionClaimed = false;
+    out.productionH40ValueNoiseAcceptanceClaimed = false;
+    return out;
+}
+
+void RequireDirectVectorH2Stride2SmokeReceipt(
+    const GLRProductionAdapter::DirectVectorH2Stride2SmokeReceipt& actual,
+    const GLRProductionAdapter::DirectVectorH2Stride2SmokeReceipt& expected) {
+    if (actual.ownerCheckedSlots != expected.ownerCheckedSlots ||
+        actual.worstOwnerSlotError != expected.worstOwnerSlotError ||
+        actual.runtimeSeconds != expected.runtimeSeconds ||
+        actual.peakRssBytes != expected.peakRssBytes ||
+        actual.compactSelectorMaxLive != expected.compactSelectorMaxLive ||
+        actual.evaluationKeyMaxLive != expected.evaluationKeyMaxLive ||
+        actual.targetGl128GeometryAndStrideBound !=
+            expected.targetGl128GeometryAndStrideBound ||
+        actual.ownerValueObservationBound !=
+            expected.ownerValueObservationBound ||
+        actual.explicitlyInsecure != expected.explicitlyInsecure ||
+        actual.adapterExecutedSmoke != expected.adapterExecutedSmoke ||
+        actual.productionH40AuthorizationAdmitted !=
+            expected.productionH40AuthorizationAdmitted ||
+        actual.productionH40ValueExecutionClaimed !=
+            expected.productionH40ValueExecutionClaimed ||
+        actual.productionH40ValueNoiseAcceptanceClaimed !=
+            expected.productionH40ValueNoiseAcceptanceClaimed) {
+        throw GlrError(
+            "GLRProductionAdapter: insecure h2 smoke receipt is forged or "
+            "overstates production execution/security");
+    }
+}
+
 }  // namespace
 
 GLRProductionAdapter::OrdinaryRefreshPackSession::
@@ -1299,6 +1734,69 @@ const GLRProductionAdapter::Context& GLRProductionAdapter::GetContext() const no
 GLRProductionAdapter::OrdinaryRefreshPackFacade
 GLRProductionAdapter::ResumableOrdinaryRefreshPack() const noexcept {
     return OrdinaryRefreshPackFacade(m_context);
+}
+
+GLRProductionAdapter::DirectVectorAllYReturnPreflight
+GLRProductionAdapter::PreflightDirectVectorPrimaryAllYReturn() const {
+    return MakeDirectVectorPrimaryAllYReturnPreflight(m_context);
+}
+
+void GLRProductionAdapter::ValidateDirectVectorPrimaryAllYReturnPreflight(
+    const DirectVectorAllYReturnPreflight& preflight) const {
+    if (!DirectVectorAllYReturnPreflightEquals(
+            preflight, MakeDirectVectorPrimaryAllYReturnPreflight(m_context))) {
+        throw GlrError(
+            "GLRProductionAdapter: direct-vector all-Y return preflight is "
+            "forged or overstates canonical h40 execution/value acceptance");
+    }
+}
+
+GLRProductionAdapter::DirectVectorPrimaryAuthorization
+GLRProductionAdapter::AuthorizeDirectVectorPrimaryCandidate(
+    const std::string& supportCommitment,
+    const SecurityReport& sparseH40SecurityReport,
+    const NativeDirectVectorDensePrimarySecurityEvidence&
+        densePrimarySecurity) const {
+    return MakeDirectVectorPrimaryAuthorization(
+        m_context, supportCommitment, sparseH40SecurityReport,
+        densePrimarySecurity);
+}
+
+void GLRProductionAdapter::ValidateDirectVectorPrimaryAuthorization(
+    const DirectVectorPrimaryAuthorization& authorization,
+    const std::string& supportCommitment,
+    const SecurityReport& sparseH40SecurityReport,
+    const NativeDirectVectorDensePrimarySecurityEvidence&
+        densePrimarySecurity) const {
+    RequireDirectVectorPrimaryAuthorization(
+        authorization,
+        MakeDirectVectorPrimaryAuthorization(
+            m_context, supportCommitment, sparseH40SecurityReport,
+            densePrimarySecurity));
+}
+
+GLRProductionAdapter::DirectVectorH2Stride2SmokeReceipt
+GLRProductionAdapter::BindInsecureDirectVectorH2Stride2Smoke(
+    const NativeDirectVectorEvidence& evidence,
+    std::uint64_t ownerCheckedSlots, double worstOwnerSlotError,
+    double runtimeSeconds, std::uint64_t peakRssBytes,
+    std::uint32_t compactSelectorMaxLive,
+    std::uint32_t evaluationKeyMaxLive) const {
+    return MakeDirectVectorH2Stride2SmokeReceipt(
+        m_context, evidence, ownerCheckedSlots, worstOwnerSlotError,
+        runtimeSeconds, peakRssBytes, compactSelectorMaxLive,
+        evaluationKeyMaxLive);
+}
+
+void GLRProductionAdapter::ValidateInsecureDirectVectorH2Stride2SmokeReceipt(
+    const DirectVectorH2Stride2SmokeReceipt& receipt) const {
+    RequireDirectVectorH2Stride2SmokeReceipt(
+        receipt,
+        MakeDirectVectorH2Stride2SmokeReceipt(
+            m_context, receipt.native, receipt.ownerCheckedSlots,
+            receipt.worstOwnerSlotError, receipt.runtimeSeconds,
+            receipt.peakRssBytes, receipt.compactSelectorMaxLive,
+            receipt.evaluationKeyMaxLive));
 }
 
 GLRProductionAdapter::OrdinaryRefreshPreflight

@@ -15,6 +15,8 @@
 #include "glscheme/rns_public_key.hpp"
 #include "glscheme/rns_ship.hpp"
 #include "glscheme/rns_ship_compact_selector.hpp"
+#include "glscheme/rns_ship_direct_composition.hpp"
+#include "glscheme/rns_ship_direct_vector.hpp"
 #include "glscheme/rns_ship_gadget_provider.hpp"
 #include "glscheme/rns_w_algebra.hpp"
 
@@ -78,6 +80,95 @@ public:
         glscheme::rns::GlrShipRefreshOnlyPackCheckpointSource;
     using NativeRefreshPackCheckpointReceipt =
         glscheme::rns::GlrShipRefreshOnlyPackCheckpointReceipt;
+    using NativeDirectVectorPlan =
+        glscheme::rns::GlrShipDirectVectorPlan;
+    using NativeDirectVectorEvidence =
+        glscheme::rns::GlrShipDirectVectorEvidence;
+    using NativeDirectVectorDensePrimarySecurityEvidence =
+        glscheme::rns::GlrShipDirectVectorDensePrimarySecurityEvidence;
+    using NativeDirectVectorProductionAuthorizationEvidence =
+        glscheme::rns::GlrShipDirectVectorProductionAuthorizationEvidence;
+    using NativeDirectVectorAllYStcEvidence =
+        glscheme::rns::GlrShipDirectAllYStcEvidence;
+    using NativeDirectVectorFullReturnEvidence =
+        glscheme::rns::GlrShipDirectFullReturnEvidence;
+
+    // Allocation-free expected shape for composing 128 direct-vector Y rows
+    // into one bounded R' tensor and returning it through the genuine StC
+    // boundary.  These are requirements for a future canonical h40 run, not
+    // measured execution evidence.  The two explicit false flags prevent a
+    // preflight from being mistaken for value/noise acceptance.
+    struct DirectVectorAllYReturnPreflight {
+        std::uint32_t yRows = 0;
+        std::uint32_t selectorLevel = 0;
+        std::uint32_t activeSelectorQPrimes = 0;
+        std::uint32_t directOutputLevel = 0;
+        std::uint32_t directMultiplicativeDepth = 0;
+        std::uint32_t rescaleStride = 0;
+        std::uint32_t physicalQPrimeDropsPerRow = 0;
+        std::uint64_t logicalXwSlotsPerRow = 0;
+        std::uint64_t totalXwSlots = 0;
+        std::uint64_t selectorCiphertextsVisited = 0;
+        std::uint64_t selectorProviderLeases = 0;
+        std::uint64_t plaintextCiphertextProducts = 0;
+        std::uint64_t leafRescales = 0;
+        std::uint64_t treeProductNodes = 0;
+        std::uint64_t treeRelinearizations = 0;
+        std::uint64_t treeRelinearizationKeyProviderLeases = 0;
+        std::uint64_t treeCarryLevelAlignments = 0;
+        std::uint64_t treeRescales = 0;
+        std::uint64_t conjugationKeySwitches = 0;
+        std::uint32_t expectedMaxLiveYRows = 0;
+        std::uint64_t representationScaleFactor = 0;
+        std::uint32_t packedInputLevel = 0;
+        std::uint32_t transformMaterialLevel = 0;
+        std::uint32_t transformKeyLevel = 0;
+        std::uint32_t outputLevel = 0;
+        std::uint32_t forwardPhysicalQPrimeDrops = 0;
+        std::uint32_t expectedDftPlaintextVisits = 0;
+        bool strictYOrderRequired = false;
+        bool fullYCoverageRequired = false;
+        bool primaryRingRSlotRowsRequired = false;
+        bool slotToCoeffPerRowRequired = false;
+        bool traceRepresentationScaleRestored = false;
+        bool boundedRowPackBoundaryImplemented = false;
+        bool fullReturnBoundaryImplemented = false;
+        bool canonicalH40CiphertextValueExecutionPerformed = false;
+        bool canonicalH40DecryptedValueNoiseAcceptanceRecorded = false;
+    };
+
+    // OpenFHE-facing wrapper around GLScheme's dual-certificate L4/Q21
+    // primary-selector authorization.  The native authorization remains
+    // metadata-only; the all-Y member is an expected boundary shape and does
+    // not promote h40 into the still-disabled value evaluator.
+    struct DirectVectorPrimaryAuthorization {
+        NativeDirectVectorProductionAuthorizationEvidence native;
+        DirectVectorAllYReturnPreflight allYReturn;
+        bool metadataAuthorizationOnly = true;
+        bool productionH40CiphertextValueExecutionPerformed = false;
+        bool productionH40DecryptedValueNoiseAcceptanceRecorded = false;
+    };
+
+    // Receipt for the already-staged target-geometry h=2/stride-2 value rung.
+    // Owner observations are caller-supplied and threshold-checked; the
+    // adapter only binds them to the exact native counter/level evidence.  It
+    // deliberately cannot be converted into h40 security authorization.
+    struct DirectVectorH2Stride2SmokeReceipt {
+        NativeDirectVectorEvidence native;
+        std::uint64_t ownerCheckedSlots = 0;
+        double worstOwnerSlotError = 0.0;
+        double runtimeSeconds = 0.0;
+        std::uint64_t peakRssBytes = 0;
+        std::uint32_t compactSelectorMaxLive = 0;
+        std::uint32_t evaluationKeyMaxLive = 0;
+        bool targetGl128GeometryAndStrideBound = false;
+        bool ownerValueObservationBound = false;
+        bool explicitlyInsecure = true;
+        bool adapterExecutedSmoke = false;
+        bool productionH40AuthorizationAdmitted = false;
+        bool productionH40ValueExecutionClaimed = false;
+        bool productionH40ValueNoiseAcceptanceClaimed = false;
+    };
 
     // Fixed-capacity binding text keeps the refresh preflight itself free of
     // heap-owning strings while still carrying the exact canonical name and
@@ -439,6 +530,39 @@ public:
     const Context& GetContext() const noexcept;
 
     OrdinaryRefreshPackFacade ResumableOrdinaryRefreshPack() const noexcept;
+
+    // Canonical direct-vector planning and authorization boundaries.  The
+    // support commitment and both security certificates are caller supplied;
+    // the adapter authors the exact h40 windows/key domains/levels internally
+    // and delegates authorization to GLScheme.  Neither call allocates
+    // selector/key/ciphertext material or executes the h40 value path.
+    DirectVectorAllYReturnPreflight
+    PreflightDirectVectorPrimaryAllYReturn() const;
+    void ValidateDirectVectorPrimaryAllYReturnPreflight(
+        const DirectVectorAllYReturnPreflight& preflight) const;
+    DirectVectorPrimaryAuthorization AuthorizeDirectVectorPrimaryCandidate(
+        const std::string& supportCommitment,
+        const SecurityReport& sparseH40SecurityReport,
+        const NativeDirectVectorDensePrimarySecurityEvidence&
+            densePrimarySecurity) const;
+    void ValidateDirectVectorPrimaryAuthorization(
+        const DirectVectorPrimaryAuthorization& authorization,
+        const std::string& supportCommitment,
+        const SecurityReport& sparseH40SecurityReport,
+        const NativeDirectVectorDensePrimarySecurityEvidence&
+            densePrimarySecurity) const;
+
+    // Binds a completed owner-observed h=2 staging run to the exact
+    // GL-128-257-N32 L4 -> L8 direct-vector evidence.  This is intentionally
+    // insecure and never admits the separate h40 production candidate.
+    DirectVectorH2Stride2SmokeReceipt BindInsecureDirectVectorH2Stride2Smoke(
+        const NativeDirectVectorEvidence& evidence,
+        std::uint64_t ownerCheckedSlots, double worstOwnerSlotError,
+        double runtimeSeconds, std::uint64_t peakRssBytes,
+        std::uint32_t compactSelectorMaxLive,
+        std::uint32_t evaluationKeyMaxLive) const;
+    void ValidateInsecureDirectVectorH2Stride2SmokeReceipt(
+        const DirectVectorH2Stride2SmokeReceipt& receipt) const;
 
     // Calls GLScheme's allocation-free prime-p refresh census and binds it to
     // this adapter's exact GL-128-257-N32 context.  No key, ciphertext,
