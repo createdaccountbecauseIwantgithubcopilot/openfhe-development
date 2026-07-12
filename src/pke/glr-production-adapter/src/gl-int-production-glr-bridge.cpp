@@ -8,6 +8,8 @@
 
 #include "openfhe/pke/gl-int-production-glr-bridge.h"
 
+#include "utils/hashutil.h"
+
 #include <cmath>
 #include <limits>
 #include <string>
@@ -30,6 +32,7 @@ constexpr const char* kSecurityRejection =
     "production security rejected: the source uses a support-revealing Q2 "
     "ciphertext and sparse h<=4 Gaussian secret, not the admitted dense "
     "primary plus independently certified h40 bootstrap lineage";
+constexpr const char* kUntrustedIntegerKeyDomain = "integer-q2-untrusted";
 
 std::size_t CoefficientIndex(std::size_t n, std::size_t phi, std::size_t x,
                              std::size_t y, std::size_t w) noexcept {
@@ -75,11 +78,24 @@ bool IsSha256Text(const std::string& value) {
     return true;
 }
 
+std::string DomainSeparatedIntegerLineage(
+    const std::string& parameterFingerprint, const std::string& integerKeyTag,
+    const std::string& primaryLineageCommitment) {
+    const auto payload =
+        std::string("openfhe.gl_int.q2_untrusted_lineage.v1|") +
+        parameterFingerprint + '|' + integerKeyTag + '|' +
+        primaryLineageCommitment;
+    return "sha256:" + HashUtil::HashString(payload);
+}
+
 }  // namespace
 
 GLIntProductionGLRBridge::OwnerBinding::OwnerBinding(
-    NativeSecretKey secret, Receipt receipt)
-    : m_secret(std::move(secret)), m_receipt(std::move(receipt)) {}
+    NativeSecretKey secret, Receipt receipt,
+    std::string primaryLineageCommitment)
+    : m_secret(std::move(secret)),
+      m_receipt(std::move(receipt)),
+      m_primaryLineageCommitment(std::move(primaryLineageCommitment)) {}
 
 GLIntProductionGLRBridge::OwnerBinding::~OwnerBinding() {
     m_secret.secure_clear();
@@ -161,9 +177,18 @@ GLIntProductionGLRBridge::ImportOwnerSecret(
     }
     auto receipt = MakeReceipt("owner-secret-full-QP-coefficient");
     receipt.integerKeyTag = secretKey.GetKeyTag();
-    receipt.nativeKeyLineageCommitment =
+    const auto primaryLineageCommitment =
         glscheme::rns::glr_ship_direct_primary_secret_lineage_commitment(
             context, native);
+    if (!IsSha256Text(primaryLineageCommitment)) {
+        native.secure_clear();
+        throw GLKeyContextMismatchError(
+            "GL integer owner-secret bridge failed primary hash derivation");
+    }
+    native.key_id = kUntrustedIntegerKeyDomain;
+    receipt.nativeKeyLineageCommitment = DomainSeparatedIntegerLineage(
+        receipt.parameterFingerprint, receipt.integerKeyTag,
+        primaryLineageCommitment);
     receipt.ownerSecretLineageBound =
         IsSha256Text(receipt.nativeKeyLineageCommitment);
     if (!receipt.ownerSecretLineageBound) {
@@ -171,7 +196,8 @@ GLIntProductionGLRBridge::ImportOwnerSecret(
         throw GLKeyContextMismatchError(
             "GL integer owner-secret bridge failed native lineage derivation");
     }
-    return OwnerBinding(std::move(native), std::move(receipt));
+    return OwnerBinding(std::move(native), std::move(receipt),
+                        primaryLineageCommitment);
 }
 
 GLIntProductionGLRBridge::PlaintextImport
@@ -251,15 +277,15 @@ void GLIntProductionGLRBridge::ValidateOwner(
     const auto& receipt = owner.GetReceipt();
     const auto fingerprint = glscheme::rns::glr_parameter_fingerprint(
         m_adapter->GetContext().params);
-    const auto lineage =
-        glscheme::rns::glr_ship_direct_primary_secret_lineage_commitment(
-            m_adapter->GetContext(), owner.GetNativeSecretKey());
     const auto& nativeSecret = owner.GetNativeSecretKey();
+    const auto lineage = DomainSeparatedIntegerLineage(
+        fingerprint, receipt.integerKeyTag,
+        owner.m_primaryLineageCommitment);
     if (keyTag != receipt.integerKeyTag ||
         receipt.parameterFingerprint != fingerprint ||
         receipt.nativeKeyLineageCommitment != lineage ||
         !receipt.ownerSecretLineageBound || !IsSha256Text(lineage) ||
-        nativeSecret.key_id != "primary" ||
+        nativeSecret.key_id != kUntrustedIntegerKeyDomain ||
         nativeSecret.s.ring != GlrRing::R ||
         nativeSecret.s.domain != GlrDomain::Coeff ||
         nativeSecret.s.level != 0 || !nativeSecret.s.extended) {
@@ -315,7 +341,7 @@ GLIntProductionGLRBridge::ImportCoefficientCiphertext(
     result.native.scale =
         static_cast<double>(ciphertext.GetPlaintextScale());
     result.native.level = m_q2Level;
-    result.native.key_id = "primary";
+    result.native.key_id = kUntrustedIntegerKeyDomain;
     result.native.key_lineage_commitment =
         owner.GetReceipt().nativeKeyLineageCommitment;
     result.receipt = MakeReceipt("Q2-L23-Rp-coefficient-ciphertext");
@@ -360,7 +386,7 @@ GLIntProductionGLRBridge::ImportSlotCiphertext(
     result.native.scale =
         static_cast<double>(ciphertext.GetPlaintextScale());
     result.native.level = m_q2Level;
-    result.native.key_id = "primary";
+    result.native.key_id = kUntrustedIntegerKeyDomain;
     result.native.key_lineage_commitment =
         owner.GetReceipt().nativeKeyLineageCommitment;
     result.receipt = MakeReceipt("Q2-L23-Rp-slot-ciphertext");

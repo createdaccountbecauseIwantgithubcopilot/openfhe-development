@@ -62,10 +62,12 @@ public:
 
     private:
         friend class GLIntProductionGLRBridge;
-        OwnerBinding(NativeSecretKey secret, Receipt receipt);
+        OwnerBinding(NativeSecretKey secret, Receipt receipt,
+                     std::string primaryLineageCommitment);
 
         NativeSecretKey m_secret;
         Receipt m_receipt;
+        std::string m_primaryLineageCommitment;
     };
 
     struct PlaintextImport {
