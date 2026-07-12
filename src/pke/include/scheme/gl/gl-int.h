@@ -23,6 +23,7 @@
 
 #include "scheme/gl/gl-schemelet.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -37,6 +38,124 @@ class GLIntParameterError : public GLException {
 public:
     using GLException::GLException;
 };
+
+/**
+ * Section-4 operation names used by the allocation-free W-batched coverage
+ * census below.  This is deliberately metadata, not a second evaluator API.
+ */
+enum class GLIntOperation : uint8_t {
+    Encode,
+    Decode,
+    EncryptPublic,
+    EncryptSecret,
+    Decrypt,
+    ModSwitch,
+    Add,
+    Subtract,
+    Negate,
+    Hadamard,
+    RowRotate,
+    ColumnRotate,
+    InterMatrixRotate,
+    ConjugationSwap,
+    Transpose,
+    Adjoint,
+    CircledastPlain,
+    MatrixMultiplyPlain,
+    CircledastCipher,
+    MatrixMultiplyCipher,
+    BootstrapRows,
+    SerializeAggregate,
+};
+
+/** Exact status of the existing p=1 GLIntSchemelet implementation. */
+enum class GLIntWFreeCoverage : uint8_t {
+    Missing,
+    NotApplicable,
+    InternalOnly,
+    PublicValuePath,
+};
+
+/** Key families needed by an operation; values compose as a bit mask. */
+enum GLIntKeyRequirement : uint16_t {
+    GLIntKeyNone                = 0,
+    GLIntKeySmallRelinearize    = 1u << 0,
+    GLIntKeyBigConjugateK1      = 1u << 1,
+    GLIntKeyBigProductK2        = 1u << 2,
+    GLIntKeyBigTransposeK3      = 1u << 3,
+    GLIntKeyXYAutomorphism      = 1u << 4,
+    GLIntKeyWAutomorphism       = 1u << 5,
+    GLIntKeyBootstrap           = 1u << 6,
+};
+
+struct GLIntOperationCensusEntry {
+    GLIntOperation operation{GLIntOperation::Encode};
+    GLIntWFreeCoverage wFreeCoverage{GLIntWFreeCoverage::Missing};
+    uint8_t consumedLevels{0};
+    uint16_t keyRequirements{GLIntKeyNone};
+    bool section4Required{true};
+    bool wBatchedValuePathImplemented{false};
+};
+
+inline constexpr std::size_t kGLIntOperationCensusSize = 22;
+
+/**
+ * Algebraic parameter contract for the p>1, W-batched integer GL layout.
+ *
+ * This type exists so production-sized geometry can be validated and audited
+ * without constructing a CryptoContext or allocating any ring elements.  The
+ * plaintext modulus t is distinct from the W cyclotomic prime p and must obey
+ * t = 1 (mod 4np).  In particular, t=257 is NOT legal for n=128,p=257.
+ * `nativeRnsWordBits` records the requested execution width in the project
+ * profile name; it does not select or authorize a BGV modulus chain.
+ */
+struct GLIntWBatchedParameters {
+    uint32_t dimension{128};
+    uint32_t cyclotomicPrime{257};
+    uint32_t wGenerator{3};
+    uint64_t plaintextModulus{1579009};
+    uint32_t multiplicativeDepth{8};
+    uint32_t nativeRnsWordBits{32};
+
+    static GLIntWBatchedParameters GL128257N32(uint64_t plaintextModulus = 1579009,
+                                               uint32_t multiplicativeDepth = 8);
+    void Validate() const;
+    bool IsGL128257N32Geometry() const noexcept;
+};
+
+/**
+ * Fixed-size, trivially-copyable census for a validated W-batched profile.
+ *
+ * The derived dimensions are the exact Section-4 counts.  The four trailing
+ * flags are intentionally false in the current implementation: this receipt
+ * is not evidence of p>1 value execution, a security-authorized BGV chain,
+ * GL aggregate/key serialization, or integer bootstrapping.  `operations`
+ * records the implemented p=1 reference surface and the remaining p>1 gaps.
+ */
+struct GLIntWBatchedCensus {
+    GLIntWBatchedParameters parameters;
+    uint64_t phi{0};
+    uint64_t rootOrder{0};                         // 4*n*p
+    uint64_t rowRingDimension{0};                   // 2*n*phi(p)
+    uint64_t ciphertextRowCount{0};                 // n Y coefficients
+    uint64_t matrixCount{0};                        // 2*phi(p), (+) and (-)
+    uint64_t matrixCellCount{0};                    // n*n per matrix
+    uint64_t aggregatePlaintextValueCount{0};
+    uint64_t nonIdentityRowRotations{0};
+    uint64_t nonIdentityColumnRotations{0};
+    uint64_t nonIdentityInterMatrixRotations{0};
+    uint64_t independentRowBootstrapCount{0};
+    uint32_t logicalBigSwitchFamilyCount{3};  // K1, K2, K3
+    uint32_t logicalSmallSwitchFamilyCount{1};
+    bool wBatchedValueExecutionImplemented{false};
+    bool securityAuthorized{false};
+    bool aggregateSerializationImplemented{false};
+    bool integerBootstrapImplemented{false};
+    std::array<GLIntOperationCensusEntry, kGLIntOperationCensusSize> operations{};
+};
+
+/** Validate parameters and derive the fixed-size Section-4 coverage receipt. */
+GLIntWBatchedCensus MakeGLIntWBatchedCensus(const GLIntWBatchedParameters& parameters);
 
 /**
  * Parameters of the W-free integer (BGV-like) GL mode.

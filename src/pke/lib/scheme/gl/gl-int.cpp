@@ -18,6 +18,7 @@
 #include "scheme/gl/gl-int.h"
 
 #include <algorithm>
+#include <limits>
 #include <sstream>
 #include <utility>
 
@@ -83,6 +84,81 @@ bool IsSmallPrime(uint64_t value) {
         }
     }
     return true;
+}
+
+bool IsPowerOfTwoIntCensus(uint64_t value) {
+    return value != 0 && (value & (value - 1)) == 0;
+}
+
+bool IsGeneratorModPrime(uint64_t generator, uint64_t prime) {
+    if (generator < 2 || generator >= prime || !IsSmallPrime(prime)) {
+        return false;
+    }
+    const auto order = prime - 1;
+    auto remaining   = order;
+    for (uint64_t factor = 2; factor * factor <= remaining; ++factor) {
+        if (remaining % factor != 0) {
+            continue;
+        }
+        if (PowModT(generator, order / factor, prime) == 1) {
+            return false;
+        }
+        do {
+            remaining /= factor;
+        } while (remaining % factor == 0);
+    }
+    return remaining == 1 || PowModT(generator, order / remaining, prime) != 1;
+}
+
+uint64_t CheckedMultiply(uint64_t lhs, uint64_t rhs, const char* quantity) {
+    if (rhs != 0 && lhs > std::numeric_limits<uint64_t>::max() / rhs) {
+        throw GLIntParameterError(std::string("GL integer W-batched ") + quantity + " overflows uint64");
+    }
+    return lhs * rhs;
+}
+
+GLIntOperationCensusEntry CensusEntry(GLIntOperation operation, GLIntWFreeCoverage coverage,
+                                      uint8_t consumedLevels, uint16_t keyRequirements,
+                                      bool section4Required = true) {
+    return GLIntOperationCensusEntry{operation, coverage, consumedLevels, keyRequirements,
+                                     section4Required, false};
+}
+
+std::array<GLIntOperationCensusEntry, kGLIntOperationCensusSize> WFreeOperationCensus() {
+    using Coverage = GLIntWFreeCoverage;
+    return {{
+        CensusEntry(GLIntOperation::Encode, Coverage::PublicValuePath, 0, GLIntKeyNone),
+        CensusEntry(GLIntOperation::Decode, Coverage::PublicValuePath, 0, GLIntKeyNone),
+        CensusEntry(GLIntOperation::EncryptPublic, Coverage::PublicValuePath, 0, GLIntKeyNone),
+        CensusEntry(GLIntOperation::EncryptSecret, Coverage::PublicValuePath, 0, GLIntKeyNone),
+        CensusEntry(GLIntOperation::Decrypt, Coverage::PublicValuePath, 0, GLIntKeyNone),
+        CensusEntry(GLIntOperation::ModSwitch, Coverage::InternalOnly, 1, GLIntKeyNone),
+        CensusEntry(GLIntOperation::Add, Coverage::PublicValuePath, 0, GLIntKeyNone),
+        CensusEntry(GLIntOperation::Subtract, Coverage::PublicValuePath, 0, GLIntKeyNone),
+        CensusEntry(GLIntOperation::Negate, Coverage::PublicValuePath, 0, GLIntKeyNone),
+        CensusEntry(GLIntOperation::Hadamard, Coverage::PublicValuePath, 1,
+                    GLIntKeySmallRelinearize),
+        CensusEntry(GLIntOperation::RowRotate, Coverage::PublicValuePath, 0,
+                    GLIntKeyXYAutomorphism),
+        CensusEntry(GLIntOperation::ColumnRotate, Coverage::PublicValuePath, 0, GLIntKeyNone),
+        CensusEntry(GLIntOperation::InterMatrixRotate, Coverage::NotApplicable, 0,
+                    GLIntKeyWAutomorphism),
+        CensusEntry(GLIntOperation::ConjugationSwap, Coverage::PublicValuePath, 0,
+                    GLIntKeyXYAutomorphism),
+        CensusEntry(GLIntOperation::Transpose, Coverage::PublicValuePath, 0,
+                    GLIntKeyBigTransposeK3),
+        CensusEntry(GLIntOperation::Adjoint, Coverage::PublicValuePath, 0,
+                    GLIntKeyBigConjugateK1),
+        CensusEntry(GLIntOperation::CircledastPlain, Coverage::PublicValuePath, 1, GLIntKeyNone),
+        CensusEntry(GLIntOperation::MatrixMultiplyPlain, Coverage::PublicValuePath, 1,
+                    GLIntKeyNone),
+        CensusEntry(GLIntOperation::CircledastCipher, Coverage::PublicValuePath, 1,
+                    GLIntKeyBigConjugateK1 | GLIntKeyBigProductK2),
+        CensusEntry(GLIntOperation::MatrixMultiplyCipher, Coverage::PublicValuePath, 1,
+                    GLIntKeyBigConjugateK1 | GLIntKeyBigProductK2),
+        CensusEntry(GLIntOperation::BootstrapRows, Coverage::Missing, 0, GLIntKeyBootstrap),
+        CensusEntry(GLIntOperation::SerializeAggregate, Coverage::Missing, 0, GLIntKeyNone, false),
+    }};
 }
 
 /**
@@ -451,6 +527,96 @@ void RequireUniformRowMetadataInt(const GLIntCiphertext& ciphertext, const char*
 }
 
 }  // namespace
+
+// ---------------------------------------------------------------------------
+// Allocation-free p>1 / W-batched parameter and coverage census
+// ---------------------------------------------------------------------------
+
+GLIntWBatchedParameters GLIntWBatchedParameters::GL128257N32(uint64_t plaintextModulus,
+                                                             uint32_t multiplicativeDepth) {
+    GLIntWBatchedParameters parameters;
+    parameters.dimension           = 128;
+    parameters.cyclotomicPrime     = 257;
+    parameters.wGenerator          = 3;
+    parameters.plaintextModulus    = plaintextModulus;
+    parameters.multiplicativeDepth = multiplicativeDepth;
+    parameters.nativeRnsWordBits   = 32;
+    return parameters;
+}
+
+void GLIntWBatchedParameters::Validate() const {
+    if (!IsPowerOfTwoIntCensus(dimension)) {
+        throw GLDimensionError("GL integer W-batched mode requires power-of-two n");
+    }
+    if (dimension < 2) {
+        throw GLDimensionError("GL integer W-batched mode requires n >= 2");
+    }
+    if (multiplicativeDepth < 1) {
+        throw GLDepthError("GL integer W-batched mode requires multiplicativeDepth >= 1");
+    }
+    if (nativeRnsWordBits != 32 && nativeRnsWordBits != 64) {
+        throw GLIntParameterError("GL integer W-batched census requires a 32- or 64-bit RNS width");
+    }
+    if (cyclotomicPrime < 3 || cyclotomicPrime % 2 == 0 || !IsSmallPrime(cyclotomicPrime)) {
+        throw GLIntParameterError("GL integer W-batched mode requires an odd prime p");
+    }
+    if (!IsGeneratorModPrime(wGenerator, cyclotomicPrime)) {
+        throw GLIntParameterError("GL integer W-batched mode requires gamma to generate Z_p^*");
+    }
+    if (plaintextModulus < 3 || plaintextModulus >= (uint64_t{1} << 32) ||
+        !IsSmallPrime(plaintextModulus)) {
+        throw GLIntParameterError(
+            "GL integer W-batched census requires a prime plaintext modulus t below 2^32");
+    }
+
+    const auto fourN = CheckedMultiply(4, dimension, "4n root order");
+    const auto order = CheckedMultiply(fourN, cyclotomicPrime, "4np root order");
+    if (plaintextModulus % order != 1) {
+        std::ostringstream os;
+        os << "GL integer W-batched mode requires t = 1 (mod 4np); got t="
+           << plaintextModulus << ", 4np=" << order;
+        throw GLIntParameterError(os.str());
+    }
+}
+
+bool GLIntWBatchedParameters::IsGL128257N32Geometry() const noexcept {
+    return dimension == 128 && cyclotomicPrime == 257 && wGenerator == 3 &&
+           nativeRnsWordBits == 32;
+}
+
+GLIntWBatchedCensus MakeGLIntWBatchedCensus(const GLIntWBatchedParameters& parameters) {
+    parameters.Validate();
+
+    GLIntWBatchedCensus census;
+    census.parameters    = parameters;
+    census.phi           = static_cast<uint64_t>(parameters.cyclotomicPrime) - 1;
+    census.rootOrder     = CheckedMultiply(
+        CheckedMultiply(4, parameters.dimension, "4n root order"),
+        parameters.cyclotomicPrime, "4np root order");
+    census.rowRingDimension = CheckedMultiply(
+        CheckedMultiply(2, parameters.dimension, "2n row dimension"), census.phi,
+        "2n*phi(p) row dimension");
+    census.ciphertextRowCount = parameters.dimension;
+    census.matrixCount        = CheckedMultiply(2, census.phi, "2*phi(p) matrix count");
+    census.matrixCellCount    = CheckedMultiply(parameters.dimension, parameters.dimension,
+                                                "n*n matrix cell count");
+    census.aggregatePlaintextValueCount = CheckedMultiply(
+        census.matrixCount, census.matrixCellCount, "aggregate plaintext value count");
+    const auto rowRepresentationValueCount = CheckedMultiply(
+        census.rowRingDimension, census.ciphertextRowCount,
+        "row-representation plaintext value count");
+    if (rowRepresentationValueCount != census.aggregatePlaintextValueCount) {
+        throw GLIntParameterError(
+            "GL integer W-batched row representation does not match 2*phi(p) matrix payload");
+    }
+
+    census.nonIdentityRowRotations         = parameters.dimension - 1;
+    census.nonIdentityColumnRotations      = parameters.dimension - 1;
+    census.nonIdentityInterMatrixRotations = census.phi - 1;
+    census.independentRowBootstrapCount   = parameters.dimension;
+    census.operations                     = WFreeOperationCensus();
+    return census;
+}
 
 // ---------------------------------------------------------------------------
 // GLIntParameters

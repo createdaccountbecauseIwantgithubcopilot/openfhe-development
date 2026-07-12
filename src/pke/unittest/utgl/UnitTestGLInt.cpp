@@ -15,7 +15,10 @@
 // n=4 pins the design-doc section-12 vector tables (anchored on the shared
 // cross-port contract matrices A/B); n=8 checks every operation against a
 // clear oracle recomputed in-test with plain integers.  Toy dims n=4/8 with
-// HEStd_NotSet remain conformance geometry, not a security claim.
+// HEStd_NotSet remain conformance geometry, not a security claim.  The
+// separate fixed-size W-batched census validates production-sized Section-4
+// geometry without claiming a p>1 value path, security, serialization, or
+// integer bootstrapping.
 
 #include "gtest/gtest.h"
 
@@ -41,6 +44,10 @@ static_assert(!std::is_default_constructible_v<GLIntEncodedPlaintext>,
 static_assert(!std::is_aggregate_v<GLIntEvalKey> && !std::is_aggregate_v<GLIntCiphertext> &&
                   !std::is_aggregate_v<GLIntEncodedPlaintext>,
               "GL integer invariants must stay behind validating constructors");
+static_assert(std::is_trivially_copyable_v<GLIntWBatchedParameters> &&
+                  std::is_trivially_copyable_v<GLIntOperationCensusEntry> &&
+                  std::is_trivially_copyable_v<GLIntWBatchedCensus>,
+              "the production/W-batched census must remain fixed-size and allocation-free");
 
 using IntMatrix = std::vector<int64_t>;
 
@@ -289,6 +296,113 @@ std::vector<int64_t> CanonicalSlots(const Plaintext& row, std::size_t count) {
 // ===========================================================================
 // Parameter surface
 // ===========================================================================
+
+TEST(GLInt, WBatchedProductionParameterAndOperationCensus) {
+    const auto parameters = GLIntWBatchedParameters::GL128257N32();
+    ASSERT_NO_THROW(parameters.Validate());
+    EXPECT_TRUE(parameters.IsGL128257N32Geometry());
+    EXPECT_EQ(parameters.dimension, 128u);
+    EXPECT_EQ(parameters.cyclotomicPrime, 257u);
+    EXPECT_EQ(parameters.wGenerator, 3u);
+    // Smallest prime of the form k*(4*128*257)+1.  This is a plaintext-codec
+    // choice only; it does not authorize a BGV ciphertext modulus chain.
+    EXPECT_EQ(parameters.plaintextModulus, 1579009u);
+    EXPECT_EQ(parameters.plaintextModulus % (4u * 128u * 257u), 1u);
+
+    const auto census = MakeGLIntWBatchedCensus(parameters);
+    EXPECT_EQ(census.phi, 256u);
+    EXPECT_EQ(census.rootOrder, 131584u);
+    EXPECT_EQ(census.rowRingDimension, 65536u);
+    EXPECT_EQ(census.ciphertextRowCount, 128u);
+    EXPECT_EQ(census.matrixCount, 512u);  // 2*phi(257), unlike CKKS's 256
+    EXPECT_EQ(census.matrixCellCount, 16384u);
+    EXPECT_EQ(census.aggregatePlaintextValueCount, 8388608u);
+    EXPECT_EQ(census.rowRingDimension * census.ciphertextRowCount,
+              census.aggregatePlaintextValueCount);
+    EXPECT_EQ(census.nonIdentityRowRotations, 127u);
+    EXPECT_EQ(census.nonIdentityColumnRotations, 127u);
+    EXPECT_EQ(census.nonIdentityInterMatrixRotations, 255u);
+    EXPECT_EQ(census.independentRowBootstrapCount, 128u);
+    EXPECT_EQ(census.logicalBigSwitchFamilyCount, 3u);
+    EXPECT_EQ(census.logicalSmallSwitchFamilyCount, 1u);
+
+    // These gates are the point of the census: production-sized arithmetic
+    // is not silently upgraded from a shape calculation to an execution or
+    // security claim.
+    EXPECT_FALSE(census.wBatchedValueExecutionImplemented);
+    EXPECT_FALSE(census.securityAuthorized);
+    EXPECT_FALSE(census.aggregateSerializationImplemented);
+    EXPECT_FALSE(census.integerBootstrapImplemented);
+
+    ASSERT_EQ(census.operations.size(), kGLIntOperationCensusSize);
+    for (std::size_t index = 0; index < census.operations.size(); ++index) {
+        EXPECT_EQ(static_cast<std::size_t>(census.operations[index].operation), index);
+        EXPECT_FALSE(census.operations[index].wBatchedValuePathImplemented);
+    }
+    const auto& encode = census.operations[static_cast<std::size_t>(GLIntOperation::Encode)];
+    EXPECT_EQ(encode.wFreeCoverage, GLIntWFreeCoverage::PublicValuePath);
+    EXPECT_EQ(encode.consumedLevels, 0u);
+    const auto& modSwitch = census.operations[static_cast<std::size_t>(GLIntOperation::ModSwitch)];
+    EXPECT_EQ(modSwitch.wFreeCoverage, GLIntWFreeCoverage::InternalOnly);
+    EXPECT_EQ(modSwitch.consumedLevels, 1u);
+    const auto& interMatrix =
+        census.operations[static_cast<std::size_t>(GLIntOperation::InterMatrixRotate)];
+    EXPECT_EQ(interMatrix.wFreeCoverage, GLIntWFreeCoverage::NotApplicable);
+    EXPECT_EQ(interMatrix.keyRequirements, GLIntKeyWAutomorphism);
+    const auto& cipherMatMul =
+        census.operations[static_cast<std::size_t>(GLIntOperation::MatrixMultiplyCipher)];
+    EXPECT_EQ(cipherMatMul.wFreeCoverage, GLIntWFreeCoverage::PublicValuePath);
+    EXPECT_EQ(cipherMatMul.consumedLevels, 1u);
+    EXPECT_EQ(cipherMatMul.keyRequirements,
+              GLIntKeyBigConjugateK1 | GLIntKeyBigProductK2);
+    const auto& bootstrap =
+        census.operations[static_cast<std::size_t>(GLIntOperation::BootstrapRows)];
+    EXPECT_EQ(bootstrap.wFreeCoverage, GLIntWFreeCoverage::Missing);
+    EXPECT_EQ(bootstrap.keyRequirements, GLIntKeyBootstrap);
+    const auto& serialization =
+        census.operations[static_cast<std::size_t>(GLIntOperation::SerializeAggregate)];
+    EXPECT_FALSE(serialization.section4Required);
+    EXPECT_EQ(serialization.wFreeCoverage, GLIntWFreeCoverage::Missing);
+}
+
+TEST(GLInt, WBatchedParameterCensusValidationAndHistoricalShape) {
+    // The old n=256,p=17 paper geometry is representable by the metadata
+    // census even though the executable W-free GLGeometry gate remains n=4/8.
+    GLIntWBatchedParameters historical;
+    historical.dimension           = 256;
+    historical.cyclotomicPrime     = 17;
+    historical.wGenerator          = 3;
+    historical.plaintextModulus    = 87041;  // prime, =1 mod 4*256*17
+    historical.multiplicativeDepth = 2;
+    historical.nativeRnsWordBits   = 64;
+    const auto historicalCensus    = MakeGLIntWBatchedCensus(historical);
+    EXPECT_FALSE(historical.IsGL128257N32Geometry());
+    EXPECT_EQ(historicalCensus.rootOrder, 17408u);
+    EXPECT_EQ(historicalCensus.rowRingDimension, 8192u);
+    EXPECT_EQ(historicalCensus.matrixCount, 32u);
+    EXPECT_EQ(historicalCensus.matrixCellCount, 65536u);
+    EXPECT_EQ(historicalCensus.aggregatePlaintextValueCount, 2097152u);
+
+    auto bad = GLIntWBatchedParameters::GL128257N32(257);
+    EXPECT_THROW(bad.Validate(), GLIntParameterError);  // t is not 1 mod 4np
+    bad = GLIntWBatchedParameters::GL128257N32(131585);
+    EXPECT_THROW(bad.Validate(), GLIntParameterError);  // composite t
+    bad = GLIntWBatchedParameters::GL128257N32();
+    bad.dimension = 127;
+    EXPECT_THROW(bad.Validate(), GLDimensionError);
+    bad = GLIntWBatchedParameters::GL128257N32();
+    bad.cyclotomicPrime = 15;
+    EXPECT_THROW(bad.Validate(), GLIntParameterError);
+    bad = GLIntWBatchedParameters::GL128257N32();
+    bad.wGenerator = 2;
+    EXPECT_THROW(bad.Validate(), GLIntParameterError);
+    bad = GLIntWBatchedParameters::GL128257N32();
+    bad.multiplicativeDepth = 0;
+    EXPECT_THROW(bad.Validate(), GLDepthError);
+    bad = GLIntWBatchedParameters::GL128257N32();
+    bad.nativeRnsWordBits = 31;
+    EXPECT_THROW(bad.Validate(), GLIntParameterError);
+}
 
 TEST(GLInt, ParameterSurfacePins) {
     const GLIntSchemelet scheme4(IntParameters(4));
