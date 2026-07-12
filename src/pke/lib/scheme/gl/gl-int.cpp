@@ -738,6 +738,8 @@ GLIntWBatchedCensus MakeGLIntWBatchedCensus(const GLIntWBatchedParameters& param
             .boundedConformancePathImplemented = true;
         census.operations[static_cast<std::size_t>(GLIntOperation::Negate)]
             .boundedConformancePathImplemented = true;
+        census.operations[static_cast<std::size_t>(GLIntOperation::Hadamard)]
+            .boundedConformancePathImplemented = true;
         census.operations[static_cast<std::size_t>(GLIntOperation::InterMatrixRotate)]
             .boundedConformancePathImplemented = true;
     }
@@ -1352,6 +1354,7 @@ GLIntWBatchedSlicedSchemelet::GLIntWBatchedSlicedSchemelet(
             "OpenFHE failed to create the bounded W-batched sliced BGV context");
     }
     m_context->Enable(PKE);
+    m_context->Enable(KEYSWITCH);
     m_context->Enable(LEVELEDSHE);
     if (m_context->GetRingDimension() != 2 * m_parameters.dimension ||
         m_context->GetCryptoParameters()->GetPlaintextModulus() !=
@@ -1382,6 +1385,10 @@ bool GLIntWBatchedSlicedSchemelet::UsesWConstantSecretEmbedding() const noexcept
     return true;
 }
 
+bool GLIntWBatchedSlicedSchemelet::SupportsCiphertextHadamard() const noexcept {
+    return true;
+}
+
 bool GLIntWBatchedSlicedSchemelet::SupportsNativeFusedWTransport() const noexcept {
     return false;
 }
@@ -1408,6 +1415,13 @@ KeyPair<DCRTPoly> GLIntWBatchedSlicedSchemelet::KeyGen() const {
         throw GLKeyMismatchError("OpenFHE failed to generate the bounded W-batched BGV key pair");
     }
     return keys;
+}
+
+void GLIntWBatchedSlicedSchemelet::EvalMultKeyGen(
+    const PrivateKey<DCRTPoly>& privateKey) const {
+    ValidateKey(privateKey, "GL integer W-batched EvalMultKeyGen");
+    m_context->EvalMultKeyGen(privateKey);
+    ValidateMultiplicationKey(privateKey->GetKeyTag(), "GL integer W-batched EvalMultKeyGen");
 }
 
 void GLIntWBatchedSlicedSchemelet::ValidateEncoded(
@@ -1470,6 +1484,31 @@ void GLIntWBatchedSlicedSchemelet::ValidateKey(const PrivateKey<DCRTPoly>& key,
     }
     if (key->GetCryptoContext().get() != m_context.get()) {
         throw GLKeyContextMismatchError(std::string(operation) + " key belongs to a different context");
+    }
+}
+
+void GLIntWBatchedSlicedSchemelet::ValidateMultiplicationKey(
+    const std::string& keyTag, const char* operation) const {
+    const auto& allMultKeys = CryptoContextImpl<DCRTPoly>::GetAllEvalMultKeys();
+    const auto found        = allMultKeys.find(keyTag);
+    if (found == allMultKeys.end() || found->second.empty() || !found->second.front() ||
+        found->second.front()->GetCryptoContext().get() != m_context.get()) {
+        throw GLMissingEvaluationKeyError(
+            std::string(operation) +
+            " is missing the bounded W-batched s^2 key; call EvalMultKeyGen");
+    }
+}
+
+void GLIntWBatchedSlicedSchemelet::RequireMultiplicationBudget(
+    const GLIntWBatchedSlicedCiphertext& ciphertext, const char* operation) const {
+    const auto& first = ciphertext.GetSlices().front();
+    if (first->GetNoiseScaleDeg() != 1) {
+        throw GLCiphertextError(std::string(operation) +
+                                " requires ModReduced degree-one BGV operands");
+    }
+    if (first->GetElements().front().GetNumOfElements() <= 1) {
+        throw GLDepthError(std::string(operation) +
+                           " requires one available BGV level for its single ModReduce");
     }
 }
 
@@ -1651,6 +1690,79 @@ GLIntWBatchedSlicedCiphertext GLIntWBatchedSlicedSchemelet::RotateInterMatrix(
     }
     return GLIntWBatchedSlicedCiphertext(m_parameters, m_codec.GetRoots(), m_context,
                                          std::move(slices));
+}
+
+GLIntWBatchedSlicedCiphertext GLIntWBatchedSlicedSchemelet::EvalHadamard(
+    const GLIntWBatchedSlicedCiphertext& lhs,
+    const GLIntWBatchedSlicedCiphertext& rhs) const {
+    ValidateOperands(lhs, rhs, "GL integer W-batched Hadamard product");
+    RequireMultiplicationBudget(lhs, "GL integer W-batched Hadamard product");
+    ValidateMultiplicationKey(lhs.GetKeyTag(), "GL integer W-batched Hadamard product");
+
+    const auto n   = static_cast<std::size_t>(m_parameters.dimension);
+    const auto phi = static_cast<std::size_t>(m_parameters.cyclotomicPrime - 1);
+    std::vector<Ciphertext<DCRTPoly>> output(GetSliceCount());
+    const auto accumulate = [&](std::size_t index, const Ciphertext<DCRTPoly>& term,
+                                bool positive) {
+        if (!output[index]) {
+            output[index] = positive ? term->Clone() : m_context->EvalNegate(term);
+        }
+        else {
+            output[index] = positive ? m_context->EvalAdd(output[index], term)
+                                     : m_context->EvalSub(output[index], term);
+        }
+        if (!output[index]) {
+            throw GLCiphertextError(
+                "OpenFHE failed while accumulating the W-batched quotient-ring product");
+        }
+    };
+
+    for (std::size_t y1 = 0; y1 < n; ++y1) {
+        for (std::size_t w1 = 0; w1 < phi; ++w1) {
+            for (std::size_t y2 = 0; y2 < n; ++y2) {
+                for (std::size_t w2 = 0; w2 < phi; ++w2) {
+                    // This is a real BGV X/Gaussian-ring product, relinearized
+                    // through the framework s^2 key before the public Y/W
+                    // quotient reductions below.
+                    auto product = m_context->EvalMult(lhs.At(y1, w1), rhs.At(y2, w2));
+                    if (!product || product->GetElements().size() != 2) {
+                        throw GLCiphertextError(
+                            "OpenFHE returned an invalid relinearized W-batched slice product");
+                    }
+
+                    auto yExponent = y1 + y2;
+                    if (yExponent >= n) {
+                        yExponent -= n;
+                        // Y^n=I, and I is the exact X-ring monomial T^n.
+                        m_context->GetScheme()->MultByMonomialInPlace(
+                            product, static_cast<uint32_t>(n));
+                    }
+
+                    const auto wExponent = w1 + w2;
+                    if (wExponent < phi) {
+                        accumulate(WBatchedSliceIndex(phi, yExponent, wExponent), product, true);
+                    }
+                    else {
+                        // p=3: W^2=-(1+W) modulo Phi_3(W).
+                        accumulate(WBatchedSliceIndex(phi, yExponent, 0), product, false);
+                        accumulate(WBatchedSliceIndex(phi, yExponent, 1), product, false);
+                    }
+                }
+            }
+        }
+    }
+
+    for (auto& slice : output) {
+        if (!slice) {
+            throw GLCiphertextError(
+                "W-batched quotient-ring multiplication left an output slice empty");
+        }
+        // Every relinearized scale-degree-two sum crosses exactly one BGV
+        // ModSwitch boundary.  FIXEDMANUAL keeps the plaintext invariant.
+        m_context->GetScheme()->ModReduceInternalInPlace(slice, 1);
+    }
+    return GLIntWBatchedSlicedCiphertext(m_parameters, m_codec.GetRoots(), m_context,
+                                         std::move(output));
 }
 
 // ---------------------------------------------------------------------------

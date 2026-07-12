@@ -335,9 +335,12 @@ private:
  * operation are exact; W -> W^(gamma^nu) is a keyless public slice
  * recombination because that restricted secret is W-invariant.
  *
- * Native fused single-RLWE W transport under a W-dependent secret,
- * ciphertext multiplication/matrix multiplication, security authorization,
- * serialization, and bootstrapping are explicitly pending.
+ * The exact quotient-ring product is exposed as EvalHadamard: BGV multiplies
+ * and relinearizes the X/Gaussian slices while the aggregate performs the Y
+ * convolution modulo Y^n-I and W convolution modulo Phi_p(W).  Native fused
+ * single-RLWE W transport under a W-dependent secret, ordinary GL matrix
+ * multiplication, security authorization, serialization, and bootstrapping
+ * are explicitly pending.
  */
 class GLIntWBatchedSlicedSchemelet final {
 public:
@@ -350,6 +353,7 @@ public:
     const CryptoContext<DCRTPoly>& GetCryptoContext() const noexcept;
     std::size_t GetSliceCount() const noexcept;
     bool UsesWConstantSecretEmbedding() const noexcept;
+    bool SupportsCiphertextHadamard() const noexcept;
     bool SupportsNativeFusedWTransport() const noexcept;
     bool SupportsCiphertextMatMul() const noexcept;
     bool IsSecurityAuthorized() const noexcept;
@@ -357,6 +361,8 @@ public:
     bool SupportsBootstrap() const noexcept;
 
     KeyPair<DCRTPoly> KeyGen() const;
+    /** Generate the real OpenFHE s^2 relinearization key used by EvalHadamard. */
+    void EvalMultKeyGen(const PrivateKey<DCRTPoly>& privateKey) const;
     GLIntWBatchedSlicedCiphertext Encrypt(
         const PublicKey<DCRTPoly>& publicKey,
         const GLIntWBatchedEncodedPlaintext& plaintext) const;
@@ -377,6 +383,14 @@ public:
         const GLIntWBatchedSlicedCiphertext& ciphertext) const;
     GLIntWBatchedSlicedCiphertext RotateInterMatrix(
         const GLIntWBatchedSlicedCiphertext& ciphertext, std::size_t amount) const;
+    /**
+     * Exact branchwise matrix Hadamard product.  Consumes one BGV level,
+     * requires equal ModReduced operands and an EvalMultKeyGen key, and
+     * returns n*phi(p) relinearized two-component slices.
+     */
+    GLIntWBatchedSlicedCiphertext EvalHadamard(
+        const GLIntWBatchedSlicedCiphertext& lhs,
+        const GLIntWBatchedSlicedCiphertext& rhs) const;
 
 private:
     void ValidateEncoded(const GLIntWBatchedEncodedPlaintext& plaintext,
@@ -388,6 +402,9 @@ private:
                           const char* operation) const;
     void ValidateKey(const PublicKey<DCRTPoly>& key, const char* operation) const;
     void ValidateKey(const PrivateKey<DCRTPoly>& key, const char* operation) const;
+    void ValidateMultiplicationKey(const std::string& keyTag, const char* operation) const;
+    void RequireMultiplicationBudget(const GLIntWBatchedSlicedCiphertext& ciphertext,
+                                     const char* operation) const;
 
     GLIntWBatchedParameters m_parameters;
     GLIntWBatchedPlaintextCodec m_codec;

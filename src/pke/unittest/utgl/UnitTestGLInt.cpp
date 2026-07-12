@@ -685,6 +685,7 @@ TEST(GLInt, WBatchedSlicedBGVEncryptDecryptAndContract) {
     EXPECT_EQ(scheme.GetCryptoContext()->GetCyclotomicOrder(), 16u);
     EXPECT_EQ(scheme.GetCryptoContext()->GetCryptoParameters()->GetPlaintextModulus(), 97u);
     EXPECT_TRUE(scheme.UsesWConstantSecretEmbedding());
+    EXPECT_TRUE(scheme.SupportsCiphertextHadamard());
     EXPECT_FALSE(scheme.SupportsNativeFusedWTransport());
     EXPECT_FALSE(scheme.SupportsCiphertextMatMul());
     EXPECT_FALSE(scheme.IsSecurityAuthorized());
@@ -721,6 +722,7 @@ TEST(GLInt, WBatchedSlicedBGVEncryptDecryptAndContract) {
     for (const auto operation : {GLIntOperation::EncryptPublic, GLIntOperation::EncryptSecret,
                                  GLIntOperation::Decrypt, GLIntOperation::Add,
                                  GLIntOperation::Subtract, GLIntOperation::Negate,
+                                 GLIntOperation::Hadamard,
                                  GLIntOperation::InterMatrixRotate}) {
         EXPECT_TRUE(census.operations[static_cast<std::size_t>(operation)]
                         .boundedConformancePathImplemented);
@@ -812,6 +814,83 @@ TEST(GLInt, WBatchedSlicedBGVWRotationMatchesOwnerOracle) {
     EXPECT_EQ(scheme.Decrypt(keys.secretKey, scheme.RotateInterMatrix(ciphertext, 0))
                   .GetCoefficients(),
               encoded.GetCoefficients());
+}
+
+TEST(GLInt, WBatchedSlicedBGVHadamardUsesFullQuotientRing) {
+    const auto parameters = GLIntWBatchedParameters::ConformanceN4P3T97();
+    const GLIntWBatchedSlicedSchemelet scheme(parameters);
+    const auto keys = scheme.KeyGen();
+    scheme.EvalMultKeyGen(keys.secretKey);
+
+    const GLIntWBatchedPlaintext leftPlain(parameters, WBatchedPlusValues(), WBatchedMinusValues());
+    const auto rightPlain = scheme.GetCodec().RotateInterMatrix(leftPlain, 1);
+    const auto left = scheme.Encrypt(keys.publicKey, scheme.GetCodec().Encode(leftPlain));
+    const auto right = scheme.Encrypt(keys.publicKey, scheme.GetCodec().Encode(rightPlain));
+    const auto initialTowers = left.GetSlices().front()->GetElements().front().GetNumOfElements();
+
+    const auto hadamard = [](const std::vector<int64_t>& lhs,
+                             const std::vector<int64_t>& rhs) {
+        std::vector<int64_t> output(lhs.size());
+        for (std::size_t index = 0; index < lhs.size(); ++index) {
+            output[index] = Canonical(lhs[index] * rhs[index], kWBatchedModulus);
+        }
+        return output;
+    };
+    const GLIntWBatchedPlaintext ownerProduct(
+        parameters,
+        hadamard(leftPlain.GetValues(GLIntBranch::Plus), rightPlain.GetValues(GLIntBranch::Plus)),
+        hadamard(leftPlain.GetValues(GLIntBranch::Minus), rightPlain.GetValues(GLIntBranch::Minus)));
+
+    const auto product = scheme.EvalHadamard(left, right);
+    ASSERT_EQ(product.GetSlices().size(), 8u);
+    for (const auto& slice : product.GetSlices()) {
+        EXPECT_EQ(slice->GetElements().size(), 2u);  // real OpenFHE relinearization
+        EXPECT_EQ(slice->GetLevel(), 1u);
+        EXPECT_EQ(slice->GetNoiseScaleDeg(), 1u);
+        EXPECT_EQ(slice->GetElements().front().GetNumOfElements(), initialTowers - 1);
+    }
+    const auto decrypted = scheme.Decrypt(keys.secretKey, product);
+    EXPECT_EQ(decrypted.GetCoefficients(),
+              scheme.GetCodec().Encode(ownerProduct).GetCoefficients());
+    const auto decoded = scheme.GetCodec().Decode(decrypted);
+    EXPECT_EQ(decoded.GetValues(GLIntBranch::Plus), ownerProduct.GetValues(GLIntBranch::Plus));
+    EXPECT_EQ(decoded.GetValues(GLIntBranch::Minus), ownerProduct.GetValues(GLIntBranch::Minus));
+
+    const auto census = MakeGLIntWBatchedCensus(parameters);
+    const auto& entry = census.operations[static_cast<std::size_t>(GLIntOperation::Hadamard)];
+    EXPECT_TRUE(entry.boundedConformancePathImplemented);
+    EXPECT_FALSE(entry.productionValuePathImplemented);
+    EXPECT_EQ(entry.consumedLevels, 1u);
+    EXPECT_EQ(entry.keyRequirements, GLIntKeySmallRelinearize);
+    EXPECT_TRUE(scheme.SupportsCiphertextHadamard());
+    EXPECT_FALSE(scheme.SupportsCiphertextMatMul());
+    EXPECT_FALSE(scheme.SupportsNativeFusedWTransport());
+}
+
+TEST(GLInt, WBatchedSlicedBGVHadamardDepthAndKeyGates) {
+    const auto parameters = GLIntWBatchedParameters::ConformanceN4P3T97();
+    const GLIntWBatchedSlicedSchemelet scheme(parameters);
+    const auto input = scheme.GetCodec().Encode(
+        GLIntWBatchedPlaintext(parameters, WBatchedPlusValues(), WBatchedMinusValues()));
+
+    // A key pair with no ambient s^2 key fails before any product is formed.
+    const auto missingKeys = scheme.KeyGen();
+    const auto missing = scheme.Encrypt(missingKeys.publicKey, input);
+    EXPECT_THROW((void)scheme.EvalHadamard(missing, missing), GLMissingEvaluationKeyError);
+
+    const auto keys = scheme.KeyGen();
+    scheme.EvalMultKeyGen(keys.secretKey);
+    const auto ciphertext = scheme.Encrypt(keys.publicKey, input);
+    const auto exhausted = scheme.EvalHadamard(ciphertext, ciphertext);
+    EXPECT_EQ(exhausted.GetSlices().front()->GetLevel(), 1u);
+    EXPECT_EQ(exhausted.GetSlices().front()->GetElements().front().GetNumOfElements(), 1u);
+    EXPECT_THROW((void)scheme.EvalHadamard(exhausted, exhausted), GLDepthError);
+    EXPECT_THROW((void)scheme.EvalHadamard(ciphertext, exhausted), GLCiphertextError);
+
+    const auto foreignKeys = scheme.KeyGen();
+    scheme.EvalMultKeyGen(foreignKeys.secretKey);
+    const auto foreign = scheme.Encrypt(foreignKeys.publicKey, input);
+    EXPECT_THROW((void)scheme.EvalHadamard(ciphertext, foreign), GLKeyMismatchError);
 }
 
 TEST(GLInt, WBatchedSlicedBGVBindingAndShapeNegatives) {
