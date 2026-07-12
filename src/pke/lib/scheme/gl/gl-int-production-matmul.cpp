@@ -465,6 +465,56 @@ GLIntProductionSparsePlaintext GLIntProductionMatMulCore::Decrypt(
     return GLIntProductionSparsePlaintext(m_parameters, std::move(output));
 }
 
+GLIntProductionSlotCiphertext GLIntProductionMatMulCore::Add(
+    const GLIntProductionSlotCiphertext& lhs,
+    const GLIntProductionSlotCiphertext& rhs) const {
+    ValidateOperands(lhs, rhs, "production Slot Add");
+    std::map<SlotKey, GLIntProductionSlotCiphertextValue> values;
+    for (const auto& value : lhs.GetValues()) {
+        values.emplace(KeyOf(value), value);
+    }
+    for (const auto& value : rhs.GetValues()) {
+        const auto [it, inserted] = values.emplace(KeyOf(value), value);
+        if (!inserted) {
+            it->second.b = AddMod(it->second.b, value.b, m_compositeModulus);
+            it->second.a = AddMod(it->second.a, value.a, m_compositeModulus);
+        }
+        if (values.size() > kGLIntProductionMaxLogicalValues) {
+            throw GLDimensionError(
+                "production Slot Add exceeds its sparse support bound");
+        }
+    }
+    std::vector<GLIntProductionSlotCiphertextValue> output;
+    output.reserve(values.size());
+    for (const auto& [key, value] : values) {
+        static_cast<void>(key);
+        if (value.b != 0 || value.a != 0) {
+            output.push_back(value);
+        }
+    }
+    return GLIntProductionSlotCiphertext(
+        m_parameters, lhs.GetKeyTag(), m_compositeModulus, std::move(output));
+}
+
+GLIntProductionSlotCiphertext GLIntProductionMatMulCore::Subtract(
+    const GLIntProductionSlotCiphertext& lhs,
+    const GLIntProductionSlotCiphertext& rhs) const {
+    return Add(lhs, Negate(rhs));
+}
+
+GLIntProductionSlotCiphertext GLIntProductionMatMulCore::Negate(
+    const GLIntProductionSlotCiphertext& ciphertext) const {
+    ValidateCiphertext(ciphertext, "production Slot ciphertext");
+    auto output = ciphertext.GetValues();
+    for (auto& value : output) {
+        value.b = value.b == 0 ? 0 : m_compositeModulus - value.b;
+        value.a = value.a == 0 ? 0 : m_compositeModulus - value.a;
+    }
+    return GLIntProductionSlotCiphertext(
+        m_parameters, ciphertext.GetKeyTag(), m_compositeModulus,
+        std::move(output));
+}
+
 GLIntProductionMatMulCore::Entry GLIntProductionMatMulCore::MakeEntry(
     const GLIntProductionSecretKey& key,
     GLIntProductionGadgetDirection direction, GLIntBranch branch,

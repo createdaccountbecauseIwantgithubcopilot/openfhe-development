@@ -46,6 +46,17 @@ TEST(GLIntProductionMatMul, GadgetTErrCrossLaneAndHadamard) {
         evaluator.Encrypt(primary, left, 0x4c454654454e43ULL);
     const auto encryptedRight =
         evaluator.Encrypt(primary, right, 0x5249474854454e43ULL);
+    const auto sum = evaluator.Decrypt(
+        primary, evaluator.Add(encryptedLeft, encryptedRight));
+    EXPECT_EQ(sum.At(GLIntBranch::Plus, 9, 1, 4), 6);
+    EXPECT_EQ(sum.At(GLIntBranch::Minus, 9, 3, 4), 10);
+    const auto difference = evaluator.Decrypt(
+        primary, evaluator.Subtract(encryptedLeft, encryptedRight));
+    EXPECT_EQ(difference.At(GLIntBranch::Plus, 9, 1, 4), 6);
+    EXPECT_EQ(difference.At(GLIntBranch::Minus, 9, 3, 4), 1579009 - 10);
+    const auto negated =
+        evaluator.Decrypt(primary, evaluator.Negate(encryptedLeft));
+    EXPECT_EQ(negated.At(GLIntBranch::Plus, 9, 1, 4), 1579009 - 6);
     const auto matrixKeys = evaluator.EvalKeyGen(
         primary, encryptedLeft, encryptedRight, 0x4d41544b455953ULL);
     EXPECT_GT(matrixKeys.GetDigitCount(), 32u);

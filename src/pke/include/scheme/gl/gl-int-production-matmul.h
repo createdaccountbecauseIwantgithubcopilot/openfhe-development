@@ -162,6 +162,15 @@ public:
         const GLIntProductionSecretKey& secretKey,
         const GLIntProductionSlotCiphertext& ciphertext) const;
 
+    GLIntProductionSlotCiphertext Add(
+        const GLIntProductionSlotCiphertext& lhs,
+        const GLIntProductionSlotCiphertext& rhs) const;
+    GLIntProductionSlotCiphertext Subtract(
+        const GLIntProductionSlotCiphertext& lhs,
+        const GLIntProductionSlotCiphertext& rhs) const;
+    GLIntProductionSlotCiphertext Negate(
+        const GLIntProductionSlotCiphertext& ciphertext) const;
+
     GLIntProductionGadgetEvalKeys EvalKeyGen(
         const GLIntProductionSecretKey& primaryKey,
         const GLIntProductionSlotCiphertext& lhs,
