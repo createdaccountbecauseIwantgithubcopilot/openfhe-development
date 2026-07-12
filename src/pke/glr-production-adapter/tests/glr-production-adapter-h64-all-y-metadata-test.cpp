@@ -150,7 +150,9 @@ int main() {
                 oneBit.relinearizationSpecialPrimeCount == 13 &&
                 oneBit.inputLevel == 0 && oneBit.outputLevel == 2 &&
                 oneBit.cpuValueExecutionExposed &&
-                !oneBit.gpuValueExecutionExposed &&
+                oneBit.gpuValueExecutionExposed &&
+                oneBit.gpuDeviceAvailable ==
+                    glscheme::rns::glr_device_ks_available() &&
                 oneBit.actualCiphertextProductExecuted &&
                 oneBit.exactPairedRescaleExecuted &&
                 !oneBit.outputReanchoredToDelta &&
@@ -166,7 +168,9 @@ int main() {
 
     auto generateOneBit = &Adapter::GenerateH64P257OneBitMaterial;
     auto executeOneBit = &Adapter::EvaluateH64P257OneBitCpu;
-    Require(generateOneBit != nullptr && executeOneBit != nullptr,
+    auto executeOneBitGpu = &Adapter::EvaluateH64P257OneBitGpu;
+    Require(generateOneBit != nullptr && executeOneBit != nullptr &&
+                executeOneBitGpu != nullptr,
             "OpenFHE canonical H64 one-bit execution seam is absent");
 
     const auto structuredAudit = adapter.AuditH64StructuredSecurity();

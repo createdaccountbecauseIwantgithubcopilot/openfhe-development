@@ -2733,7 +2733,7 @@ GLRProductionAdapter::GetH64P257OneBitCapabilities() const {
     (void)glscheme::rns::glr_gl128_validate_context(m_context);
     NativeGL128H64P257OneBitCapabilities capabilities;
     if (!capabilities.cpuValueExecutionExposed ||
-        capabilities.gpuValueExecutionExposed ||
+        !capabilities.gpuValueExecutionExposed ||
         !capabilities.actualCiphertextProductExecuted ||
         !capabilities.exactPairedRescaleExecuted ||
         capabilities.outputReanchoredToDelta ||
@@ -2749,6 +2749,8 @@ GLRProductionAdapter::GetH64P257OneBitCapabilities() const {
             "GLRProductionAdapter: canonical one-bit H64 capability "
             "overstates execution or security admission");
     }
+    capabilities.gpuDeviceAvailable =
+        glscheme::rns::glr_device_ks_available();
     return capabilities;
 }
 
@@ -2770,6 +2772,15 @@ GLRProductionAdapter::EvaluateH64P257OneBitCpu(
     (void)glscheme::rns::glr_gl128_validate_context(m_context);
     return glscheme::rns::glr_h64_p257_one_bit_root_action_cpu(
         m_context, material, requests);
+}
+
+GLRProductionAdapter::NativeGL128H64P257OneBitGpuResult
+GLRProductionAdapter::EvaluateH64P257OneBitGpu(
+    const NativeGL128H64P257OneBitMaterial& material,
+    const NativeGL128H64P257OneBitRequest& request) const {
+    (void)glscheme::rns::glr_gl128_validate_context(m_context);
+    return glscheme::rns::glr_h64_p257_one_bit_root_action_gpu(
+        m_context, material, request);
 }
 
 GLRProductionAdapter::NativeGL128H64StructuredSecurityAudit

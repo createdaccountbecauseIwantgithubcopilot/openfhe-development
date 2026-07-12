@@ -16,6 +16,7 @@
 #include "glscheme/gl128_h64_bootstrap_research.hpp"
 #include "glscheme/gl128_h64_hidden_selector.hpp"
 #include "glscheme/gl128_h64_p257_one_bit.hpp"
+#include "glscheme/gl128_h64_p257_one_bit_gpu.hpp"
 #include "glscheme/gl128_h64_root_product_oracle.hpp"
 #include "glscheme/gl128_h64_structured_security_audit.hpp"
 #include "glscheme/gl128_h64_w_action_plan.hpp"
@@ -359,6 +360,10 @@ public:
         glscheme::rns::GlrH64P257OneBitEvidence;
     using NativeGL128H64P257OneBitResult =
         glscheme::rns::GlrH64P257OneBitResult;
+    using NativeGL128H64P257OneBitGpuEvidence =
+        glscheme::rns::GlrH64P257OneBitGpuEvidence;
+    using NativeGL128H64P257OneBitGpuResult =
+        glscheme::rns::GlrH64P257OneBitGpuResult;
     using NativeGL128H64CheckedEstimatorTranscript =
         glscheme::rns::GlrH64CheckedEstimatorTranscript;
     using NativeGL128H64StructuredSecurityAudit =
@@ -471,7 +476,8 @@ public:
         std::uint32_t inputLevel = 0;
         std::uint32_t outputLevel = 2;
         bool cpuValueExecutionExposed = true;
-        bool gpuValueExecutionExposed = false;
+        bool gpuValueExecutionExposed = true;
+        bool gpuDeviceAvailable = false;
         bool actualCiphertextProductExecuted = true;
         bool exactPairedRescaleExecuted = true;
         bool outputReanchoredToDelta = false;
@@ -531,6 +537,8 @@ public:
                       production_security_authorized);
     static_assert(!NativeGL128H64P257OneBitEvidence::
                       bootstrap_direct_admitted);
+    static_assert(NativeGL128H64P257OneBitGpuEvidence::research_only);
+    static_assert(!NativeGL128H64P257OneBitGpuEvidence::gpu_h64_bootstrap_ready);
     static_assert(!std::is_convertible_v<
                   NativeGL128H64P257OneBitResult,
                   NativeGL128BootstrapResult>);
@@ -1354,6 +1362,9 @@ public:
     NativeGL128H64P257OneBitResult EvaluateH64P257OneBitCpu(
         const NativeGL128H64P257OneBitMaterial& material,
         std::span<const NativeGL128H64P257OneBitRequest> requests) const;
+    NativeGL128H64P257OneBitGpuResult EvaluateH64P257OneBitGpu(
+        const NativeGL128H64P257OneBitMaterial& material,
+        const NativeGL128H64P257OneBitRequest& request) const;
     NativeGL128H64StructuredSecurityAudit
     AuditH64StructuredSecurity() const;
     NativeGL128H64StructuredSecurityCapabilities
