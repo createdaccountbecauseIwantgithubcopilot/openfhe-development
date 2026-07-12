@@ -960,6 +960,10 @@ TEST(GLShip, ExactN32DirectRefreshOnlyIndependentOracleAndNegatives) {
     RunExactDirectRefreshOnlyIndependentOracleAndNegatives(32);
 }
 
+TEST(GLShip, ExactN64DirectRefreshOnlyIndependentOracleAndNegatives) {
+    RunExactDirectRefreshOnlyIndependentOracleAndNegatives(64);
+}
+
 TEST(GLShip, EncryptedSelectorIsLoadBearing) {
     GLSchemelet gl(ExactParameters(4, 4));
     GLShipSchemelet ship(gl, ShipParameters(4, 2));
@@ -1276,6 +1280,7 @@ TEST(GLShip, HybridParametersValidateAndDepth) {
     GLSchemelet gl8(ExactParameters(8, 7));
     GLSchemelet gl16(ExactParameters(16, 6));
     GLSchemelet gl32(ExactParameters(32, 6));
+    GLSchemelet gl64(ExactParameters(64, 6));
     EXPECT_NO_THROW(GLShipSchemelet(gl4, HybridShipParameters(4, 2, 2)));
     EXPECT_NO_THROW(GLShipSchemelet(gl8, HybridShipParameters(8, 3, 4)));
     EXPECT_NO_THROW(GLShipSchemelet(gl8, HybridShipParameters(8, 3, 2)));
@@ -1290,6 +1295,9 @@ TEST(GLShip, HybridParametersValidateAndDepth) {
                  GLShipUnsupportedError);
     EXPECT_NO_THROW(GLShipSchemelet(gl32, ShipParameters(32, 2)));
     EXPECT_THROW(GLShipSchemelet(gl32, HybridShipParameters(32, 2, 2)),
+                 GLShipUnsupportedError);
+    EXPECT_NO_THROW(GLShipSchemelet(gl64, ShipParameters(64, 2)));
+    EXPECT_THROW(GLShipSchemelet(gl64, HybridShipParameters(64, 2, 2)),
                  GLShipUnsupportedError);
 
     // Negative #1: direct parameters take no hybrid coarse fields.

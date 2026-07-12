@@ -237,7 +237,7 @@ private:
 };
 
 /**
- * Bounded, exact-ring direct-column SHIP implementation for n=4/8/16/32
+ * Bounded, exact-ring direct-column SHIP implementation for n=4/8/16/32/64
  * conformance only. Hybrid masked-column material remains n=4/8 because its
  * distinct depth and selector-material contract has not been extended.
  *
@@ -268,7 +268,7 @@ public:
         const GLShipEvaluationKey& evaluationKey) const;
 
     /**
-     * Exact-ring direct-column n=4/8/16/32 ordinary refresh. Hybrid remains n=4/8.
+     * Exact-ring direct-column n=4/8/16/32/64 ordinary refresh. Hybrid remains n=4/8.
      *
      * Every independently computed Gaussian X-coefficient lane must have real
      * and imaginary magnitude at most one.  This is an encrypted-message

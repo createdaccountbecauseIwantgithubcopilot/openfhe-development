@@ -10,7 +10,7 @@
 // conjugation, native transpose, and the Remark 3.13 transposed encoding.
 // n=4 pins the shared cross-port contract vectors; n=8 checks every operation
 // against a clear oracle computed in-test; n=16 has a bounded exact-ring
-// codec/rotation composition gate. Toy dims n=4/8/16/32 with HEStd_NotSet remain
+// codec/rotation composition gate. Toy dims n=4/8/16/32/64 with HEStd_NotSet remain
 // conformance geometry, not a security claim.
 
 #include "gtest/gtest.h"
