@@ -2670,6 +2670,121 @@ GLRProductionAdapter::BootstrapResearchDirect(
         normalizationRelativeTolerance);
 }
 
+GLRProductionAdapter::NativeGL128H64ResearchProfileReceipt
+GLRProductionAdapter::GetH64ResearchProfile() const {
+    return glscheme::rns::glr_gl128_h64_research_profile(m_context);
+}
+
+GLRProductionAdapter::NativeGL128H64HiddenSelectorPlan
+GLRProductionAdapter::PlanH64HiddenSelector() const {
+    return glscheme::rns::glr_gl128_h64_hidden_selector_plan(m_context);
+}
+
+GLRProductionAdapter::NativeGL128H64HiddenSelectorBinding
+GLRProductionAdapter::BindH64HiddenSelectorManifest(
+    const NativeGL128H64HiddenSelectorManifest& manifest) const {
+    (void)glscheme::rns::glr_gl128_validate_context(m_context);
+    return glscheme::rns::glr_gl128_h64_hidden_selector_binding(manifest);
+}
+
+GLRProductionAdapter::NativeGL128H64HiddenSelectorGenerationResult
+GLRProductionAdapter::GenerateH64HiddenSelectorMaterial(
+    const SparseSecretKey& sparseKey,
+    const NativeGL128H64HiddenSelectorOwnerSeed& ownerSeed,
+    const NativeGL128H64HiddenSelectorRecordSink& sink,
+    const NativeGL128H64HiddenSelectorCheckpoint* resumeCheckpoint,
+    std::size_t maxRecordsThisCall) const {
+    return glscheme::rns::glr_generate_gl128_h64_hidden_selector_material(
+        m_context, sparseKey, ownerSeed, sink, resumeCheckpoint,
+        maxRecordsThisCall);
+}
+
+std::unique_ptr<
+    GLRProductionAdapter::NativeGL128H64HiddenSelectorProvider>
+GLRProductionAdapter::OpenH64HiddenSelectorProvider(
+    NativeGL128H64HiddenSelectorManifest manifest,
+    NativeGL128H64HiddenSelectorBinding binding,
+    NativeGL128H64HiddenSelectorLeaseCallbacks callbacks) const {
+    return glscheme::rns::
+        glr_make_authenticated_gl128_h64_hidden_selector_provider(
+            m_context, std::move(manifest), std::move(binding),
+            std::move(callbacks));
+}
+
+GLRProductionAdapter::NativeGL128ValidatedH64HiddenSelectorSession
+GLRProductionAdapter::OpenH64HiddenSelectorSession(
+    const NativeGL128H64HiddenSelectorProvider& provider,
+    const NativeGL128H64HiddenSelectorBinding& binding) const {
+    return glscheme::rns::glr_open_gl128_h64_hidden_selector_session(
+        m_context, provider, binding);
+}
+
+GLRProductionAdapter::NativeGL128H64PublicRootProviderBinding
+GLRProductionAdapter::BindH64PublicRootManifest(
+    const NativeGL128H64PublicRootProviderManifest& manifest) const {
+    (void)glscheme::rns::glr_gl128_validate_context(m_context);
+    return glscheme::rns::glr_gl128_h64_public_root_provider_binding(
+        manifest);
+}
+
+GLRProductionAdapter::NativeGL128H64PublicRootSource
+GLRProductionAdapter::ExtractH64PublicRootSource(
+    const Ciphertext& normalizedSparseQ0, std::uint32_t yRow,
+    std::uint32_t branch) const {
+    return glscheme::rns::glr_gl128_h64_public_root_source(
+        m_context, normalizedSparseQ0, yRow, branch);
+}
+
+GLRProductionAdapter::NativeGL128H64PublicRootProviderManifest
+GLRProductionAdapter::BuildH64PublicRootManifest(
+    const NativeGL128H64PublicRootSource& source) const {
+    return glscheme::rns::glr_gl128_h64_public_root_provider_manifest(
+        m_context, source);
+}
+
+std::unique_ptr<
+    GLRProductionAdapter::NativeGL128H64PublicRootCandidateProvider>
+GLRProductionAdapter::OpenH64PublicRootProvider(
+    NativeGL128H64PublicRootProviderManifest manifest,
+    NativeGL128H64PublicRootProviderBinding binding,
+    NativeGL128H64PublicRootProviderCallbacks callbacks) const {
+    return glscheme::rns::
+        glr_make_authenticated_gl128_h64_public_root_candidate_provider(
+            m_context, std::move(manifest), std::move(binding),
+            std::move(callbacks));
+}
+
+GLRProductionAdapter::NativeGL128H64ConcretePublicRootProviderOpening
+GLRProductionAdapter::OpenConcreteH64PublicRootProvider(
+    NativeGL128H64PublicRootSource source) const {
+    return glscheme::rns::
+        glr_make_gl128_h64_concrete_public_root_provider(
+            m_context, std::move(source));
+}
+
+GLRProductionAdapter::NativeGL128H64SparseFoldKskBinding
+GLRProductionAdapter::BindH64SparseFoldKeys(
+    const NativeKeyProvider& evaluationKeys,
+    const std::string& expectedPrimarySecretLineageCommitment,
+    const std::string& expectedSparseSecretLineageCommitment) const {
+    return glscheme::rns::glr_bind_gl128_h64_sparse_fold_ksk_provider(
+        m_context, evaluationKeys,
+        expectedPrimarySecretLineageCommitment,
+        expectedSparseSecretLineageCommitment);
+}
+
+GLRProductionAdapter::NativeGL128H64SparseFoldResult
+GLRProductionAdapter::EvaluateH64OneBranchSparseFold(
+    const NativeGL128ValidatedH64HiddenSelectorSession& hiddenSelector,
+    const NativeGL128H64PublicRootCandidateProvider& publicRoots,
+    const NativeGL128H64PublicRootProviderBinding& publicRootBinding,
+    const NativeKeyProvider& evaluationKeys,
+    const NativeGL128H64SparseFoldKskBinding& sparseFoldKeys) const {
+    return glscheme::rns::glr_gl128_h64_blind_select_and_sparse_fold_cpu(
+        m_context, hiddenSelector, publicRoots, publicRootBinding,
+        evaluationKeys, sparseFoldKeys);
+}
+
 GLRProductionAdapter::NativeGL128BootstrapAcceptanceReceipt
 GLRProductionAdapter::AcceptBootstrapDirect(
     const SecretKey& primaryKey,

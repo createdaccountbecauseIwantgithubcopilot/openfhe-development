@@ -13,6 +13,7 @@
 #include "glscheme/gl128_bootstrap_research.hpp"
 #include "glscheme/gl128_bootstrap_acceptance.hpp"
 #include "glscheme/gl128_ciphertext_artifact.hpp"
+#include "glscheme/gl128_h64_hidden_selector.hpp"
 #include "glscheme/glr_device_ks.hpp"
 #include "glscheme/rns_dft_plaintext_provider.hpp"
 #include "glscheme/rns_encode.hpp"
@@ -270,6 +271,58 @@ public:
         glscheme::rns::Gl128BootstrapAcceptanceReceipt;
     using NativeGL128ResearchBootstrapAcceptanceReceipt =
         glscheme::rns::Gl128ResearchBootstrapAcceptanceReceipt;
+    using NativeGL128H64ResearchProfileReceipt =
+        glscheme::rns::GlrH64ResearchProfileReceipt;
+    using NativeGL128H64HiddenSelectorStorageReceipt =
+        glscheme::rns::GlrH64HiddenSelectorStorageReceipt;
+    using NativeGL128H64HiddenSelectorPlan =
+        glscheme::rns::GlrH64HiddenSelectorPlan;
+    using NativeGL128H64HiddenControlKind =
+        glscheme::rns::GlrH64HiddenControlKind;
+    using NativeGL128H64HiddenControlDescriptor =
+        glscheme::rns::GlrH64HiddenControlDescriptor;
+    using NativeGL128H64HiddenSelectorOwnerSeed =
+        glscheme::rns::GlrH64HiddenSelectorOwnerSeed;
+    using NativeGL128H64HiddenSelectorCheckpoint =
+        glscheme::rns::GlrH64HiddenSelectorCheckpoint;
+    using NativeGL128H64HiddenSelectorManifest =
+        glscheme::rns::GlrH64HiddenSelectorManifest;
+    using NativeGL128H64HiddenSelectorBinding =
+        glscheme::rns::GlrH64HiddenSelectorBinding;
+    using NativeGL128H64HiddenSelectorRecordSink =
+        glscheme::rns::GlrH64HiddenSelectorRecordSink;
+    using NativeGL128H64HiddenSelectorGenerationResult =
+        glscheme::rns::GlrH64HiddenSelectorGenerationResult;
+    using NativeGL128H64HiddenSelectorLeaseCallbacks =
+        glscheme::rns::GlrH64HiddenSelectorLeaseCallbacks;
+    using NativeGL128H64HiddenSelectorProvider =
+        glscheme::rns::GlrH64HiddenSelectorProvider;
+    using NativeGL128ValidatedH64HiddenSelectorSession =
+        glscheme::rns::GlrValidatedH64HiddenSelectorSession;
+    using NativeGL128H64CpuCmuxEvidence =
+        glscheme::rns::GlrH64CpuCmuxEvidence;
+    using NativeGL128H64PublicRootSource =
+        glscheme::rns::GlrH64PublicRootSource;
+    using NativeGL128H64PublicRootCandidateRequest =
+        glscheme::rns::GlrH64PublicRootCandidateRequest;
+    using NativeGL128H64PublicRootCandidatePair =
+        glscheme::rns::GlrH64PublicRootCandidatePair;
+    using NativeGL128H64PublicRootProviderManifest =
+        glscheme::rns::GlrH64PublicRootProviderManifest;
+    using NativeGL128H64PublicRootProviderBinding =
+        glscheme::rns::GlrH64PublicRootProviderBinding;
+    using NativeGL128H64PublicRootProviderCallbacks =
+        glscheme::rns::GlrH64PublicRootProviderCallbacks;
+    using NativeGL128H64PublicRootCandidateProvider =
+        glscheme::rns::GlrH64PublicRootCandidateProvider;
+    using NativeGL128H64ConcretePublicRootProviderOpening =
+        glscheme::rns::GlrH64ConcretePublicRootProviderOpening;
+    using NativeGL128H64SparseFoldKskBinding =
+        glscheme::rns::GlrH64SparseFoldKskBinding;
+    using NativeGL128H64SparseFoldEvidence =
+        glscheme::rns::GlrH64SparseFoldEvidence;
+    using NativeGL128H64SparseFoldResult =
+        glscheme::rns::GlrH64SparseFoldResult;
     using NativeGL128CiphertextArtifactSink =
         glscheme::rns::Gl128CiphertextArtifactSink;
     using NativeGL128CiphertextArtifactSource =
@@ -317,6 +370,44 @@ public:
     static_assert(!std::is_constructible_v<
                   NativeGL128BootstrapAcceptanceReceipt,
                   NativeGL128ResearchBootstrapAcceptanceReceipt>);
+
+    // The H64 lane is a bounded executable research composition only.  It
+    // returns a primary-domain L14 root for one branch and deliberately has
+    // no all-Y/StC or production-authorization conversion seam.
+    struct NativeGL128H64ResearchPosture final {
+        static constexpr bool research_only = true;
+        static constexpr bool one_branch_sparse_fold_executable = true;
+        static constexpr bool full_all_y_stc_composed = false;
+        static constexpr bool exact_estimator_evidence_present = false;
+        static constexpr bool exact_noise_evidence_present = false;
+        static constexpr bool production_security_claim = false;
+        static constexpr bool production_authorization_admitted = false;
+    };
+
+    static_assert(NativeGL128H64ResearchPosture::research_only);
+    static_assert(!NativeGL128H64ResearchPosture::full_all_y_stc_composed);
+    static_assert(
+        !NativeGL128H64ResearchPosture::production_security_claim);
+    static_assert(
+        !NativeGL128H64ResearchPosture::production_authorization_admitted);
+    static_assert(!std::is_convertible_v<
+                  NativeGL128H64ResearchProfileReceipt,
+                  NativeGL128DirectBootstrapAuthorizationBundle>);
+    static_assert(!std::is_convertible_v<
+                  NativeGL128H64HiddenSelectorPlan,
+                  NativeGL128DirectBootstrapAuthorizationBundle>);
+    static_assert(!std::is_convertible_v<
+                  NativeGL128H64SparseFoldKskBinding,
+                  NativeGL128DirectBootstrapAuthorizationBundle>);
+    static_assert(!std::is_convertible_v<
+                  NativeGL128H64SparseFoldResult,
+                  NativeGL128BootstrapResult>);
+    static_assert(!std::is_convertible_v<
+                  NativeGL128H64ConcretePublicRootProviderOpening,
+                  NativeDirectVectorProductionSelectorProviderOpeningResult>);
+    static_assert(!std::is_constructible_v<
+                  NativeGL128BootstrapResult,
+                  NativeGL128H64SparseFoldResult>);
 
     static constexpr std::size_t kLegacyDftPlaintextEntryCount =
         glscheme::rns::kGlrDftPlaintextEntryCount;
@@ -1063,6 +1154,56 @@ public:
         const NativeCtsStcConfig& config = {},
         double normalizationRelativeTolerance =
             glscheme::rns::kGl128BootstrapNormalizationRelativeTolerance) const;
+
+    // Exact H64 research aliases and thin native composition.  The terminal
+    // call returns one branch's primary-domain L14 root only; it does not
+    // perform all-Y packing, forward StC, renewal, or authorization.
+    NativeGL128H64ResearchProfileReceipt GetH64ResearchProfile() const;
+    NativeGL128H64HiddenSelectorPlan PlanH64HiddenSelector() const;
+    NativeGL128H64HiddenSelectorBinding BindH64HiddenSelectorManifest(
+        const NativeGL128H64HiddenSelectorManifest& manifest) const;
+    NativeGL128H64HiddenSelectorGenerationResult
+    GenerateH64HiddenSelectorMaterial(
+        const SparseSecretKey& sparseKey,
+        const NativeGL128H64HiddenSelectorOwnerSeed& ownerSeed,
+        const NativeGL128H64HiddenSelectorRecordSink& sink,
+        const NativeGL128H64HiddenSelectorCheckpoint* resumeCheckpoint =
+            nullptr,
+        std::size_t maxRecordsThisCall = 0) const;
+    std::unique_ptr<NativeGL128H64HiddenSelectorProvider>
+    OpenH64HiddenSelectorProvider(
+        NativeGL128H64HiddenSelectorManifest manifest,
+        NativeGL128H64HiddenSelectorBinding binding,
+        NativeGL128H64HiddenSelectorLeaseCallbacks callbacks) const;
+    NativeGL128ValidatedH64HiddenSelectorSession
+    OpenH64HiddenSelectorSession(
+        const NativeGL128H64HiddenSelectorProvider& provider,
+        const NativeGL128H64HiddenSelectorBinding& binding) const;
+    NativeGL128H64PublicRootProviderBinding BindH64PublicRootManifest(
+        const NativeGL128H64PublicRootProviderManifest& manifest) const;
+    NativeGL128H64PublicRootSource ExtractH64PublicRootSource(
+        const Ciphertext& normalizedSparseQ0, std::uint32_t yRow,
+        std::uint32_t branch) const;
+    NativeGL128H64PublicRootProviderManifest BuildH64PublicRootManifest(
+        const NativeGL128H64PublicRootSource& source) const;
+    std::unique_ptr<NativeGL128H64PublicRootCandidateProvider>
+    OpenH64PublicRootProvider(
+        NativeGL128H64PublicRootProviderManifest manifest,
+        NativeGL128H64PublicRootProviderBinding binding,
+        NativeGL128H64PublicRootProviderCallbacks callbacks) const;
+    NativeGL128H64ConcretePublicRootProviderOpening
+    OpenConcreteH64PublicRootProvider(
+        NativeGL128H64PublicRootSource source) const;
+    NativeGL128H64SparseFoldKskBinding BindH64SparseFoldKeys(
+        const NativeKeyProvider& evaluationKeys,
+        const std::string& expectedPrimarySecretLineageCommitment,
+        const std::string& expectedSparseSecretLineageCommitment) const;
+    NativeGL128H64SparseFoldResult EvaluateH64OneBranchSparseFold(
+        const NativeGL128ValidatedH64HiddenSelectorSession& hiddenSelector,
+        const NativeGL128H64PublicRootCandidateProvider& publicRoots,
+        const NativeGL128H64PublicRootProviderBinding& publicRootBinding,
+        const NativeKeyProvider& evaluationKeys,
+        const NativeGL128H64SparseFoldKskBinding& sparseFoldKeys) const;
 
     // Owner-side exhaustive post-bootstrap acceptance.  This is kept out of
     // BootstrapDirect so an evaluator cannot self-author a correctness/noise
