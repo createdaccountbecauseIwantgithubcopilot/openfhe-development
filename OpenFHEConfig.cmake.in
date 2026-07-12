@@ -4,9 +4,25 @@
 #  OpenFHE_LIBRARIES    - libraries to link against
 get_filename_component(OpenFHE_CMAKE_DIR "${CMAKE_CURRENT_LIST_FILE}" PATH)
 
+# The adapter's exported public link interface names GLScheme::glscheme.
+# Discover it before importing OpenFHETargets, and only for OpenFHE packages
+# that were actually built with the default-off provider enabled.
+set(OpenFHE_GLR_PRODUCTION_ADAPTER "@WITH_GLR_PRODUCTION_ADAPTER@")
+if(OpenFHE_GLR_PRODUCTION_ADAPTER)
+    include(CMakeFindDependencyMacro)
+    find_dependency(GLScheme CONFIG)
+endif()
+
 # Our library dependencies (contains definitions for IMPORTED targets)
 if(NOT OpenFHE_BINARY_DIR)
     include("${OpenFHE_CMAKE_DIR}/OpenFHETargets.cmake")
+endif()
+
+if(OpenFHE_GLR_PRODUCTION_ADAPTER AND TARGET GLRProductionAdapter AND
+   NOT TARGET OpenFHE::GLRProductionAdapter)
+    add_library(OpenFHE::GLRProductionAdapter INTERFACE IMPORTED)
+    set_property(TARGET OpenFHE::GLRProductionAdapter PROPERTY
+                 INTERFACE_LINK_LIBRARIES GLRProductionAdapter)
 endif()
 
 # These are IMPORTED targets created by OpenFHETargets.cmake

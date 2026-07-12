@@ -93,6 +93,9 @@ option(WITH_COVTEST "Turn on to enable coverage testing (can be used with g++ on
 option(WITH_NOISE_DEBUG "Use only when running lattice estimator; not for production"  OFF )
 option(WITH_REDUCED_NOISE "Enable reduced noise within HKS and BFV HPSPOVERQ modes"    OFF )
 option(USE_MACPORTS "Use MacPorts installed packages"                                  OFF )
+option(WITH_GLR_PRODUCTION_ADAPTER
+       "Build the optional native GLR production adapter against an installed GLScheme package"
+       OFF)
 
 # Set required number of bits for native integer in build by setting NATIVE_SIZE to 64 or 128
 if(NOT NATIVE_SIZE)
@@ -123,6 +126,7 @@ message(STATUS "WITH_COVTEST:       ${WITH_COVTEST}")
 message(STATUS "WITH_NOISE_DEBUG:   ${WITH_NOISE_DEBUG}")
 message(STATUS "WITH_REDUCED_NOISE: ${WITH_REDUCED_NOISE}")
 message(STATUS "USE_MACPORTS:       ${USE_MACPORTS}")
+message(STATUS "WITH_GLR_PRODUCTION_ADAPTER: ${WITH_GLR_PRODUCTION_ADAPTER}")
 
 #--------------------------------------------------------------------
 # Compiler logic
@@ -734,6 +738,13 @@ LIST(APPEND ADDITIONAL_CLEAN_FILES ${CMAKE_CURRENT_BINARY_DIR}/CMakeCache.txt)
 
 if(BUILD_UNITTESTS)
     set(UNITTESTMAIN ${PROJECT_SOURCE_DIR}/test/Main_TestAll.cpp)
+endif()
+
+# OpenFHE's historical monolithic tests are custom targets rather than CTest
+# entries.  The optional GLR provider has a small standalone smoke test, so
+# enable CTest at the project root only for that opt-in configuration.
+if(WITH_GLR_PRODUCTION_ADAPTER AND BUILD_UNITTESTS)
+    enable_testing()
 endif()
 
 add_subdirectory(src/core)
