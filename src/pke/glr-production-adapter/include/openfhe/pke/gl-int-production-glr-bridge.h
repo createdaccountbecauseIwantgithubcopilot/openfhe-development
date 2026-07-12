@@ -95,8 +95,14 @@ public:
     CiphertextImport ImportCoefficientCiphertext(
         const GLIntProductionCiphertext& ciphertext,
         const OwnerBinding& owner) const;
+    GLIntProductionCiphertext ExportCoefficientCiphertext(
+        const NativeCiphertext& ciphertext,
+        const OwnerBinding& owner) const;
     CiphertextImport ImportSlotCiphertext(
         const GLIntProductionSlotCiphertext& ciphertext,
+        const OwnerBinding& owner) const;
+    GLIntProductionSlotCiphertext ExportSlotCiphertext(
+        const NativeCiphertext& ciphertext,
         const OwnerBinding& owner) const;
 
     /** Always throws until an exact randomized Q7/L18 integer lift exists. */

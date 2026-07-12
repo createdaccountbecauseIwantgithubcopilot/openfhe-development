@@ -39,16 +39,21 @@ std::size_t CoefficientIndex(std::size_t n, std::size_t phi, std::size_t x,
     return (x * n + y) * phi + w;
 }
 
-std::int64_t CenteredCrt(std::uint32_t r0, std::uint32_t r1,
-                         std::uint32_t q0, std::uint32_t q1) {
+std::uint64_t CanonicalCrt(std::uint32_t r0, std::uint32_t r1,
+                           std::uint32_t q0, std::uint32_t q1) {
     const auto r0ModQ1 = static_cast<std::uint64_t>(r0) % q1;
     const auto difference =
         r1 >= r0ModQ1 ? static_cast<std::uint64_t>(r1) - r0ModQ1
                       : static_cast<std::uint64_t>(q1) - (r0ModQ1 - r1);
     const auto correction = glscheme::rns::glr_mulmod(
         difference, glscheme::rns::glr_invmod(q0 % q1, q1), q1);
-    const auto value = static_cast<std::uint64_t>(r0) +
-                       static_cast<std::uint64_t>(q0) * correction;
+    return static_cast<std::uint64_t>(r0) +
+           static_cast<std::uint64_t>(q0) * correction;
+}
+
+std::int64_t CenteredCrt(std::uint32_t r0, std::uint32_t r1,
+                         std::uint32_t q0, std::uint32_t q1) {
+    const auto value = CanonicalCrt(r0, r1, q0, q1);
     const auto modulus = static_cast<std::uint64_t>(q0) * q1;
     if (modulus > static_cast<std::uint64_t>(
                       std::numeric_limits<std::int64_t>::max())) {
@@ -57,6 +62,39 @@ std::int64_t CenteredCrt(std::uint32_t r0, std::uint32_t r1,
     return value <= modulus / 2
                ? static_cast<std::int64_t>(value)
                : -static_cast<std::int64_t>(modulus - value);
+}
+
+std::uint64_t RequireIntegerScale(double scale, std::uint64_t t) {
+    if (!std::isfinite(scale) || scale < 1.0 || scale >= t ||
+        std::floor(scale) != scale) {
+        throw GLContextMismatchError(
+            "GL integer bridge requires an exact integral plaintext scale");
+    }
+    return static_cast<std::uint64_t>(scale);
+}
+
+GLIntProductionModResidue GaussianResidueAt(
+    const glscheme::rns::GlrContext& context, const GlrPoly& poly,
+    std::uint32_t prime, std::uint32_t x, std::uint32_t y,
+    std::uint32_t w) {
+    const auto& modulus = context.params.q_chain[prime];
+    const auto flat =
+        (static_cast<std::size_t>(w) * context.n() + x) * context.n() + y;
+    const auto plus = poly.lane_ptr(context, prime, 0)[flat];
+    const auto minus = poly.lane_ptr(context, prime, 1)[flat];
+    const auto sum = plus + minus >= modulus.q
+                         ? plus + minus - modulus.q
+                         : plus + minus;
+    const auto difference =
+        plus >= minus ? plus - minus : modulus.q - (minus - plus);
+    return {
+        static_cast<std::uint32_t>(glscheme::rns::glr_mulmod(
+            sum, modulus.two_inv, modulus.q)),
+        static_cast<std::uint32_t>(glscheme::rns::glr_mulmod(
+            difference,
+            glscheme::rns::glr_mulmod(modulus.two_inv, modulus.u_inv,
+                                      modulus.q),
+            modulus.q))};
 }
 
 std::int64_t ReduceModT(__int128 value, std::int64_t t) noexcept {
@@ -352,6 +390,65 @@ GLIntProductionGLRBridge::ImportCoefficientCiphertext(
     return result;
 }
 
+GLIntProductionCiphertext
+GLIntProductionGLRBridge::ExportCoefficientCiphertext(
+    const NativeCiphertext& ciphertext, const OwnerBinding& owner) const {
+    ValidateOwner(owner.GetReceipt().integerKeyTag, owner,
+                  "native GL integer coefficient export");
+    const auto& context = m_adapter->GetContext();
+    const auto expectedWords = static_cast<std::size_t>(2) * 2 *
+                               context.params.coeffs_Rp();
+    if (ciphertext.key_id != kUntrustedIntegerKeyDomain ||
+        ciphertext.key_lineage_commitment !=
+            owner.GetReceipt().nativeKeyLineageCommitment ||
+        ciphertext.level != m_q2Level ||
+        ciphertext.b.ring != GlrRing::Rp ||
+        ciphertext.a.ring != GlrRing::Rp ||
+        ciphertext.b.domain != GlrDomain::Coeff ||
+        ciphertext.a.domain != GlrDomain::Coeff || ciphertext.b.extended ||
+        ciphertext.a.extended || ciphertext.b.level != m_q2Level ||
+        ciphertext.a.level != m_q2Level ||
+        ciphertext.b.data.size() != expectedWords ||
+        ciphertext.a.data.size() != expectedWords) {
+        throw GLContextMismatchError(
+            "native GL integer coefficient export requires an authentic untrusted Q2/L23 ciphertext");
+    }
+    const auto plaintextScale = RequireIntegerScale(ciphertext.scale, 1579009);
+    const auto parameters = GLIntWBatchedParameters::GL128257N32();
+    const auto roots = GLIntProductionCore(parameters).GetRoots();
+    const auto n = static_cast<std::size_t>(parameters.dimension);
+    const auto phi =
+        static_cast<std::size_t>(parameters.cyclotomicPrime - 1);
+    std::vector<GLIntProductionCiphertextPlane> planes(2);
+    for (std::uint32_t prime = 0; prime < 2; ++prime) {
+        auto& plane = planes[prime];
+        plane.modulus =
+            static_cast<std::uint32_t>(context.params.q_chain[prime].q);
+        plane.b.resize(n * n * phi);
+        plane.a.resize(n * n * phi);
+        for (std::size_t x = 0; x < n; ++x) {
+            for (std::size_t y = 0; y < n; ++y) {
+                for (std::size_t w = 0; w < phi; ++w) {
+                    const auto index = CoefficientIndex(n, phi, x, y, w);
+                    plane.b[index] = GaussianResidueAt(
+                        context, ciphertext.b, prime,
+                        static_cast<std::uint32_t>(x),
+                        static_cast<std::uint32_t>(y),
+                        static_cast<std::uint32_t>(w));
+                    plane.a[index] = GaussianResidueAt(
+                        context, ciphertext.a, prime,
+                        static_cast<std::uint32_t>(x),
+                        static_cast<std::uint32_t>(y),
+                        static_cast<std::uint32_t>(w));
+                }
+            }
+        }
+    }
+    return GLIntProductionCiphertext(
+        parameters, roots, owner.GetReceipt().integerKeyTag, 0,
+        plaintextScale, std::move(planes));
+}
+
 GLIntProductionGLRBridge::CiphertextImport
 GLIntProductionGLRBridge::ImportSlotCiphertext(
     const GLIntProductionSlotCiphertext& ciphertext,
@@ -395,6 +492,71 @@ GLIntProductionGLRBridge::ImportSlotCiphertext(
         result.native.key_lineage_commitment;
     result.receipt.ownerSecretLineageBound = true;
     return result;
+}
+
+GLIntProductionSlotCiphertext GLIntProductionGLRBridge::ExportSlotCiphertext(
+    const NativeCiphertext& ciphertext, const OwnerBinding& owner) const {
+    ValidateOwner(owner.GetReceipt().integerKeyTag, owner,
+                  "native GL integer Slot export");
+    const auto& context = m_adapter->GetContext();
+    const auto expectedWords = static_cast<std::size_t>(2) * 2 *
+                               context.params.coeffs_Rp();
+    if (ciphertext.key_id != kUntrustedIntegerKeyDomain ||
+        ciphertext.key_lineage_commitment !=
+            owner.GetReceipt().nativeKeyLineageCommitment ||
+        ciphertext.level != m_q2Level ||
+        ciphertext.b.ring != GlrRing::Rp ||
+        ciphertext.a.ring != GlrRing::Rp ||
+        ciphertext.b.domain != GlrDomain::Slot ||
+        ciphertext.a.domain != GlrDomain::Slot || ciphertext.b.extended ||
+        ciphertext.a.extended || ciphertext.b.level != m_q2Level ||
+        ciphertext.a.level != m_q2Level ||
+        ciphertext.b.data.size() != expectedWords ||
+        ciphertext.a.data.size() != expectedWords) {
+        throw GLContextMismatchError(
+            "native GL integer Slot export requires an authentic untrusted Q2/L23 ciphertext");
+    }
+    const auto plaintextScale = RequireIntegerScale(ciphertext.scale, 1579009);
+    const auto n = static_cast<std::size_t>(context.n());
+    const auto phi = static_cast<std::size_t>(context.phi());
+    std::vector<GLIntProductionSlotCiphertextValue> values;
+    for (std::uint32_t lane = 0; lane < 2; ++lane) {
+        const auto branch = lane == 0 ? GLIntBranch::Plus
+                                      : GLIntBranch::Minus;
+        for (std::size_t matrix = 0; matrix < phi; ++matrix) {
+            for (std::size_t row = 0; row < n; ++row) {
+                for (std::size_t column = 0; column < n; ++column) {
+                    const auto flat = (matrix * n + row) * n + column;
+                    const auto b0 = static_cast<std::uint32_t>(
+                        ciphertext.b.lane_ptr(context, 0, lane)[flat]);
+                    const auto b1 = static_cast<std::uint32_t>(
+                        ciphertext.b.lane_ptr(context, 1, lane)[flat]);
+                    const auto a0 = static_cast<std::uint32_t>(
+                        ciphertext.a.lane_ptr(context, 0, lane)[flat]);
+                    const auto a1 = static_cast<std::uint32_t>(
+                        ciphertext.a.lane_ptr(context, 1, lane)[flat]);
+                    if (b0 == 0 && b1 == 0 && a0 == 0 && a1 == 0) {
+                        continue;
+                    }
+                    values.push_back(
+                        {branch, static_cast<std::uint32_t>(matrix),
+                         static_cast<std::uint32_t>(row),
+                         static_cast<std::uint32_t>(column),
+                         CanonicalCrt(b0, b1, m_q0, m_q1),
+                         CanonicalCrt(a0, a1, m_q0, m_q1)});
+                    if (values.size() > kGLIntProductionMaxLogicalValues) {
+                        throw GLDimensionError(
+                            "native GL integer Slot export exceeds the bounded sparse support");
+                    }
+                }
+            }
+        }
+    }
+    return GLIntProductionSlotCiphertext(
+        GLIntWBatchedParameters::GL128257N32(),
+        owner.GetReceipt().integerKeyTag,
+        static_cast<std::uint64_t>(m_q0) * m_q1, plaintextScale,
+        std::move(values));
 }
 
 void GLIntProductionGLRBridge::RequireBootstrapDirectAdmission(

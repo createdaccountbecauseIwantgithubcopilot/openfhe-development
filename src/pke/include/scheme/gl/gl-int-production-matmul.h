@@ -48,6 +48,7 @@ public:
 
 private:
     friend class GLIntProductionMatMulCore;
+    friend class GLIntProductionGLRBridge;
 
     GLIntProductionSlotCiphertext(
         GLIntWBatchedParameters parameters, std::string keyTag,

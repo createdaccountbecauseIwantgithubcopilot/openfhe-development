@@ -59,9 +59,9 @@ public:
 
 private:
     friend class GLIntProductionRLWECore;
+    friend class GLIntProductionGLRBridge;
     friend class GLIntProductionSwitchCore;
     friend class GLIntProductionMatMulCore;
-    friend class GLIntProductionGLRBridge;
 
     struct Term {
         uint32_t x{0};
@@ -95,6 +95,7 @@ public:
 
 private:
     friend class GLIntProductionRLWECore;
+    friend class GLIntProductionGLRBridge;
 
     GLIntProductionCiphertext(
         GLIntWBatchedParameters parameters, GLIntWBatchedCodecRoots roots,
