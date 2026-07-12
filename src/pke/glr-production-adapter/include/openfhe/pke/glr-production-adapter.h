@@ -15,6 +15,7 @@
 #include "glscheme/gl128_ciphertext_artifact.hpp"
 #include "glscheme/gl128_h64_bootstrap_research.hpp"
 #include "glscheme/gl128_h64_hidden_selector.hpp"
+#include "glscheme/gl128_h64_p257_one_bit.hpp"
 #include "glscheme/gl128_h64_root_product_oracle.hpp"
 #include "glscheme/gl128_h64_structured_security_audit.hpp"
 #include "glscheme/gl128_h64_w_action_plan.hpp"
@@ -350,6 +351,14 @@ public:
         glscheme::rns::GlrH64OwnerRootProductEvidence;
     using NativeGL128H64OwnerRootProductResult =
         glscheme::rns::GlrH64OwnerRootProductResult;
+    using NativeGL128H64P257OneBitMaterial =
+        glscheme::rns::GlrH64P257OneBitMaterial;
+    using NativeGL128H64P257OneBitRequest =
+        glscheme::rns::GlrH64P257OneBitRequest;
+    using NativeGL128H64P257OneBitEvidence =
+        glscheme::rns::GlrH64P257OneBitEvidence;
+    using NativeGL128H64P257OneBitResult =
+        glscheme::rns::GlrH64P257OneBitResult;
     using NativeGL128H64CheckedEstimatorTranscript =
         glscheme::rns::GlrH64CheckedEstimatorTranscript;
     using NativeGL128H64StructuredSecurityAudit =
@@ -441,6 +450,41 @@ public:
         bool bootstrapDirectAdmitted = false;
     };
 
+    // Executable CPU anchor for one canonical encrypted W-index bit.  This
+    // is deliberately a distinct capability from the metadata-only complete
+    // logarithmic plan: it covers the full 32,768-coordinate grid and the
+    // real P13 CMux/product/relinearize/paired-rescale path, but not prefix
+    // splice, keyed W rotations, all eight bits, or a complete H64 row.
+    struct NativeGL128H64P257OneBitCapabilities final {
+        std::string schema =
+            "openfhe.gl128_h64_p257_one_bit_capabilities.v1";
+        std::string nativeMaterialSchema =
+            "glscheme.gl128_h64_p257_one_bit_material.v1";
+        std::string nativeEvidenceSchema =
+            "glscheme.gl128_h64_p257_one_bit_evidence.v1";
+        std::uint32_t matrixOrder = 128;
+        std::uint32_t matrixCount = 256;
+        std::uint64_t xwCoordinatesPerRequest = 32768;
+        std::uint32_t encryptedWBitsExecuted = 1;
+        std::uint32_t controlSpecialPrimeCount = 13;
+        std::uint32_t relinearizationSpecialPrimeCount = 13;
+        std::uint32_t inputLevel = 0;
+        std::uint32_t outputLevel = 2;
+        bool cpuValueExecutionExposed = true;
+        bool gpuValueExecutionExposed = false;
+        bool actualCiphertextProductExecuted = true;
+        bool exactPairedRescaleExecuted = true;
+        bool outputReanchoredToDelta = false;
+        bool encryptedPrefixSpliceExecuted = false;
+        bool keyedWRotationsExecuted = false;
+        bool completeEightBitWActionExecuted = false;
+        bool hiddenFineXSelectionExecuted = false;
+        bool hiddenSignSelectionExecuted = false;
+        bool exactNoiseEvidencePresent = false;
+        bool productionSecurityAuthorized = false;
+        bool bootstrapDirectAdmitted = false;
+    };
+
     // Allocation-free projection of the checked structured-H64 audit.  The
     // 134.213965-bit number is explicitly the free-support SparseTernary(h64)
     // proxy over Q25P14, not a certificate for the implemented public-window
@@ -482,6 +526,14 @@ public:
     static_assert(!std::is_constructible_v<
                   NativeGL128DirectBootstrapAuthorizationBundle,
                   NativeGL128H64WActionPlan>);
+    static_assert(NativeGL128H64P257OneBitEvidence::research_only);
+    static_assert(!NativeGL128H64P257OneBitEvidence::
+                      production_security_authorized);
+    static_assert(!NativeGL128H64P257OneBitEvidence::
+                      bootstrap_direct_admitted);
+    static_assert(!std::is_convertible_v<
+                  NativeGL128H64P257OneBitResult,
+                  NativeGL128BootstrapResult>);
     static_assert(NativeGL128H64OwnerRootProductEvidence::owner_only);
     static_assert(!NativeGL128H64OwnerRootProductEvidence::evaluator_callable);
     static_assert(!NativeGL128H64OwnerRootProductEvidence::
@@ -1293,6 +1345,15 @@ public:
     NativeGL128H64WActionPlan PlanH64WActionResearch() const;
     NativeGL128H64WActionResearchCapabilities
     GetH64WActionResearchCapabilities() const;
+    NativeGL128H64P257OneBitCapabilities
+    GetH64P257OneBitCapabilities() const;
+    NativeGL128H64P257OneBitMaterial GenerateH64P257OneBitMaterial(
+        const SparseSecretKey& sparseKey,
+        const NativeGL128H64HiddenSelectorOwnerSeed& ownerSeed,
+        std::uint64_t seed) const;
+    NativeGL128H64P257OneBitResult EvaluateH64P257OneBitCpu(
+        const NativeGL128H64P257OneBitMaterial& material,
+        std::span<const NativeGL128H64P257OneBitRequest> requests) const;
     NativeGL128H64StructuredSecurityAudit
     AuditH64StructuredSecurity() const;
     NativeGL128H64StructuredSecurityCapabilities

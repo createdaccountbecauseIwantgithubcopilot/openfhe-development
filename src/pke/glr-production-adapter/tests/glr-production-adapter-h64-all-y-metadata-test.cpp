@@ -136,6 +136,39 @@ int main() {
                 !wCapabilities.bootstrapDirectAdmitted,
             "OpenFHE H64 W-action capability projection is malformed");
 
+    const auto oneBit = adapter.GetH64P257OneBitCapabilities();
+    Require(oneBit.schema ==
+                    "openfhe.gl128_h64_p257_one_bit_capabilities.v1" &&
+                oneBit.nativeMaterialSchema ==
+                    "glscheme.gl128_h64_p257_one_bit_material.v1" &&
+                oneBit.nativeEvidenceSchema ==
+                    "glscheme.gl128_h64_p257_one_bit_evidence.v1" &&
+                oneBit.matrixOrder == 128 && oneBit.matrixCount == 256 &&
+                oneBit.xwCoordinatesPerRequest == 32768 &&
+                oneBit.encryptedWBitsExecuted == 1 &&
+                oneBit.controlSpecialPrimeCount == 13 &&
+                oneBit.relinearizationSpecialPrimeCount == 13 &&
+                oneBit.inputLevel == 0 && oneBit.outputLevel == 2 &&
+                oneBit.cpuValueExecutionExposed &&
+                !oneBit.gpuValueExecutionExposed &&
+                oneBit.actualCiphertextProductExecuted &&
+                oneBit.exactPairedRescaleExecuted &&
+                !oneBit.outputReanchoredToDelta &&
+                !oneBit.encryptedPrefixSpliceExecuted &&
+                !oneBit.keyedWRotationsExecuted &&
+                !oneBit.completeEightBitWActionExecuted &&
+                !oneBit.hiddenFineXSelectionExecuted &&
+                !oneBit.hiddenSignSelectionExecuted &&
+                !oneBit.exactNoiseEvidencePresent &&
+                !oneBit.productionSecurityAuthorized &&
+                !oneBit.bootstrapDirectAdmitted,
+            "OpenFHE canonical H64 one-bit capability is malformed");
+
+    auto generateOneBit = &Adapter::GenerateH64P257OneBitMaterial;
+    auto executeOneBit = &Adapter::EvaluateH64P257OneBitCpu;
+    Require(generateOneBit != nullptr && executeOneBit != nullptr,
+            "OpenFHE canonical H64 one-bit execution seam is absent");
+
     const auto structuredAudit = adapter.AuditH64StructuredSecurity();
     const auto structuredCapabilities =
         adapter.GetH64StructuredSecurityCapabilities();

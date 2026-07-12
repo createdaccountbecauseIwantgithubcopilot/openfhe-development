@@ -2728,6 +2728,50 @@ GLRProductionAdapter::GetH64WActionResearchCapabilities() const {
     return capabilities;
 }
 
+GLRProductionAdapter::NativeGL128H64P257OneBitCapabilities
+GLRProductionAdapter::GetH64P257OneBitCapabilities() const {
+    (void)glscheme::rns::glr_gl128_validate_context(m_context);
+    NativeGL128H64P257OneBitCapabilities capabilities;
+    if (!capabilities.cpuValueExecutionExposed ||
+        capabilities.gpuValueExecutionExposed ||
+        !capabilities.actualCiphertextProductExecuted ||
+        !capabilities.exactPairedRescaleExecuted ||
+        capabilities.outputReanchoredToDelta ||
+        capabilities.encryptedPrefixSpliceExecuted ||
+        capabilities.keyedWRotationsExecuted ||
+        capabilities.completeEightBitWActionExecuted ||
+        capabilities.hiddenFineXSelectionExecuted ||
+        capabilities.hiddenSignSelectionExecuted ||
+        capabilities.exactNoiseEvidencePresent ||
+        capabilities.productionSecurityAuthorized ||
+        capabilities.bootstrapDirectAdmitted) {
+        throw GlrError(
+            "GLRProductionAdapter: canonical one-bit H64 capability "
+            "overstates execution or security admission");
+    }
+    return capabilities;
+}
+
+GLRProductionAdapter::NativeGL128H64P257OneBitMaterial
+GLRProductionAdapter::GenerateH64P257OneBitMaterial(
+    const SparseSecretKey& sparseKey,
+    const NativeGL128H64HiddenSelectorOwnerSeed& ownerSeed,
+    std::uint64_t seed) const {
+    (void)glscheme::rns::glr_gl128_validate_context(m_context);
+    GlrRngOwner rng = MakeRng(seed);
+    return glscheme::rns::glr_generate_h64_p257_one_bit_material(
+        m_context, sparseKey, ownerSeed, *rng);
+}
+
+GLRProductionAdapter::NativeGL128H64P257OneBitResult
+GLRProductionAdapter::EvaluateH64P257OneBitCpu(
+    const NativeGL128H64P257OneBitMaterial& material,
+    std::span<const NativeGL128H64P257OneBitRequest> requests) const {
+    (void)glscheme::rns::glr_gl128_validate_context(m_context);
+    return glscheme::rns::glr_h64_p257_one_bit_root_action_cpu(
+        m_context, material, requests);
+}
+
 GLRProductionAdapter::NativeGL128H64StructuredSecurityAudit
 GLRProductionAdapter::AuditH64StructuredSecurity() const {
     const auto transcript =
