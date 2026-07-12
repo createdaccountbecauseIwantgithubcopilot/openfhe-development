@@ -401,9 +401,9 @@ void GLShipParameters::Validate(const GLGeometry& geometry,
     // mode keeps failing closed at n=4096 pending production parameters.
     if (dimension != geometry.GetDimension() ||
         (dimension != 4 && dimension != 8 && dimension != 16 && dimension != 32 &&
-         dimension != 64)) {
+         dimension != 64 && dimension != 128)) {
         throw GLShipParameterError(
-            "GL SHIP conformance supports matching n=4/8, plus direct-column n=16/32/64");
+            "GL SHIP conformance supports matching n=4/8, plus direct-column n=16/32/64/128");
     }
     if (!std::isfinite(gamma) || gamma <= 2.0) {
         throw GLShipParameterError("GL SHIP gamma must be finite and greater than two");
@@ -456,7 +456,7 @@ void GLShipParameters::Validate(const GLGeometry& geometry,
         throw GLNativeModeError("GL SHIP requires exact ringDimension=2n; transport rings are rejected");
     }
     if (glParameters.securityLevel != HEStd_NotSet) {
-        throw GLNativeModeError("GL SHIP n=4/8/16/32/64 is an HEStd_NotSet conformance mode only");
+        throw GLNativeModeError("GL SHIP n=4/8/16/32/64/128 is an HEStd_NotSet conformance mode only");
     }
     if (glParameters.scalingTechnique != FLEXIBLEAUTO) {
         throw GLShipUnsupportedError(

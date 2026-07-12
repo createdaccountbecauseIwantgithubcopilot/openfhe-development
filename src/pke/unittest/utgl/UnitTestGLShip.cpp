@@ -116,6 +116,10 @@ public:
         return key.m_fineSelectors;
     }
 
+    static std::size_t XForwardKeyCount(const GLShipEvaluationKey& key) {
+        return key.m_xForwardKeys ? key.m_xForwardKeys->size() : 0;
+    }
+
     static GLShipEvaluationKey WithoutConjugationKey(
         const GLShipEvaluationKey& source) {
         auto result = source;
@@ -370,10 +374,14 @@ GLCiphertext DepleteToTwoTowers(const GLCiphertext& input) {
 
 std::vector<std::complex<double>> RefreshMatrix(std::size_t n) {
     std::vector<std::complex<double>> result(n * n);
+    // Keep the independently checked XInv lanes inside SHIP's |lane| <= 1
+    // message contract as the exact conformance geometry grows.
+    const double realDenominator = static_cast<double>(std::max<std::size_t>(64, n));
     for (std::size_t row = 0; row < n; ++row) {
         for (std::size_t column = 0; column < n; ++column) {
             const double real =
-                (static_cast<double>(2 * row) - static_cast<double>(column) + 1.0) / 64.0;
+                (static_cast<double>(2 * row) - static_cast<double>(column) + 1.0) /
+                realDenominator;
             const int imagIndex = static_cast<int>((row + 2 * column) % 5) - 2;
             const double imag = static_cast<double>(imagIndex) / 128.0;
             result[row * n + column] = {real, imag};
@@ -863,6 +871,12 @@ void RunExactDirectRefreshOnlyIndependentOracleAndNegatives(std::size_t n) {
     GLShipSchemelet ship(gl, ShipParameters(n, 2));
     const auto primary = gl.KeyGen();
     auto client = ship.KeyGen(primary, {{3, 1}, {static_cast<uint32_t>(n - 2), -1}});
+    const auto babyStep = static_cast<std::size_t>(
+        std::ceil(std::sqrt(static_cast<double>(n))));
+    const auto giantStep = (n + babyStep - 1) / babyStep;
+    ASSERT_EQ(GLShipTestAccess::XForwardKeyCount(client.GetEvaluationKey()),
+              babyStep + giantStep - 2);
+    EXPECT_LT(GLShipTestAccess::XForwardKeyCount(client.GetEvaluationKey()), n - 1);
 
     const auto values = RefreshMatrix(n);
     const auto encoded = gl.Encode(GLPlaintext(n, values));
@@ -962,6 +976,10 @@ TEST(GLShip, ExactN32DirectRefreshOnlyIndependentOracleAndNegatives) {
 
 TEST(GLShip, ExactN64DirectRefreshOnlyIndependentOracleAndNegatives) {
     RunExactDirectRefreshOnlyIndependentOracleAndNegatives(64);
+}
+
+TEST(GLShip, ExactN128DirectRefreshOnlyIndependentOracleAndNegatives) {
+    RunExactDirectRefreshOnlyIndependentOracleAndNegatives(128);
 }
 
 TEST(GLShip, EncryptedSelectorIsLoadBearing) {
@@ -1281,6 +1299,7 @@ TEST(GLShip, HybridParametersValidateAndDepth) {
     GLSchemelet gl16(ExactParameters(16, 6));
     GLSchemelet gl32(ExactParameters(32, 6));
     GLSchemelet gl64(ExactParameters(64, 6));
+    GLSchemelet gl128(ExactParameters(128, 6));
     EXPECT_NO_THROW(GLShipSchemelet(gl4, HybridShipParameters(4, 2, 2)));
     EXPECT_NO_THROW(GLShipSchemelet(gl8, HybridShipParameters(8, 3, 4)));
     EXPECT_NO_THROW(GLShipSchemelet(gl8, HybridShipParameters(8, 3, 2)));
@@ -1298,6 +1317,9 @@ TEST(GLShip, HybridParametersValidateAndDepth) {
                  GLShipUnsupportedError);
     EXPECT_NO_THROW(GLShipSchemelet(gl64, ShipParameters(64, 2)));
     EXPECT_THROW(GLShipSchemelet(gl64, HybridShipParameters(64, 2, 2)),
+                 GLShipUnsupportedError);
+    EXPECT_NO_THROW(GLShipSchemelet(gl128, ShipParameters(128, 2)));
+    EXPECT_THROW(GLShipSchemelet(gl128, HybridShipParameters(128, 2, 2)),
                  GLShipUnsupportedError);
 
     // Negative #1: direct parameters take no hybrid coarse fields.
