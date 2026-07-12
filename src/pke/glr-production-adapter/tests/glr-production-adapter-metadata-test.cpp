@@ -30,10 +30,27 @@ int main() {
         std::is_same_v<Adapter::PublicKey, glscheme::rns::GlrPublicKey>);
     static_assert(!std::is_copy_constructible_v<Adapter>);
     static_assert(!std::is_copy_constructible_v<Adapter::EvaluationKeys>);
+    static_assert(std::is_trivially_copyable_v<
+                  Adapter::FixedProfileBindingText>);
+    static_assert(std::is_trivially_copyable_v<
+                  Adapter::RefreshTraceKeyEntry>);
+    static_assert(std::is_trivially_copyable_v<
+                  Adapter::OrdinaryRefreshPreflight>);
     using AdapterRef = const Adapter&;
     using CiphertextRef = const Adapter::Ciphertext&;
     using PlaintextRef = const Adapter::Plaintext&;
     using KeysRef = const Adapter::EvaluationKeys&;
+    using RefreshPreflightRef =
+        const Adapter::OrdinaryRefreshPreflight&;
+    static_assert(std::is_same_v<
+                  decltype(std::declval<AdapterRef>()
+                               .PreflightOrdinaryRefresh()),
+                  Adapter::OrdinaryRefreshPreflight>);
+    static_assert(std::is_same_v<
+                  decltype(std::declval<AdapterRef>()
+                               .ValidateOrdinaryRefreshPreflight(
+                                   std::declval<RefreshPreflightRef>())),
+                  void>);
     static_assert(std::is_same_v<
                   decltype(std::declval<AdapterRef>().Sub(
                       std::declval<CiphertextRef>(),
@@ -135,6 +152,113 @@ int main() {
                 expectedPublicKeyBytes == 25ULL * 1024 * 1024,
             "compact production public-key byte model is wrong");
 
+    // The production ordinary-refresh surface is deliberately a fixed-size
+    // preflight, not an execution API.  It consumes the native prime-p census
+    // and exposes the exact logarithmic trace key list while keeping value
+    // execution unavailable until all owner/provider material seams exist.
+    const Adapter::OrdinaryRefreshPreflight refresh =
+        adapter.PreflightOrdinaryRefresh();
+    adapter.ValidateOrdinaryRefreshPreflight(refresh);
+    Require(refresh.canonicalProfile.View() == profile.canonical_name &&
+                refresh.parameterFingerprint.View() ==
+                    profile.binding_fingerprint &&
+                refresh.layout == LayoutKind::gl128_257_n32_tensor &&
+                refresh.canonicalProfileBound,
+            "ordinary-refresh preflight lost its canonical profile binding");
+    Require(refresh.native.n == 128 && refresh.native.p == 257 &&
+                refresh.native.phi == 256 &&
+                refresh.native.centered_refreshes == 32768ULL &&
+                refresh.native.coefficients_packed == 4194304ULL &&
+                refresh.native.x_trace_unique_keys == 7 &&
+                refresh.native.w_trace_unique_keys == 8 &&
+                refresh.native.x_trace_rotations_per_readout == 7 &&
+                refresh.native.w_trace_rotations_per_readout == 8 &&
+                refresh.native.trace_key_switches == 491520ULL &&
+                refresh.native.exact_prime_w_dual &&
+                !refresh.native.heap_allocation_required,
+            "canonical prime-p refresh census is wrong");
+    Require(refresh.traceKeyCount ==
+                Adapter::kCanonicalRefreshTraceKeyCount &&
+                refresh.traceKeys.size() == 15,
+            "canonical refresh trace-key count is not exactly 15");
+    std::size_t traceIndex = 0;
+    for (std::int32_t amount = 1; amount < 128; amount *= 2) {
+        const auto& entry = refresh.traceKeys[traceIndex++];
+        Require(entry.id.direction ==
+                    glscheme::rns::GlrKsDirection::row_rotation &&
+                    entry.id.amount == amount &&
+                    entry.applications == 32768ULL,
+                "row trace-key direction/amount/application count is wrong");
+    }
+    for (std::int32_t amount = 1; amount < 256; amount *= 2) {
+        const auto& entry = refresh.traceKeys[traceIndex++];
+        Require(entry.id.direction ==
+                    glscheme::rns::GlrKsDirection::w_rotation &&
+                    entry.id.amount == amount &&
+                    entry.applications == 32768ULL,
+                "W trace-key direction/amount/application count is wrong");
+    }
+    Require(traceIndex == refresh.traceKeys.size(),
+            "refresh trace-key list has an unverified tail");
+    const std::uint64_t traceApplications = std::accumulate(
+        refresh.traceKeys.begin(), refresh.traceKeys.end(), std::uint64_t{0},
+        [](std::uint64_t sum,
+           const Adapter::RefreshTraceKeyEntry& entry) {
+            return sum + entry.applications;
+        });
+    Require(traceApplications == refresh.native.trace_key_switches,
+            "exact trace-key list does not sum to 491,520 switches");
+
+    using Direction = glscheme::rns::GlrKsDirection;
+    const std::array<Direction, 5> expectedEndpointDebts{
+        Direction::primary_to_sparse,
+        Direction::sparse_to_primary,
+        Direction::conjugation_to_sparse,
+        Direction::primary_conjtranspose_to_primary,
+        Direction::aux_conjtranspose_to_primary,
+    };
+    Require(refresh.endpointKeyDebtCount ==
+                Adapter::kCanonicalRefreshEndpointKeyDebtCount,
+            "full endpoint non-trace key debt count is wrong");
+    for (std::size_t i = 0; i < expectedEndpointDebts.size(); ++i) {
+        Require(refresh.endpointKeyDebts[i].direction ==
+                    expectedEndpointDebts[i] &&
+                    refresh.endpointKeyDebts[i].amount == 0,
+                "full endpoint non-trace key debt list is wrong");
+    }
+    Require(refresh.availability ==
+                Adapter::OrdinaryRefreshAvailability::preflight_only &&
+                refresh.sparseKeyRequired &&
+                refresh.encryptedSelectorBankRequired &&
+                refresh.encryptedGadgetBankRequired &&
+                refresh.dftBankRequired &&
+                !refresh.productionExecutionExposed,
+            "refresh preflight overstates production execution readiness");
+
+    const auto rejectedRefreshForgery = [&](auto mutate) {
+        Adapter::OrdinaryRefreshPreflight forged = refresh;
+        mutate(forged);
+        try {
+            adapter.ValidateOrdinaryRefreshPreflight(forged);
+        }
+        catch (const glscheme::rns::GlrError&) {
+            return true;
+        }
+        return false;
+    };
+    Require(rejectedRefreshForgery([](auto& forged) {
+                forged.parameterFingerprint.bytes[0] ^= 1;
+            }),
+            "cross-fingerprint refresh preflight did not fail closed");
+    Require(rejectedRefreshForgery([](auto& forged) {
+                forged.traceKeys[14].id.amount = 127;
+            }),
+            "forged refresh trace-key list did not fail closed");
+    Require(rejectedRefreshForgery([](auto& forged) {
+                forged.productionExecutionExposed = true;
+            }),
+            "forged production refresh readiness did not fail closed");
+
     // Planning is exact and allocation-free even for the production geometry.
     // It must deduplicate the Hermitian key shared by the explicit transform
     // and ciphertext MatMul, while retaining the two new §3.5/§3.6 families.
@@ -172,7 +296,6 @@ int main() {
                                                .size())),
             "level-0 plan disagrees with the native switch-key size model");
     }
-    using Direction = glscheme::rns::GlrKsDirection;
     const auto hasDirection = [&allPlan](Direction direction) {
         for (const auto& entry : allPlan.entries) {
             if (entry.id.direction == direction) {

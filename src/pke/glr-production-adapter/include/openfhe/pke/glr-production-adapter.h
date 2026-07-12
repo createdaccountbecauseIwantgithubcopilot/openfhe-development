@@ -12,11 +12,15 @@
 #include "glscheme/rns_hybrid_ks.hpp"
 #include "glscheme/rns_keygen.hpp"
 #include "glscheme/rns_public_key.hpp"
+#include "glscheme/rns_ship.hpp"
 #include "glscheme/rns_w_algebra.hpp"
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace lbcrypto {
@@ -34,6 +38,68 @@ public:
     using KeyRing = glscheme::rns::GlrRing;
     using KeyManifest = glscheme::rns::GlrKskManifest;
     using NativeKeyProvider = glscheme::rns::GlrKskProvider;
+    using NativeRefreshTracePreflight =
+        glscheme::rns::GlrShipRefreshOnlyPackPreflight;
+
+    // Fixed-capacity binding text keeps the refresh preflight itself free of
+    // heap-owning strings while still carrying the exact canonical name and
+    // native parameter fingerprint.  View() remains valid for the lifetime
+    // of the containing preflight value.
+    struct FixedProfileBindingText {
+        std::array<char, 96> bytes{};
+        std::uint32_t size = 0;
+
+        std::string_view View() const noexcept {
+            return size <= bytes.size()
+                       ? std::string_view(bytes.data(), size)
+                       : std::string_view{};
+        }
+    };
+
+    enum class OrdinaryRefreshAvailability : std::uint8_t {
+        // The adapter exposes no sparse-key, encrypted selector/gadget-bank,
+        // or DFT-bank owner/provider seam and no production value execution.
+        preflight_only = 1,
+    };
+
+    struct RefreshTraceKeyEntry {
+        KeyId id;
+        // Logarithmic doubling applies each exact key once per centered
+        // readout.  This is 32,768 for canonical GL-128-257-N32.
+        std::uint64_t applications = 0;
+    };
+
+    static constexpr std::size_t kCanonicalRefreshTraceKeyCount = 15;
+    static constexpr std::size_t kCanonicalRefreshEndpointKeyDebtCount = 5;
+
+    // Fixed-size, key/ciphertext-free ordinary-refresh census.  traceKeys are
+    // exactly row_rotation:{1,2,4,8,16,32,64} followed by
+    // w_rotation:{1,2,4,8,16,32,64,128}.  They are the coefficient-projector
+    // keys only, not a claim that production SHIP is executable.
+    // endpointKeyDebts separately names primary_to_sparse,
+    // sparse_to_primary, conjugation_to_sparse, the primary transform key,
+    // and the auxiliary transform key required by a full endpoint.
+    struct OrdinaryRefreshPreflight {
+        FixedProfileBindingText canonicalProfile;
+        FixedProfileBindingText parameterFingerprint;
+        glscheme::production::LayoutKind layout =
+            glscheme::production::LayoutKind::gl128_257_n32_tensor;
+        NativeRefreshTracePreflight native;
+        std::array<RefreshTraceKeyEntry,
+                   kCanonicalRefreshTraceKeyCount> traceKeys{};
+        std::uint32_t traceKeyCount = 0;
+        std::array<KeyId,
+                   kCanonicalRefreshEndpointKeyDebtCount> endpointKeyDebts{};
+        std::uint32_t endpointKeyDebtCount = 0;
+        OrdinaryRefreshAvailability availability =
+            OrdinaryRefreshAvailability::preflight_only;
+        bool canonicalProfileBound = false;
+        bool sparseKeyRequired = false;
+        bool encryptedSelectorBankRequired = false;
+        bool encryptedGadgetBankRequired = false;
+        bool dftBankRequired = false;
+        bool productionExecutionExposed = false;
+    };
 
     // Ordinary GL evaluation-key request.  Rotation amounts name the exact
     // native Galois keys to materialize; there is no implicit all-rotations
@@ -109,6 +175,16 @@ public:
     ~GLRProductionAdapter() = default;
 
     const Context& GetContext() const noexcept;
+
+    // Calls GLScheme's allocation-free prime-p refresh census and binds it to
+    // this adapter's exact GL-128-257-N32 context.  No key, ciphertext,
+    // selector/gadget bank, DFT bank, or sparse secret is allocated.  The
+    // validator is suitable for a copied/persisted preflight and rejects any
+    // profile, fingerprint, geometry, count, key-list, or availability
+    // tampering before it could be interpreted as evaluator readiness.
+    OrdinaryRefreshPreflight PreflightOrdinaryRefresh() const;
+    void ValidateOrdinaryRefreshPreflight(
+        const OrdinaryRefreshPreflight& preflight) const;
 
     // GLScheme's current owner-side encryption API is symmetric.  A zero seed
     // requests operating-system entropy; nonzero seeds are deterministic and

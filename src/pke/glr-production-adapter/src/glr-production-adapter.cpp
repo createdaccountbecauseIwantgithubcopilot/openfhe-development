@@ -315,6 +315,173 @@ const GLRProductionAdapter::NativeKeyProvider& RequireEvaluationKeys(
     return provider;
 }
 
+GLRProductionAdapter::FixedProfileBindingText FixedBindingText(
+    std::string_view value) {
+    GLRProductionAdapter::FixedProfileBindingText out;
+    if (value.size() > out.bytes.size()) {
+        throw GlrError(
+            "GLRProductionAdapter: canonical refresh binding text exceeds "
+            "its fixed-capacity representation");
+    }
+    std::copy(value.begin(), value.end(), out.bytes.begin());
+    out.size = static_cast<std::uint32_t>(value.size());
+    return out;
+}
+
+bool BindingTextEquals(
+    const GLRProductionAdapter::FixedProfileBindingText& lhs,
+    const GLRProductionAdapter::FixedProfileBindingText& rhs) {
+    if (lhs.size > lhs.bytes.size() || rhs.size > rhs.bytes.size() ||
+        lhs.size != rhs.size) {
+        return false;
+    }
+    return std::equal(lhs.bytes.begin(), lhs.bytes.begin() + lhs.size,
+                      rhs.bytes.begin());
+}
+
+bool NativeRefreshPreflightEquals(
+    const GLRProductionAdapter::NativeRefreshTracePreflight& lhs,
+    const GLRProductionAdapter::NativeRefreshTracePreflight& rhs) {
+    return lhs.n == rhs.n && lhs.p == rhs.p && lhs.phi == rhs.phi &&
+           lhs.x_trace_schedule == rhs.x_trace_schedule &&
+           lhs.w_trace_schedule == rhs.w_trace_schedule &&
+           lhs.x_trace_unique_keys == rhs.x_trace_unique_keys &&
+           lhs.w_trace_unique_keys == rhs.w_trace_unique_keys &&
+           lhs.x_trace_rotations_per_readout ==
+               rhs.x_trace_rotations_per_readout &&
+           lhs.w_trace_rotations_per_readout ==
+               rhs.w_trace_rotations_per_readout &&
+           lhs.centered_refreshes == rhs.centered_refreshes &&
+           lhs.coefficients_packed == rhs.coefficients_packed &&
+           lhs.x_centering_monomial_multiplies ==
+               rhs.x_centering_monomial_multiplies &&
+           lhs.w_dual_monomial_multiplies ==
+               rhs.w_dual_monomial_multiplies &&
+           lhs.w_dual_accumulator_additions ==
+               rhs.w_dual_accumulator_additions &&
+           lhs.trace_key_switches == rhs.trace_key_switches &&
+           lhs.exact_prime_w_dual == rhs.exact_prime_w_dual &&
+           lhs.heap_allocation_required == rhs.heap_allocation_required;
+}
+
+GLRProductionAdapter::OrdinaryRefreshPreflight
+MakeCanonicalOrdinaryRefreshPreflight(
+    const GLRProductionAdapter::Context& context) {
+    const auto profile = GLRProductionAdapter::CanonicalProfile();
+    const std::string fingerprint =
+        glscheme::rns::glr_parameter_fingerprint(context.params);
+    if (context.params.name != profile.parameter_source ||
+        context.n() != profile.n || context.p_() != profile.p ||
+        context.phi() != profile.phi ||
+        context.params.rescale_stride != 2 ||
+        fingerprint != profile.binding_fingerprint) {
+        throw GlrError(
+            "GLRProductionAdapter: ordinary-refresh preflight is not bound "
+            "to the exact GL-128-257-N32 N32 context");
+    }
+
+    GLRProductionAdapter::OrdinaryRefreshPreflight out;
+    out.canonicalProfile = FixedBindingText(profile.canonical_name);
+    out.parameterFingerprint = FixedBindingText(fingerprint);
+    out.layout = profile.layout;
+    out.native = glscheme::rns::glr_ship_refresh_only_pack_preflight(
+        profile.n, profile.p);
+    if (out.native.n != 128 || out.native.p != 257 ||
+        out.native.phi != 256 ||
+        out.native.centered_refreshes != 32768ULL ||
+        out.native.coefficients_packed != 4194304ULL ||
+        out.native.x_trace_unique_keys != 7 ||
+        out.native.w_trace_unique_keys != 8 ||
+        out.native.trace_key_switches != 491520ULL ||
+        !out.native.exact_prime_w_dual ||
+        out.native.heap_allocation_required) {
+        throw GlrError(
+            "GLRProductionAdapter: native ordinary-refresh preflight "
+            "diverged from the canonical production census");
+    }
+
+    std::size_t traceIndex = 0;
+    for (std::int32_t amount = 1; amount < 128; amount *= 2) {
+        out.traceKeys[traceIndex++] = {
+            GlrKskId{GlrKsDirection::row_rotation, amount},
+            out.native.centered_refreshes};
+    }
+    for (std::int32_t amount = 1; amount < 256; amount *= 2) {
+        out.traceKeys[traceIndex++] = {
+            GlrKskId{GlrKsDirection::w_rotation, amount},
+            out.native.centered_refreshes};
+    }
+    if (traceIndex != out.traceKeys.size()) {
+        throw GlrError(
+            "GLRProductionAdapter: canonical refresh trace-key census has "
+            "the wrong fixed cardinality");
+    }
+    out.traceKeyCount = static_cast<std::uint32_t>(traceIndex);
+
+    out.endpointKeyDebts = {
+        GlrKskId{GlrKsDirection::primary_to_sparse, 0},
+        GlrKskId{GlrKsDirection::sparse_to_primary, 0},
+        GlrKskId{GlrKsDirection::conjugation_to_sparse, 0},
+        GlrKskId{
+            GlrKsDirection::primary_conjtranspose_to_primary, 0},
+        GlrKskId{GlrKsDirection::aux_conjtranspose_to_primary, 0},
+    };
+    out.endpointKeyDebtCount =
+        static_cast<std::uint32_t>(out.endpointKeyDebts.size());
+    out.availability =
+        GLRProductionAdapter::OrdinaryRefreshAvailability::preflight_only;
+    out.canonicalProfileBound = true;
+    out.sparseKeyRequired = true;
+    out.encryptedSelectorBankRequired = true;
+    out.encryptedGadgetBankRequired = true;
+    out.dftBankRequired = true;
+    out.productionExecutionExposed = false;
+    return out;
+}
+
+void RequireCanonicalOrdinaryRefreshPreflight(
+    const GLRProductionAdapter::OrdinaryRefreshPreflight& actual,
+    const GLRProductionAdapter::OrdinaryRefreshPreflight& expected) {
+    bool keysMatch =
+        actual.traceKeyCount == expected.traceKeyCount &&
+        actual.traceKeyCount == actual.traceKeys.size();
+    for (std::size_t i = 0; i < actual.traceKeys.size(); ++i) {
+        keysMatch = keysMatch &&
+                    actual.traceKeys[i].id == expected.traceKeys[i].id &&
+                    actual.traceKeys[i].applications ==
+                        expected.traceKeys[i].applications;
+    }
+    bool debtsMatch =
+        actual.endpointKeyDebtCount == expected.endpointKeyDebtCount &&
+        actual.endpointKeyDebtCount == actual.endpointKeyDebts.size();
+    for (std::size_t i = 0; i < actual.endpointKeyDebts.size(); ++i) {
+        debtsMatch = debtsMatch &&
+                     actual.endpointKeyDebts[i] ==
+                         expected.endpointKeyDebts[i];
+    }
+    if (!BindingTextEquals(actual.canonicalProfile,
+                           expected.canonicalProfile) ||
+        !BindingTextEquals(actual.parameterFingerprint,
+                           expected.parameterFingerprint) ||
+        actual.layout != expected.layout ||
+        !NativeRefreshPreflightEquals(actual.native, expected.native) ||
+        !keysMatch || !debtsMatch ||
+        actual.availability != expected.availability ||
+        actual.canonicalProfileBound != expected.canonicalProfileBound ||
+        actual.sparseKeyRequired != expected.sparseKeyRequired ||
+        actual.encryptedSelectorBankRequired !=
+            expected.encryptedSelectorBankRequired ||
+        actual.encryptedGadgetBankRequired !=
+            expected.encryptedGadgetBankRequired ||
+        actual.dftBankRequired != expected.dftBankRequired ||
+        actual.productionExecutionExposed !=
+            expected.productionExecutionExposed) {
+        throw GlrError(
+            "GLRProductionAdapter: ordinary-refresh preflight is forged, "
+            "cross-profile, or overstates production execution readiness");
+    }
+}
+
 }  // namespace
 
 GLRProductionAdapter::EvaluationKeys::EvaluationKeys(
@@ -385,6 +552,17 @@ GLRProductionAdapter::GLRProductionAdapter(Context context)
 
 const GLRProductionAdapter::Context& GLRProductionAdapter::GetContext() const noexcept {
     return m_context;
+}
+
+GLRProductionAdapter::OrdinaryRefreshPreflight
+GLRProductionAdapter::PreflightOrdinaryRefresh() const {
+    return MakeCanonicalOrdinaryRefreshPreflight(m_context);
+}
+
+void GLRProductionAdapter::ValidateOrdinaryRefreshPreflight(
+    const OrdinaryRefreshPreflight& preflight) const {
+    RequireCanonicalOrdinaryRefreshPreflight(
+        preflight, MakeCanonicalOrdinaryRefreshPreflight(m_context));
 }
 
 GLRProductionAdapter::SecretKey GLRProductionAdapter::KeyGen(
