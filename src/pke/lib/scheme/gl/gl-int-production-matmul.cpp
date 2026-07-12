@@ -100,10 +100,12 @@ bool HasExactOrder(uint64_t value, uint64_t order, uint64_t modulus) {
            PowMod(value, order / remaining, modulus) != 1;
 }
 
-uint32_t MinimumElementOfOrder(uint64_t order, uint32_t modulus) {
-    for (uint32_t candidate = 2; candidate < modulus; ++candidate) {
+uint32_t RootFromSmallestGeneratorBase(uint64_t order, uint32_t modulus) {
+    const auto cofactor = (modulus - 1) / order;
+    for (uint32_t base = 2; base < modulus; ++base) {
+        const auto candidate = PowMod(base, cofactor, modulus);
         if (HasExactOrder(candidate, order, modulus)) {
-            return candidate;
+            return static_cast<uint32_t>(candidate);
         }
     }
     throw GLIntParameterError(
@@ -291,10 +293,15 @@ GLIntProductionMatMulCore::GLIntProductionMatMulCore(
     m_compositeModulus =
         static_cast<uint64_t>(m_moduli[0]) * m_moduli[1];
     for (const auto modulus : m_moduli) {
-        m_zeta.push_back(MinimumElementOfOrder(
-            4 * m_parameters.dimension, modulus));
-        m_eta.push_back(
-            MinimumElementOfOrder(m_parameters.cyclotomicPrime, modulus));
+        // Match the native GLR root table exactly: find the smallest element
+        // of order 4*n*p, then derive zeta=root^p and eta=root^(4*n).
+        const auto root4np = RootFromSmallestGeneratorBase(
+            4 * m_parameters.dimension * m_parameters.cyclotomicPrime,
+            modulus);
+        m_zeta.push_back(PowMod(root4np, m_parameters.cyclotomicPrime,
+                                modulus));
+        m_eta.push_back(PowMod(root4np, 4 * m_parameters.dimension,
+                               modulus));
     }
     auto remaining = m_compositeModulus - 1;
     while (remaining != 0) {

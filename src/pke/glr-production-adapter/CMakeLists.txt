@@ -2,6 +2,7 @@ find_package(GLScheme CONFIG REQUIRED)
 
 add_library(GLRProductionAdapter STATIC
     src/glr-production-adapter.cpp
+    src/gl-int-production-glr-bridge.cpp
 )
 add_library(OpenFHE::GLRProductionAdapter ALIAS GLRProductionAdapter)
 
@@ -12,10 +13,15 @@ target_include_directories(GLRProductionAdapter
         $<INSTALL_INTERFACE:include>
 )
 target_link_libraries(GLRProductionAdapter PUBLIC GLScheme::glscheme)
+if(BUILD_SHARED)
+    target_link_libraries(GLRProductionAdapter PUBLIC OPENFHEpke)
+elseif(BUILD_STATIC)
+    target_link_libraries(GLRProductionAdapter PUBLIC OPENFHEpke_static)
+endif()
 set_target_properties(GLRProductionAdapter PROPERTIES
     POSITION_INDEPENDENT_CODE ON
     PUBLIC_HEADER
-        "${CMAKE_CURRENT_SOURCE_DIR}/include/openfhe/pke/glr-production-adapter.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/openfhe/pke/glr-production-adapter.h;${CMAKE_CURRENT_SOURCE_DIR}/include/openfhe/pke/gl-int-production-glr-bridge.h"
 )
 
 install(TARGETS GLRProductionAdapter
@@ -38,6 +44,14 @@ target_link_libraries(glr_production_adapter_metadata_test
 
 add_executable(glr_production_adapter_resumable_pack_test
     tests/glr-production-adapter-resumable-pack-test.cpp
+)
+
+add_executable(gl_int_production_glr_bridge_link_test
+    tests/gl-int-production-glr-bridge-link-test.cpp
+)
+target_compile_features(gl_int_production_glr_bridge_link_test PRIVATE cxx_std_20)
+target_link_libraries(gl_int_production_glr_bridge_link_test
+    PRIVATE GLRProductionAdapter
 )
 target_compile_features(glr_production_adapter_resumable_pack_test
     PRIVATE cxx_std_20

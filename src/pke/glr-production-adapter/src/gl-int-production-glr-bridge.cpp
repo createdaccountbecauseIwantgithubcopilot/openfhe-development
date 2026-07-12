@@ -1,0 +1,399 @@
+//==================================================================================
+// BSD 2-Clause License
+//
+// Copyright (c) 2014-2026, NJIT, Duality Technologies Inc. and other contributors
+//
+// All rights reserved.
+//==================================================================================
+
+#include "openfhe/pke/gl-int-production-glr-bridge.h"
+
+#include <cmath>
+#include <limits>
+#include <string>
+#include <utility>
+#include <vector>
+
+namespace lbcrypto {
+namespace {
+
+using glscheme::rns::GlrDomain;
+using glscheme::rns::GlrError;
+using glscheme::rns::GlrPoly;
+using glscheme::rns::GlrRing;
+
+constexpr const char* kBootstrapRejection =
+    "BootstrapDirect rejected: integer Q2/L23 is not the required randomized "
+    "Q7/L18 primary Slot input, and no exact BGV m+t*e lift/SHIP mod-t "
+    "correctness theorem is bound";
+constexpr const char* kSecurityRejection =
+    "production security rejected: the source uses a support-revealing Q2 "
+    "ciphertext and sparse h<=4 Gaussian secret, not the admitted dense "
+    "primary plus independently certified h40 bootstrap lineage";
+
+std::size_t CoefficientIndex(std::size_t n, std::size_t phi, std::size_t x,
+                             std::size_t y, std::size_t w) noexcept {
+    return (x * n + y) * phi + w;
+}
+
+std::int64_t CenteredCrt(std::uint32_t r0, std::uint32_t r1,
+                         std::uint32_t q0, std::uint32_t q1) {
+    const auto r0ModQ1 = static_cast<std::uint64_t>(r0) % q1;
+    const auto difference =
+        r1 >= r0ModQ1 ? static_cast<std::uint64_t>(r1) - r0ModQ1
+                      : static_cast<std::uint64_t>(q1) - (r0ModQ1 - r1);
+    const auto correction = glscheme::rns::glr_mulmod(
+        difference, glscheme::rns::glr_invmod(q0 % q1, q1), q1);
+    const auto value = static_cast<std::uint64_t>(r0) +
+                       static_cast<std::uint64_t>(q0) * correction;
+    const auto modulus = static_cast<std::uint64_t>(q0) * q1;
+    if (modulus > static_cast<std::uint64_t>(
+                      std::numeric_limits<std::int64_t>::max())) {
+        throw GlrError("GL integer Q2 CRT product exceeds int64");
+    }
+    return value <= modulus / 2
+               ? static_cast<std::int64_t>(value)
+               : -static_cast<std::int64_t>(modulus - value);
+}
+
+std::int64_t ReduceModT(__int128 value, std::int64_t t) noexcept {
+    const auto remainder = value % t;
+    return static_cast<std::int64_t>(remainder < 0 ? remainder + t
+                                                   : remainder);
+}
+
+bool IsSha256Text(const std::string& value) {
+    if (value.size() != 71 || value.rfind("sha256:", 0) != 0) {
+        return false;
+    }
+    for (auto it = value.begin() + 7; it != value.end(); ++it) {
+        if (!((*it >= '0' && *it <= '9') ||
+              (*it >= 'a' && *it <= 'f'))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+}  // namespace
+
+GLIntProductionGLRBridge::OwnerBinding::OwnerBinding(
+    NativeSecretKey secret, Receipt receipt)
+    : m_secret(std::move(secret)), m_receipt(std::move(receipt)) {}
+
+GLIntProductionGLRBridge::OwnerBinding::~OwnerBinding() {
+    m_secret.secure_clear();
+}
+
+const GLIntProductionGLRBridge::NativeSecretKey&
+GLIntProductionGLRBridge::OwnerBinding::GetNativeSecretKey() const noexcept {
+    return m_secret;
+}
+
+const GLIntProductionGLRBridge::Receipt&
+GLIntProductionGLRBridge::OwnerBinding::GetReceipt() const noexcept {
+    return m_receipt;
+}
+
+GLIntProductionGLRBridge::GLIntProductionGLRBridge(
+    const GLRProductionAdapter& adapter)
+    : m_adapter(&adapter) {
+    const auto& context = m_adapter->GetContext();
+    const auto profile = m_adapter->GetCanonicalProfileReceipt();
+    const GLIntProductionRLWECore integerCore;
+    const auto& integerModuli = integerCore.GetModuli();
+    if (context.n() != 128 || context.p_() != 257 || context.phi() != 256 ||
+        context.params.levels() < 2 || integerModuli.size() != 2 ||
+        profile.profile_name != "GL-128-257-N32") {
+        throw GlrError("GL integer bridge requires canonical GL-128-257-N32");
+    }
+    m_q2Level = context.params.levels() - 2;
+    m_q0 = static_cast<std::uint32_t>(context.params.q_chain[0].q);
+    m_q1 = static_cast<std::uint32_t>(context.params.q_chain[1].q);
+    if (integerModuli[0] != m_q0 || integerModuli[1] != m_q1 ||
+        context.active_q_primes(m_q2Level) != 2) {
+        throw GlrError(
+            "GL integer and native GLR Q2 prefixes are not byte-compatible");
+    }
+}
+
+GLIntProductionGLRBridge::Capabilities
+GLIntProductionGLRBridge::GetCapabilities() const noexcept {
+    return {};
+}
+
+std::uint32_t GLIntProductionGLRBridge::GetNativeQ2Level() const noexcept {
+    return m_q2Level;
+}
+
+GLIntProductionGLRBridge::Receipt GLIntProductionGLRBridge::MakeReceipt(
+    std::string representation) const {
+    Receipt receipt;
+    receipt.parameterFingerprint = glscheme::rns::glr_parameter_fingerprint(
+        m_adapter->GetContext().params);
+    receipt.representation = std::move(representation);
+    receipt.admissionRejection = kBootstrapRejection;
+    receipt.plaintextModulus = 1579009;
+    receipt.nativeLevel = m_q2Level;
+    receipt.activeQPrimes = 2;
+    receipt.exactModuloT = true;
+    return receipt;
+}
+
+GLIntProductionGLRBridge::OwnerBinding
+GLIntProductionGLRBridge::ImportOwnerSecret(
+    const GLIntProductionSecretKey& secretKey) const {
+    secretKey.Validate();
+    if (!secretKey.GetParameters().IsGL128257N32Geometry() ||
+        secretKey.GetParameters().plaintextModulus != 1579009) {
+        throw GLKeyContextMismatchError(
+            "GL integer owner-secret bridge parameter mismatch");
+    }
+    const auto& context = m_adapter->GetContext();
+    NativeSecretKey native;
+    native.s = GlrPoly::zero(context, GlrRing::R, 0, true,
+                             GlrDomain::Coeff);
+    native.key_id = "primary";
+    for (const auto& term : secretKey.m_terms) {
+        glscheme::rns::glr_poly_set_gaussian(
+            context, native.s, term.x, 0, term.w, term.real,
+            term.imaginary);
+    }
+    auto receipt = MakeReceipt("owner-secret-full-QP-coefficient");
+    receipt.integerKeyTag = secretKey.GetKeyTag();
+    receipt.nativeKeyLineageCommitment =
+        glscheme::rns::glr_ship_direct_primary_secret_lineage_commitment(
+            context, native);
+    receipt.ownerSecretLineageBound =
+        IsSha256Text(receipt.nativeKeyLineageCommitment);
+    if (!receipt.ownerSecretLineageBound) {
+        native.secure_clear();
+        throw GLKeyContextMismatchError(
+            "GL integer owner-secret bridge failed native lineage derivation");
+    }
+    return OwnerBinding(std::move(native), std::move(receipt));
+}
+
+GLIntProductionGLRBridge::PlaintextImport
+GLIntProductionGLRBridge::ImportEncodedPlaintext(
+    const GLIntProductionEncodedPlaintext& plaintext) const {
+    plaintext.Validate();
+    if (!plaintext.GetParameters().IsGL128257N32Geometry() ||
+        plaintext.GetParameters().plaintextModulus != 1579009) {
+        throw GLContextMismatchError(
+            "GL integer plaintext bridge parameter mismatch");
+    }
+    const auto& context = m_adapter->GetContext();
+    PlaintextImport result;
+    result.native.poly = GlrPoly::zero(
+        context, GlrRing::Rp, m_q2Level, false, GlrDomain::Coeff);
+    const auto n = static_cast<std::size_t>(context.n());
+    const auto phi = static_cast<std::size_t>(context.phi());
+    for (std::size_t x = 0; x < n; ++x) {
+        for (std::size_t y = 0; y < n; ++y) {
+            for (std::size_t w = 0; w < phi; ++w) {
+                const auto& coefficient = plaintext.GetCoefficients()[
+                    CoefficientIndex(n, phi, x, y, w)];
+                glscheme::rns::glr_poly_set_gaussian(
+                    context, result.native.poly, static_cast<std::uint32_t>(x),
+                    static_cast<std::uint32_t>(y),
+                    static_cast<std::uint32_t>(w), coefficient.real,
+                    coefficient.imaginary);
+            }
+        }
+    }
+    result.native.scale = 1.0;
+    result.native.level = m_q2Level;
+    result.receipt = MakeReceipt("Q2-L23-Rp-coefficient-plaintext");
+    return result;
+}
+
+GLIntProductionEncodedPlaintext
+GLIntProductionGLRBridge::ExportEncodedPlaintextModT(
+    const NativePlaintext& plaintext) const {
+    const auto& context = m_adapter->GetContext();
+    if (plaintext.poly.ring != GlrRing::Rp ||
+        plaintext.poly.domain != GlrDomain::Coeff ||
+        plaintext.poly.extended || plaintext.poly.level != m_q2Level ||
+        plaintext.level != m_q2Level || plaintext.scale != 1.0 ||
+        plaintext.poly.prime_count(context) != 2) {
+        throw GLContextMismatchError(
+            "GL integer export requires an unscaled Q2/L23 Rp coefficient plaintext");
+    }
+    const auto parameters = GLIntWBatchedParameters::GL128257N32();
+    const auto roots = GLIntProductionCore(parameters).GetRoots();
+    const auto n = static_cast<std::size_t>(parameters.dimension);
+    const auto phi =
+        static_cast<std::size_t>(parameters.cyclotomicPrime - 1);
+    std::vector<GLIntGaussianResidue> coefficients(n * n * phi);
+    for (std::size_t x = 0; x < n; ++x) {
+        for (std::size_t y = 0; y < n; ++y) {
+            for (std::size_t w = 0; w < phi; ++w) {
+                __int128 real = 0;
+                __int128 imaginary = 0;
+                glscheme::rns::glr_poly_get_gaussian_centered(
+                    context, plaintext.poly, static_cast<std::uint32_t>(x),
+                    static_cast<std::uint32_t>(y),
+                    static_cast<std::uint32_t>(w), real, imaginary);
+                coefficients[CoefficientIndex(n, phi, x, y, w)] = {
+                    ReduceModT(real, parameters.plaintextModulus),
+                    ReduceModT(imaginary, parameters.plaintextModulus)};
+            }
+        }
+    }
+    return GLIntProductionEncodedPlaintext(parameters, roots,
+                                            std::move(coefficients));
+}
+
+void GLIntProductionGLRBridge::ValidateOwner(
+    const std::string& keyTag, const OwnerBinding& owner,
+    const char* operation) const {
+    const auto& receipt = owner.GetReceipt();
+    const auto fingerprint = glscheme::rns::glr_parameter_fingerprint(
+        m_adapter->GetContext().params);
+    const auto lineage =
+        glscheme::rns::glr_ship_direct_primary_secret_lineage_commitment(
+            m_adapter->GetContext(), owner.GetNativeSecretKey());
+    const auto& nativeSecret = owner.GetNativeSecretKey();
+    if (keyTag != receipt.integerKeyTag ||
+        receipt.parameterFingerprint != fingerprint ||
+        receipt.nativeKeyLineageCommitment != lineage ||
+        !receipt.ownerSecretLineageBound || !IsSha256Text(lineage) ||
+        nativeSecret.key_id != "primary" ||
+        nativeSecret.s.ring != GlrRing::R ||
+        nativeSecret.s.domain != GlrDomain::Coeff ||
+        nativeSecret.s.level != 0 || !nativeSecret.s.extended) {
+        throw GLKeyMismatchError(std::string(operation) +
+                                 " owner lineage/key-tag mismatch");
+    }
+}
+
+GLIntProductionGLRBridge::CiphertextImport
+GLIntProductionGLRBridge::ImportCoefficientCiphertext(
+    const GLIntProductionCiphertext& ciphertext,
+    const OwnerBinding& owner) const {
+    ciphertext.Validate();
+    ValidateOwner(ciphertext.GetKeyTag(), owner,
+                  "GL integer coefficient bridge");
+    if (ciphertext.GetLevel() != 0 || ciphertext.GetPlanes().size() != 2 ||
+        ciphertext.GetPlanes()[0].modulus != m_q0 ||
+        ciphertext.GetPlanes()[1].modulus != m_q1) {
+        throw GLContextMismatchError(
+            "GL integer coefficient bridge requires the complete Q2 prefix");
+    }
+    const auto& context = m_adapter->GetContext();
+    CiphertextImport result;
+    result.native.b = GlrPoly::zero(
+        context, GlrRing::Rp, m_q2Level, false, GlrDomain::Coeff);
+    result.native.a = GlrPoly::zero(
+        context, GlrRing::Rp, m_q2Level, false, GlrDomain::Coeff);
+    const auto n = static_cast<std::size_t>(context.n());
+    const auto phi = static_cast<std::size_t>(context.phi());
+    for (std::size_t x = 0; x < n; ++x) {
+        for (std::size_t y = 0; y < n; ++y) {
+            for (std::size_t w = 0; w < phi; ++w) {
+                const auto index = CoefficientIndex(n, phi, x, y, w);
+                for (const auto& pair : {
+                         std::pair{&result.native.b,
+                                   std::pair{&ciphertext.GetPlanes()[0].b,
+                                             &ciphertext.GetPlanes()[1].b}},
+                         std::pair{&result.native.a,
+                                   std::pair{&ciphertext.GetPlanes()[0].a,
+                                             &ciphertext.GetPlanes()[1].a}}}) {
+                    const auto& r0 = (*pair.second.first)[index];
+                    const auto& r1 = (*pair.second.second)[index];
+                    glscheme::rns::glr_poly_set_gaussian(
+                        context, *pair.first, static_cast<std::uint32_t>(x),
+                        static_cast<std::uint32_t>(y),
+                        static_cast<std::uint32_t>(w),
+                        CenteredCrt(r0.real, r1.real, m_q0, m_q1),
+                        CenteredCrt(r0.imaginary, r1.imaginary, m_q0, m_q1));
+                }
+            }
+        }
+    }
+    result.native.scale =
+        static_cast<double>(ciphertext.GetPlaintextScale());
+    result.native.level = m_q2Level;
+    result.native.key_id = "primary";
+    result.native.key_lineage_commitment =
+        owner.GetReceipt().nativeKeyLineageCommitment;
+    result.receipt = MakeReceipt("Q2-L23-Rp-coefficient-ciphertext");
+    result.receipt.integerKeyTag = ciphertext.GetKeyTag();
+    result.receipt.nativeKeyLineageCommitment =
+        result.native.key_lineage_commitment;
+    result.receipt.ownerSecretLineageBound = true;
+    return result;
+}
+
+GLIntProductionGLRBridge::CiphertextImport
+GLIntProductionGLRBridge::ImportSlotCiphertext(
+    const GLIntProductionSlotCiphertext& ciphertext,
+    const OwnerBinding& owner) const {
+    ciphertext.Validate();
+    ValidateOwner(ciphertext.GetKeyTag(), owner, "GL integer Slot bridge");
+    if (ciphertext.GetCompositeModulus() !=
+        static_cast<std::uint64_t>(m_q0) * m_q1) {
+        throw GLContextMismatchError(
+            "GL integer Slot bridge requires the canonical Q2 product");
+    }
+    const auto& context = m_adapter->GetContext();
+    CiphertextImport result;
+    result.native.b = GlrPoly::zero(context, GlrRing::Rp, m_q2Level, false,
+                                    GlrDomain::Slot);
+    result.native.a = GlrPoly::zero(context, GlrRing::Rp, m_q2Level, false,
+                                    GlrDomain::Slot);
+    const auto n = static_cast<std::size_t>(context.n());
+    for (const auto& value : ciphertext.GetValues()) {
+        const auto lane = value.branch == GLIntBranch::Plus ? 0U : 1U;
+        const auto flat =
+            (static_cast<std::size_t>(value.matrix) * n + value.row) * n +
+            value.column;
+        for (std::uint32_t prime = 0; prime < 2; ++prime) {
+            const auto modulus = context.params.q_chain[prime].q;
+            result.native.b.lane_ptr(context, prime, lane)[flat] =
+                value.b % modulus;
+            result.native.a.lane_ptr(context, prime, lane)[flat] =
+                value.a % modulus;
+        }
+    }
+    result.native.scale =
+        static_cast<double>(ciphertext.GetPlaintextScale());
+    result.native.level = m_q2Level;
+    result.native.key_id = "primary";
+    result.native.key_lineage_commitment =
+        owner.GetReceipt().nativeKeyLineageCommitment;
+    result.receipt = MakeReceipt("Q2-L23-Rp-slot-ciphertext");
+    result.receipt.integerKeyTag = ciphertext.GetKeyTag();
+    result.receipt.nativeKeyLineageCommitment =
+        result.native.key_lineage_commitment;
+    result.receipt.ownerSecretLineageBound = true;
+    return result;
+}
+
+void GLIntProductionGLRBridge::RequireBootstrapDirectAdmission(
+    const Receipt& receipt) const {
+    if (receipt.parameterFingerprint !=
+            glscheme::rns::glr_parameter_fingerprint(
+                m_adapter->GetContext().params) ||
+        receipt.nativeLevel != m_q2Level || receipt.activeQPrimes != 2 ||
+        receipt.bootstrapDirectAdmitted) {
+        throw GLContextMismatchError(
+            "malformed GL integer bridge receipt at bootstrap admission");
+    }
+    throw GlrError(kBootstrapRejection);
+}
+
+void GLIntProductionGLRBridge::RequireProductionSecurityAuthorization(
+    const Receipt& receipt) const {
+    if (receipt.parameterFingerprint !=
+            glscheme::rns::glr_parameter_fingerprint(
+                m_adapter->GetContext().params) ||
+        receipt.productionSecurityAuthorized) {
+        throw GLContextMismatchError(
+            "malformed GL integer bridge receipt at security admission");
+    }
+    throw GlrError(kSecurityRejection);
+}
+
+}  // namespace lbcrypto
