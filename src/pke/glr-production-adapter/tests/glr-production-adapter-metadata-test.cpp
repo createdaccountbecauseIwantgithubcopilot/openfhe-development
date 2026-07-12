@@ -308,8 +308,12 @@ int main() {
         const Adapter::DirectVectorAllYReturnPreflight&;
     using DirectAuthorizationRef =
         const Adapter::DirectVectorPrimaryAuthorization&;
+    using DirectOwnerKeyLineageRef =
+        const Adapter::DirectVectorOwnerKeyLineage&;
     using DirectStorageAuthorizationRef =
         const Adapter::DirectVectorPrimarySelectorStorageAuthorization&;
+    using DirectRecordPreflightRef =
+        const Adapter::DirectVectorSelectorRecordPreflight&;
     using DensePrimaryRef = const Adapter::
         NativeDirectVectorDensePrimarySecurityEvidence&;
     using DirectSmokeEvidenceRef =
@@ -334,7 +338,8 @@ int main() {
                                .AuthorizeDirectVectorPrimaryCandidate(
                                    std::declval<const std::string&>(),
                                    std::declval<SecurityReportRef>(),
-                                   std::declval<DensePrimaryRef>())),
+                                   std::declval<DensePrimaryRef>(),
+                                   std::declval<DirectOwnerKeyLineageRef>())),
                   Adapter::DirectVectorPrimaryAuthorization>);
     static_assert(std::is_same_v<
                   decltype(std::declval<AdapterRef>()
@@ -342,7 +347,8 @@ int main() {
                                    std::declval<DirectAuthorizationRef>(),
                                    std::declval<const std::string&>(),
                                    std::declval<SecurityReportRef>(),
-                                   std::declval<DensePrimaryRef>())),
+                                   std::declval<DensePrimaryRef>(),
+                                   std::declval<DirectOwnerKeyLineageRef>())),
                   void>);
     static_assert(std::is_same_v<
                   decltype(std::declval<AdapterRef>()
@@ -353,6 +359,19 @@ int main() {
     static_assert(std::is_same_v<
                   decltype(std::declval<AdapterRef>()
                                .ValidateDirectVectorPrimarySelectorStorageAuthorization(
+                                   std::declval<DirectStorageAuthorizationRef>(),
+                                   std::declval<DirectAuthorizationRef>())),
+                  void>);
+    static_assert(std::is_same_v<
+                  decltype(std::declval<AdapterRef>()
+                               .PreflightDirectVectorPrimarySelectorRecord(
+                                   std::declval<DirectStorageAuthorizationRef>(),
+                                   std::declval<DirectAuthorizationRef>())),
+                  Adapter::DirectVectorSelectorRecordPreflight>);
+    static_assert(std::is_same_v<
+                  decltype(std::declval<AdapterRef>()
+                               .ValidateDirectVectorPrimarySelectorRecordPreflight(
+                                   std::declval<DirectRecordPreflightRef>(),
                                    std::declval<DirectStorageAuthorizationRef>(),
                                    std::declval<DirectAuthorizationRef>())),
                   void>);
@@ -609,15 +628,22 @@ int main() {
         MakeGl128CorridorReport(
             context.params, 40, directSupportCommitment);
     const auto directDenseEvidence = MakeDensePrimarySecurityEvidence();
+    const Adapter::DirectVectorOwnerKeyLineage directOwnerKeyLineage{
+        "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        "sha256:3333333333333333333333333333333333333333333333333333333333333333"};
     const Adapter::DirectVectorPrimaryAuthorization directAuthorization =
         adapter.AuthorizeDirectVectorPrimaryCandidate(
             directSupportCommitment, directSparseReport,
-            directDenseEvidence);
+            directDenseEvidence, directOwnerKeyLineage);
     adapter.ValidateDirectVectorPrimaryAuthorization(
         directAuthorization, directSupportCommitment, directSparseReport,
-        directDenseEvidence);
+        directDenseEvidence, directOwnerKeyLineage);
     const auto& directNative = directAuthorization.native;
-    Require(directNative.production_candidate_metadata_authorized &&
+    Require(directNative.schema ==
+                    glscheme::rns::
+                        kGlrShipDirectVectorGl128PrimaryAuthorizationSchema &&
+                directNative.production_candidate_metadata_authorized &&
                 directNative.sparse_h40_q7_p14_report_bound &&
                 directNative.dense_primary_full_qp_report_bound &&
                 directNative.q0_only_sparse_public_input &&
@@ -644,6 +670,12 @@ int main() {
                     33030176ULL &&
                 directNative.reserved_transform_material_level == 17 &&
                 directNative.reserved_xw_forward_return_output_level == 22 &&
+                directNative.owner_key_seed_commitment ==
+                    directOwnerKeyLineage.ownerKskSeedCommitment &&
+                directNative.primary_secret_lineage_commitment ==
+                    directOwnerKeyLineage.primarySecretLineageCommitment &&
+                directNative.sparse_secret_lineage_commitment ==
+                    directOwnerKeyLineage.sparseSecretLineageCommitment &&
                 !directNative.xw_forward_return_composition_implemented &&
                 !directNative.y_coefficient_pack_implemented &&
                 !directNative.context_ciphertext_or_key_allocation_required &&
@@ -651,6 +683,7 @@ int main() {
                 !directNative.selector_material_generated &&
                 !directNative.value_execution &&
                 directAuthorization.metadataAuthorizationOnly &&
+                directAuthorization.ownerKeyLineageBound &&
                 !directAuthorization
                      .productionH40CiphertextValueExecutionPerformed &&
                 !directAuthorization
@@ -665,7 +698,7 @@ int main() {
         try {
             adapter.ValidateDirectVectorPrimaryAuthorization(
                 forged, directSupportCommitment, directSparseReport,
-                directDenseEvidence);
+                directDenseEvidence, directOwnerKeyLineage);
         }
         catch (const glscheme::rns::GlrError&) {
             rejected = true;
@@ -680,7 +713,7 @@ int main() {
         try {
             adapter.ValidateDirectVectorPrimaryAuthorization(
                 forged, directSupportCommitment, directSparseReport,
-                directDenseEvidence);
+                directDenseEvidence, directOwnerKeyLineage);
         }
         catch (const glscheme::rns::GlrError&) {
             rejected = true;
@@ -694,13 +727,45 @@ int main() {
         bool rejected = false;
         try {
             (void)adapter.AuthorizeDirectVectorPrimaryCandidate(
-                directSupportCommitment, directSparseReport, forgedDense);
+                directSupportCommitment, directSparseReport, forgedDense,
+                directOwnerKeyLineage);
         }
         catch (const glscheme::rns::GlrError&) {
             rejected = true;
         }
         Require(rejected,
                 "cross-transcript dense-primary authorization was accepted");
+    }
+    {
+        auto forged = directAuthorization;
+        forged.native.primary_secret_lineage_commitment[7] = 'f';
+        bool rejected = false;
+        try {
+            adapter.ValidateDirectVectorPrimaryAuthorization(
+                forged, directSupportCommitment, directSparseReport,
+                directDenseEvidence, directOwnerKeyLineage);
+        }
+        catch (const glscheme::rns::GlrError&) {
+            rejected = true;
+        }
+        Require(rejected,
+                "cross-lineage direct-vector authorization was accepted");
+    }
+    {
+        auto forgedLineage = directOwnerKeyLineage;
+        forgedLineage.primarySecretLineageCommitment =
+            forgedLineage.sparseSecretLineageCommitment;
+        bool rejected = false;
+        try {
+            (void)adapter.AuthorizeDirectVectorPrimaryCandidate(
+                directSupportCommitment, directSparseReport,
+                directDenseEvidence, forgedLineage);
+        }
+        catch (const glscheme::rns::GlrError&) {
+            rejected = true;
+        }
+        Require(rejected,
+                "duplicate owner key-lineage roots were accepted");
     }
 
     // Production selector storage has a separate core capability: the exact
@@ -737,6 +802,12 @@ int main() {
                     directNative.parameter_fingerprint &&
                 nativeStorage.support_commitment ==
                     directNative.support_commitment &&
+                nativeStorage.owner_key_seed_commitment ==
+                    directOwnerKeyLineage.ownerKskSeedCommitment &&
+                nativeStorage.primary_secret_lineage_commitment ==
+                    directOwnerKeyLineage.primarySecretLineageCommitment &&
+                nativeStorage.sparse_secret_lineage_commitment ==
+                    directOwnerKeyLineage.sparseSecretLineageCommitment &&
                 nativeStorage.sparse_security_transcript_sha256 ==
                     directNative.sparse_h40_security
                         .estimator_transcript_sha256 &&
@@ -747,7 +818,7 @@ int main() {
                 nativeStorage.signed_selector_count == 640 &&
                 nativeStorage.selector_admission.kind ==
                     glscheme::rns::GlrShipDirectSelectorAdmissionKind::
-                        compact_authenticated_streamed &&
+                        compact_authenticated_production_streamed &&
                 nativeStorage.selector_admission.full_selector_payload_bytes ==
                     directNative.plan.exact_resident_selector_bytes &&
                 nativeStorage.selector_admission.stored_selector_payload_bytes ==
@@ -757,12 +828,13 @@ int main() {
                 nativeStorage.production_metadata_authorization_bound &&
                 nativeStorage.compact_authenticated_streaming_admitted &&
                 !nativeStorage.generic_512_mib_cap_widened &&
-                !nativeStorage.production_generator_enabled &&
+                nativeStorage.production_generator_enabled &&
                 !nativeStorage.manifest_or_payload_generated &&
                 selectorStorage.metadataAuthorizationOnly &&
                 selectorStorage.canonicalPlanBound &&
                 selectorStorage.bothSecurityRootsBound &&
-                !selectorStorage.selectorGenerationEnabled &&
+                selectorStorage.ownerKeyLineageBound &&
+                selectorStorage.selectorGenerationEnabled &&
                 !selectorStorage.selectorManifestOrPayloadGenerated &&
                 !selectorStorage.selectorMaterialReady &&
                 !selectorStorage.valueExecution &&
@@ -799,6 +871,10 @@ int main() {
             }),
             "cross-root selector-storage receipt was accepted");
     Require(rejectedStorageReceipt([](auto& forged) {
+                forged.native.primary_secret_lineage_commitment[7] ^= 1;
+            }),
+            "cross-lineage selector-storage receipt was accepted");
+    Require(rejectedStorageReceipt([](auto& forged) {
                 ++forged.canonicalPlan.signed_selector_count;
             }),
             "cross-plan selector-storage receipt was accepted");
@@ -806,6 +882,22 @@ int main() {
                 forged.selectorMaterialReady = true;
             }),
             "metadata-only selector receipt was promoted to material ready");
+    Require(rejectedStorageReceipt([](auto& forged) {
+                forged.native.production_generator_enabled = false;
+            }),
+            "selector-storage receipt hid native generator availability");
+    Require(rejectedStorageReceipt([](auto& forged) {
+                forged.selectorGenerationEnabled = false;
+            }),
+            "selector-storage wrapper hid generator availability");
+    Require(rejectedStorageReceipt([](auto& forged) {
+                forged.native.manifest_or_payload_generated = true;
+            }),
+            "native selector storage was forged as payload generated");
+    Require(rejectedStorageReceipt([](auto& forged) {
+                forged.selectorManifestOrPayloadGenerated = true;
+            }),
+            "selector-storage wrapper was forged as payload generated");
     Require(rejectedStorageReceipt([](auto& forged) {
                 forged.valueExecution = true;
             }),
@@ -824,6 +916,76 @@ int main() {
         Require(rejected,
                 "selector storage accepted a forged source plan");
     }
+
+    // OpenFHE exposes only the exact allocation-free shape of the native
+    // random-access record boundary.  The core acceptance test already runs
+    // and decrypts a real N128 record; this adapter test must not repeat that
+    // owner-side allocation or imply that any record/material now exists.
+    const Adapter::DirectVectorSelectorRecordPreflight recordPreflight =
+        adapter.PreflightDirectVectorPrimarySelectorRecord(
+            selectorStorage, directAuthorization);
+    adapter.ValidateDirectVectorPrimarySelectorRecordPreflight(
+        recordPreflight, selectorStorage, directAuthorization);
+    Require(recordPreflight.schema ==
+                    glscheme::rns::
+                        kGlrShipDirectVectorGl128SelectorRecordGenerationSchema &&
+                recordPreflight.ownerKeyLineage.ownerKskSeedCommitment ==
+                    directOwnerKeyLineage.ownerKskSeedCommitment &&
+                recordPreflight.ownerKeyLineage
+                        .primarySecretLineageCommitment ==
+                    directOwnerKeyLineage.primarySecretLineageCommitment &&
+                recordPreflight.ownerKeyLineage
+                        .sparseSecretLineageCommitment ==
+                    directOwnerKeyLineage.sparseSecretLineageCommitment &&
+                recordPreflight.totalRecordCount == 640 &&
+                recordPreflight.selectorLevel == 4 &&
+                recordPreflight.activeQPrimes == 21 &&
+                recordPreflight.encodedRecordBytes == 11010274ULL &&
+                recordPreflight.expectedReturnedRecordAndEncodingBytes ==
+                    22020354ULL &&
+                recordPreflight.authorizedStreamingPeakBytes == 33030176ULL &&
+                recordPreflight.productionAuthorizationBound &&
+                recordPreflight.storageAdmissionBound &&
+                recordPreflight.ownerKeyLineageBound &&
+                recordPreflight.deterministicRandomAccessGeneratorAvailable &&
+                !recordPreflight.recordGenerated &&
+                !recordPreflight.manifestOrPayloadGenerated &&
+                !recordPreflight.selectorMaterialReady &&
+                !recordPreflight.valueExecution,
+            "random-access selector preflight overstated generation or lost "
+            "its exact lineage/record/peak shape");
+    const auto rejectedRecordPreflight = [&](auto mutate) {
+        auto forged = recordPreflight;
+        mutate(forged);
+        try {
+            adapter.ValidateDirectVectorPrimarySelectorRecordPreflight(
+                forged, selectorStorage, directAuthorization);
+        }
+        catch (const glscheme::rns::GlrError&) {
+            return true;
+        }
+        return false;
+    };
+    Require(rejectedRecordPreflight([](auto& forged) {
+                --forged.encodedRecordBytes;
+            }),
+            "forged random-access encoded-record bytes were accepted");
+    Require(rejectedRecordPreflight([](auto& forged) {
+                forged.ownerKeyLineage.sparseSecretLineageCommitment[7] ^= 1;
+            }),
+            "cross-lineage random-access preflight was accepted");
+    Require(rejectedRecordPreflight([](auto& forged) {
+                forged.recordGenerated = true;
+            }),
+            "random-access preflight was promoted to a generated record");
+    Require(rejectedRecordPreflight([](auto& forged) {
+                forged.manifestOrPayloadGenerated = true;
+            }),
+            "random-access preflight was promoted to generated payload");
+    Require(rejectedRecordPreflight([](auto& forged) {
+                forged.deterministicRandomAccessGeneratorAvailable = false;
+            }),
+            "random-access preflight hid native generator availability");
 
     // The n128/p257 h=2 rung is an explicitly insecure value smoke.  Bind its
     // exact native L4 -> L8 counter receipt plus owner-observed thresholds,

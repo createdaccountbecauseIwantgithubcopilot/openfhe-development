@@ -91,6 +91,9 @@ public:
     using NativeDirectVectorSelectorStorageAdmissionEvidence =
         glscheme::rns::
             GlrShipDirectVectorProductionSelectorStorageAdmissionEvidence;
+    using NativeDirectVectorSelectorRecordGenerationResult =
+        glscheme::rns::
+            GlrShipDirectVectorProductionSelectorRecordGenerationResult;
     using NativeDirectVectorAllYStcEvidence =
         glscheme::rns::GlrShipDirectAllYStcEvidence;
     using NativeDirectVectorFullReturnEvidence =
@@ -140,6 +143,12 @@ public:
         bool canonicalH40DecryptedValueNoiseAcceptanceRecorded = false;
     };
 
+    struct DirectVectorOwnerKeyLineage {
+        std::string ownerKskSeedCommitment;
+        std::string primarySecretLineageCommitment;
+        std::string sparseSecretLineageCommitment;
+    };
+
     // OpenFHE-facing wrapper around GLScheme's dual-certificate L4/Q21
     // primary-selector authorization.  The native authorization remains
     // metadata-only; the all-Y member is an expected boundary shape and does
@@ -147,7 +156,9 @@ public:
     struct DirectVectorPrimaryAuthorization {
         NativeDirectVectorProductionAuthorizationEvidence native;
         DirectVectorAllYReturnPreflight allYReturn;
+        DirectVectorOwnerKeyLineage ownerKeyLineage;
         bool metadataAuthorizationOnly = true;
+        bool ownerKeyLineageBound = false;
         bool productionH40CiphertextValueExecutionPerformed = false;
         bool productionH40DecryptedValueNoiseAcceptanceRecorded = false;
     };
@@ -160,11 +171,36 @@ public:
     struct DirectVectorPrimarySelectorStorageAuthorization {
         NativeDirectVectorSelectorStorageAdmissionEvidence native;
         NativeDirectVectorPlan canonicalPlan;
+        DirectVectorOwnerKeyLineage ownerKeyLineage;
         bool metadataAuthorizationOnly = true;
         bool canonicalPlanBound = false;
         bool bothSecurityRootsBound = false;
+        bool ownerKeyLineageBound = false;
         bool selectorGenerationEnabled = false;
         bool selectorManifestOrPayloadGenerated = false;
+        bool selectorMaterialReady = false;
+        bool valueExecution = false;
+    };
+
+    // Allocation-free expected shape for one random-access selector record.
+    // This proves only that the authorized core generator is available for
+    // indices [0,640); it does not call owner keygen, retain a generation
+    // seed, emit a record, or promote storage into evaluator-ready material.
+    struct DirectVectorSelectorRecordPreflight {
+        std::string schema;
+        DirectVectorOwnerKeyLineage ownerKeyLineage;
+        std::uint64_t totalRecordCount = 0;
+        std::uint32_t selectorLevel = 0;
+        std::uint32_t activeQPrimes = 0;
+        std::uint64_t encodedRecordBytes = 0;
+        std::uint64_t expectedReturnedRecordAndEncodingBytes = 0;
+        std::uint64_t authorizedStreamingPeakBytes = 0;
+        bool productionAuthorizationBound = false;
+        bool storageAdmissionBound = false;
+        bool ownerKeyLineageBound = false;
+        bool deterministicRandomAccessGeneratorAvailable = false;
+        bool recordGenerated = false;
+        bool manifestOrPayloadGenerated = false;
         bool selectorMaterialReady = false;
         bool valueExecution = false;
     };
@@ -564,17 +600,27 @@ public:
         const std::string& supportCommitment,
         const SecurityReport& sparseH40SecurityReport,
         const NativeDirectVectorDensePrimarySecurityEvidence&
-            densePrimarySecurity) const;
+            densePrimarySecurity,
+        const DirectVectorOwnerKeyLineage& ownerKeyLineage) const;
     void ValidateDirectVectorPrimaryAuthorization(
         const DirectVectorPrimaryAuthorization& authorization,
         const std::string& supportCommitment,
         const SecurityReport& sparseH40SecurityReport,
         const NativeDirectVectorDensePrimarySecurityEvidence&
-            densePrimarySecurity) const;
+            densePrimarySecurity,
+        const DirectVectorOwnerKeyLineage& ownerKeyLineage) const;
     DirectVectorPrimarySelectorStorageAuthorization
     AuthorizeDirectVectorPrimarySelectorStorage(
         const DirectVectorPrimaryAuthorization& authorization) const;
     void ValidateDirectVectorPrimarySelectorStorageAuthorization(
+        const DirectVectorPrimarySelectorStorageAuthorization& storage,
+        const DirectVectorPrimaryAuthorization& authorization) const;
+    DirectVectorSelectorRecordPreflight
+    PreflightDirectVectorPrimarySelectorRecord(
+        const DirectVectorPrimarySelectorStorageAuthorization& storage,
+        const DirectVectorPrimaryAuthorization& authorization) const;
+    void ValidateDirectVectorPrimarySelectorRecordPreflight(
+        const DirectVectorSelectorRecordPreflight& preflight,
         const DirectVectorPrimarySelectorStorageAuthorization& storage,
         const DirectVectorPrimaryAuthorization& authorization) const;
 

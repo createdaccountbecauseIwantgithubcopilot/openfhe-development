@@ -1256,7 +1256,8 @@ MakeDirectVectorPrimaryAuthorization(
     const std::string& supportCommitment,
     const GLRProductionAdapter::SecurityReport& sparseReport,
     const GLRProductionAdapter::NativeDirectVectorDensePrimarySecurityEvidence&
-        denseEvidence) {
+        denseEvidence,
+    const GLRProductionAdapter::DirectVectorOwnerKeyLineage& ownerKeyLineage) {
     constexpr std::uint32_t kHammingWeight = 40;
     auto windows = glscheme::rns::glr_ship_make_windows(
         128, 256, kHammingWeight, 0, 2, 2, 2);
@@ -1286,16 +1287,34 @@ MakeDirectVectorPrimaryAuthorization(
     candidate.reserved_transform_material_level = 17;
     candidate.windows = std::move(windows);
     candidate.support_commitment = supportCommitment;
+    candidate.owner_key_seed_commitment =
+        ownerKeyLineage.ownerKskSeedCommitment;
+    candidate.primary_secret_lineage_commitment =
+        ownerKeyLineage.primarySecretLineageCommitment;
+    candidate.sparse_secret_lineage_commitment =
+        ownerKeyLineage.sparseSecretLineageCommitment;
 
     GLRProductionAdapter::DirectVectorPrimaryAuthorization out;
     out.native =
         glscheme::rns::glr_authorize_ship_direct_vector_gl128_primary_candidate(
             context.params, candidate, sparseReport, denseEvidence);
     out.allYReturn = MakeDirectVectorPrimaryAllYReturnPreflight(context);
+    out.ownerKeyLineage = ownerKeyLineage;
     out.metadataAuthorizationOnly = true;
+    out.ownerKeyLineageBound = true;
     out.productionH40CiphertextValueExecutionPerformed = false;
     out.productionH40DecryptedValueNoiseAcceptanceRecorded = false;
     return out;
+}
+
+bool DirectVectorOwnerKeyLineageEquals(
+    const GLRProductionAdapter::DirectVectorOwnerKeyLineage& lhs,
+    const GLRProductionAdapter::DirectVectorOwnerKeyLineage& rhs) {
+    return lhs.ownerKskSeedCommitment == rhs.ownerKskSeedCommitment &&
+           lhs.primarySecretLineageCommitment ==
+               rhs.primarySecretLineageCommitment &&
+           lhs.sparseSecretLineageCommitment ==
+               rhs.sparseSecretLineageCommitment;
 }
 
 bool DirectSparseSecurityEquals(
@@ -1346,6 +1365,11 @@ void RequireDirectVectorPrimaryAuthorization(
                                    rhs.dense_primary_security) ||
         lhs.parameter_fingerprint != rhs.parameter_fingerprint ||
         lhs.support_commitment != rhs.support_commitment ||
+        lhs.owner_key_seed_commitment != rhs.owner_key_seed_commitment ||
+        lhs.primary_secret_lineage_commitment !=
+            rhs.primary_secret_lineage_commitment ||
+        lhs.sparse_secret_lineage_commitment !=
+            rhs.sparse_secret_lineage_commitment ||
         lhs.sparse_public_input_q0 != rhs.sparse_public_input_q0 ||
         lhs.sparse_public_input_level != rhs.sparse_public_input_level ||
         lhs.sparse_public_input_active_q_primes !=
@@ -1387,7 +1411,10 @@ void RequireDirectVectorPrimaryAuthorization(
         lhs.value_execution != rhs.value_execution ||
         !DirectVectorAllYReturnPreflightEquals(actual.allYReturn,
                                                expected.allYReturn) ||
+        !DirectVectorOwnerKeyLineageEquals(actual.ownerKeyLineage,
+                                           expected.ownerKeyLineage) ||
         actual.metadataAuthorizationOnly != expected.metadataAuthorizationOnly ||
+        actual.ownerKeyLineageBound != expected.ownerKeyLineageBound ||
         actual.productionH40CiphertextValueExecutionPerformed !=
             expected.productionH40CiphertextValueExecutionPerformed ||
         actual.productionH40DecryptedValueNoiseAcceptanceRecorded !=
@@ -1419,6 +1446,11 @@ bool DirectVectorSelectorStorageEvidenceEquals(
                rhs.production_authorization_schema &&
            lhs.parameter_fingerprint == rhs.parameter_fingerprint &&
            lhs.support_commitment == rhs.support_commitment &&
+           lhs.owner_key_seed_commitment == rhs.owner_key_seed_commitment &&
+           lhs.primary_secret_lineage_commitment ==
+               rhs.primary_secret_lineage_commitment &&
+           lhs.sparse_secret_lineage_commitment ==
+               rhs.sparse_secret_lineage_commitment &&
            lhs.sparse_security_transcript_sha256 ==
                rhs.sparse_security_transcript_sha256 &&
            lhs.dense_security_transcript_sha256 ==
@@ -1444,8 +1476,14 @@ MakeDirectVectorPrimarySelectorStorageAuthorization(
     const GLRProductionAdapter::DirectVectorPrimaryAuthorization&
         authorization) {
     if (!authorization.metadataAuthorizationOnly ||
+        !authorization.ownerKeyLineageBound ||
         authorization.productionH40CiphertextValueExecutionPerformed ||
         authorization.productionH40DecryptedValueNoiseAcceptanceRecorded ||
+        !DirectVectorOwnerKeyLineageEquals(
+            authorization.ownerKeyLineage,
+            {authorization.native.owner_key_seed_commitment,
+             authorization.native.primary_secret_lineage_commitment,
+             authorization.native.sparse_secret_lineage_commitment}) ||
         !DirectVectorAllYReturnPreflightEquals(
             authorization.allYReturn,
             MakeDirectVectorPrimaryAllYReturnPreflight(context))) {
@@ -1460,7 +1498,10 @@ MakeDirectVectorPrimarySelectorStorageAuthorization(
             glr_authorize_ship_direct_vector_gl128_selector_storage(
                 authorization.native);
     out.canonicalPlan = authorization.native.plan;
-    if (out.native.selector_admission.stored_selector_payload_bytes !=
+    if (out.native.selector_admission.kind !=
+            glscheme::rns::GlrShipDirectSelectorAdmissionKind::
+                compact_authenticated_production_streamed ||
+        out.native.selector_admission.stored_selector_payload_bytes !=
             UINT64_C(7046575360) ||
         out.native.selector_admission.streamed_peak_selector_bytes !=
             UINT64_C(33030176) ||
@@ -1473,10 +1514,16 @@ MakeDirectVectorPrimarySelectorStorageAuthorization(
                 .estimator_transcript_sha256 ||
         out.native.dense_security_transcript_sha256 !=
             authorization.native.dense_primary_security.transcript_sha256 ||
+        out.native.owner_key_seed_commitment !=
+            authorization.native.owner_key_seed_commitment ||
+        out.native.primary_secret_lineage_commitment !=
+            authorization.native.primary_secret_lineage_commitment ||
+        out.native.sparse_secret_lineage_commitment !=
+            authorization.native.sparse_secret_lineage_commitment ||
         !out.native.production_metadata_authorization_bound ||
         !out.native.compact_authenticated_streaming_admitted ||
         out.native.generic_512_mib_cap_widened ||
-        out.native.production_generator_enabled ||
+        !out.native.production_generator_enabled ||
         out.native.manifest_or_payload_generated) {
         throw GlrError(
             "GLRProductionAdapter: native selector-storage authorization "
@@ -1484,9 +1531,11 @@ MakeDirectVectorPrimarySelectorStorageAuthorization(
             "canonical admission");
     }
     out.metadataAuthorizationOnly = true;
+    out.ownerKeyLineage = authorization.ownerKeyLineage;
     out.canonicalPlanBound = true;
     out.bothSecurityRootsBound = true;
-    out.selectorGenerationEnabled = false;
+    out.ownerKeyLineageBound = true;
+    out.selectorGenerationEnabled = true;
     out.selectorManifestOrPayloadGenerated = false;
     out.selectorMaterialReady = false;
     out.valueExecution = false;
@@ -1502,10 +1551,13 @@ void RequireDirectVectorPrimarySelectorStorageAuthorization(
                                                    expected.native) ||
         !DirectVectorPlanEquals(actual.canonicalPlan,
                                 expected.canonicalPlan) ||
+        !DirectVectorOwnerKeyLineageEquals(actual.ownerKeyLineage,
+                                           expected.ownerKeyLineage) ||
         actual.metadataAuthorizationOnly !=
             expected.metadataAuthorizationOnly ||
         actual.canonicalPlanBound != expected.canonicalPlanBound ||
         actual.bothSecurityRootsBound != expected.bothSecurityRootsBound ||
+        actual.ownerKeyLineageBound != expected.ownerKeyLineageBound ||
         actual.selectorGenerationEnabled !=
             expected.selectorGenerationEnabled ||
         actual.selectorManifestOrPayloadGenerated !=
@@ -1516,6 +1568,83 @@ void RequireDirectVectorPrimarySelectorStorageAuthorization(
             "GLRProductionAdapter: selector-storage receipt is forged, "
             "cross-authorization, or overstates material/value readiness");
     }
+}
+
+GLRProductionAdapter::DirectVectorSelectorRecordPreflight
+MakeDirectVectorPrimarySelectorRecordPreflight(
+    const GLRProductionAdapter::Context& context,
+    const GLRProductionAdapter::
+        DirectVectorPrimarySelectorStorageAuthorization& storage,
+    const GLRProductionAdapter::DirectVectorPrimaryAuthorization&
+        authorization) {
+    const auto expectedStorage =
+        MakeDirectVectorPrimarySelectorStorageAuthorization(
+            context, authorization);
+    RequireDirectVectorPrimarySelectorStorageAuthorization(
+        storage, expectedStorage);
+    const auto& plan = storage.canonicalPlan;
+    const std::uint64_t returnedBytes =
+        plan.bytes_per_compact_selector_record +
+        plan.bytes_per_encoded_compact_selector_record;
+    if (plan.signed_selector_count != 640 || plan.selector_level != 4 ||
+        plan.active_q_primes != 21 ||
+        plan.bytes_per_encoded_compact_selector_record != 11010274ULL ||
+        returnedBytes != 22020354ULL ||
+        plan.compact_streamed_peak_selector_bytes != 33030176ULL) {
+        throw GlrError(
+            "GLRProductionAdapter: random-access selector record preflight "
+            "diverged from the exact canonical record/peak census");
+    }
+
+    GLRProductionAdapter::DirectVectorSelectorRecordPreflight out;
+    out.schema =
+        glscheme::rns::
+            kGlrShipDirectVectorGl128SelectorRecordGenerationSchema;
+    out.ownerKeyLineage = storage.ownerKeyLineage;
+    out.totalRecordCount = plan.signed_selector_count;
+    out.selectorLevel = plan.selector_level;
+    out.activeQPrimes = plan.active_q_primes;
+    out.encodedRecordBytes =
+        plan.bytes_per_encoded_compact_selector_record;
+    out.expectedReturnedRecordAndEncodingBytes = returnedBytes;
+    out.authorizedStreamingPeakBytes =
+        plan.compact_streamed_peak_selector_bytes;
+    out.productionAuthorizationBound = true;
+    out.storageAdmissionBound = true;
+    out.ownerKeyLineageBound = true;
+    out.deterministicRandomAccessGeneratorAvailable = true;
+    out.recordGenerated = false;
+    out.manifestOrPayloadGenerated = false;
+    out.selectorMaterialReady = false;
+    out.valueExecution = false;
+    return out;
+}
+
+bool DirectVectorSelectorRecordPreflightEquals(
+    const GLRProductionAdapter::DirectVectorSelectorRecordPreflight& lhs,
+    const GLRProductionAdapter::DirectVectorSelectorRecordPreflight& rhs) {
+    return lhs.schema == rhs.schema &&
+           DirectVectorOwnerKeyLineageEquals(lhs.ownerKeyLineage,
+                                             rhs.ownerKeyLineage) &&
+           lhs.totalRecordCount == rhs.totalRecordCount &&
+           lhs.selectorLevel == rhs.selectorLevel &&
+           lhs.activeQPrimes == rhs.activeQPrimes &&
+           lhs.encodedRecordBytes == rhs.encodedRecordBytes &&
+           lhs.expectedReturnedRecordAndEncodingBytes ==
+               rhs.expectedReturnedRecordAndEncodingBytes &&
+           lhs.authorizedStreamingPeakBytes ==
+               rhs.authorizedStreamingPeakBytes &&
+           lhs.productionAuthorizationBound ==
+               rhs.productionAuthorizationBound &&
+           lhs.storageAdmissionBound == rhs.storageAdmissionBound &&
+           lhs.ownerKeyLineageBound == rhs.ownerKeyLineageBound &&
+           lhs.deterministicRandomAccessGeneratorAvailable ==
+               rhs.deterministicRandomAccessGeneratorAvailable &&
+           lhs.recordGenerated == rhs.recordGenerated &&
+           lhs.manifestOrPayloadGenerated ==
+               rhs.manifestOrPayloadGenerated &&
+           lhs.selectorMaterialReady == rhs.selectorMaterialReady &&
+           lhs.valueExecution == rhs.valueExecution;
 }
 
 double ExpectedDirectVectorH2OutputScale(
@@ -1876,10 +2005,11 @@ GLRProductionAdapter::AuthorizeDirectVectorPrimaryCandidate(
     const std::string& supportCommitment,
     const SecurityReport& sparseH40SecurityReport,
     const NativeDirectVectorDensePrimarySecurityEvidence&
-        densePrimarySecurity) const {
+        densePrimarySecurity,
+    const DirectVectorOwnerKeyLineage& ownerKeyLineage) const {
     return MakeDirectVectorPrimaryAuthorization(
         m_context, supportCommitment, sparseH40SecurityReport,
-        densePrimarySecurity);
+        densePrimarySecurity, ownerKeyLineage);
 }
 
 void GLRProductionAdapter::ValidateDirectVectorPrimaryAuthorization(
@@ -1887,12 +2017,13 @@ void GLRProductionAdapter::ValidateDirectVectorPrimaryAuthorization(
     const std::string& supportCommitment,
     const SecurityReport& sparseH40SecurityReport,
     const NativeDirectVectorDensePrimarySecurityEvidence&
-        densePrimarySecurity) const {
+        densePrimarySecurity,
+    const DirectVectorOwnerKeyLineage& ownerKeyLineage) const {
     RequireDirectVectorPrimaryAuthorization(
         authorization,
         MakeDirectVectorPrimaryAuthorization(
             m_context, supportCommitment, sparseH40SecurityReport,
-            densePrimarySecurity));
+            densePrimarySecurity, ownerKeyLineage));
 }
 
 GLRProductionAdapter::DirectVectorPrimarySelectorStorageAuthorization
@@ -1910,6 +2041,28 @@ void GLRProductionAdapter::
         storage,
         MakeDirectVectorPrimarySelectorStorageAuthorization(
             m_context, authorization));
+}
+
+GLRProductionAdapter::DirectVectorSelectorRecordPreflight
+GLRProductionAdapter::PreflightDirectVectorPrimarySelectorRecord(
+    const DirectVectorPrimarySelectorStorageAuthorization& storage,
+    const DirectVectorPrimaryAuthorization& authorization) const {
+    return MakeDirectVectorPrimarySelectorRecordPreflight(
+        m_context, storage, authorization);
+}
+
+void GLRProductionAdapter::ValidateDirectVectorPrimarySelectorRecordPreflight(
+    const DirectVectorSelectorRecordPreflight& preflight,
+    const DirectVectorPrimarySelectorStorageAuthorization& storage,
+    const DirectVectorPrimaryAuthorization& authorization) const {
+    if (!DirectVectorSelectorRecordPreflightEquals(
+            preflight,
+            MakeDirectVectorPrimarySelectorRecordPreflight(
+                m_context, storage, authorization))) {
+        throw GlrError(
+            "GLRProductionAdapter: random-access selector record preflight "
+            "is forged or overstates record/material/value generation");
+    }
 }
 
 GLRProductionAdapter::DirectVectorH2Stride2SmokeReceipt
