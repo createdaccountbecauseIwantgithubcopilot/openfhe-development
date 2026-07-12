@@ -132,6 +132,7 @@ int main() {
                    capabilities.denseEq5IntegerBatch &&
                    capabilities.fullChainSymmetricTErrEncryption &&
                    capabilities.fullChainBGVModSwitch &&
+                   capabilities.fullChainBGVModSwitchExactIntegerSemantics &&
                    capabilities.fullChainPublicTErrEncryption &&
                    capabilities.compactSeededPublicA &&
                    capabilities.fullChainDenseTernaryOwnerKeygen &&

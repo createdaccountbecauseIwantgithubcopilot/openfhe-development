@@ -2728,6 +2728,63 @@ GLRProductionAdapter::GetH64WActionResearchCapabilities() const {
     return capabilities;
 }
 
+GLRProductionAdapter::NativeGL128H64StructuredSecurityAudit
+GLRProductionAdapter::AuditH64StructuredSecurity() const {
+    const auto transcript =
+        glscheme::rns::glr_gl128_h64_checked_free_support_transcript();
+    auto audit =
+        glscheme::rns::glr_gl128_h64_structured_security_audit(
+            m_context, transcript);
+    glscheme::rns::glr_validate_gl128_h64_structured_security_audit(
+        m_context, audit);
+    return audit;
+}
+
+GLRProductionAdapter::NativeGL128H64StructuredSecurityCapabilities
+GLRProductionAdapter::GetH64StructuredSecurityCapabilities() const {
+    const auto audit = AuditH64StructuredSecurity();
+    if (!audit.cryptographic_material_allocation_free ||
+        audit.cryptographic_material_generated ||
+        !audit.checked_free_support_transcript.free_support_proxy_only ||
+        audit.checked_free_support_transcript.structured_distribution_modeled ||
+        audit.free_support_proxy_promoted ||
+        audit.rlwe_lattice.checked_proxy_covers_structured_distribution ||
+        audit.rlwe_lattice.exact_structured_lattice_estimate_present ||
+        audit.composed_key_leakage.same_secret_multi_sample_theorem_bound ||
+        audit.composed_key_leakage.circular_security_theorem_bound ||
+        audit.composed_key_leakage.related_key_security_theorem_bound ||
+        audit.composed_key_leakage.joint_public_window_and_rlwe_attack_analyzed ||
+        audit.exact_structured_security_certificate_present ||
+        audit.production_security_authorized ||
+        audit.bootstrap_direct_admitted) {
+        throw GlrError(
+            "GLRProductionAdapter: structured H64 security audit is "
+            "malformed or overstates security admission");
+    }
+    NativeGL128H64StructuredSecurityCapabilities capabilities;
+    capabilities.auditCommitment = audit.audit_commitment;
+    capabilities.freeSupportProxyClassicalBits =
+        audit.checked_free_support_transcript.reported_classical_bits;
+    capabilities.rawPublicWindowChoiceBits =
+        audit.choice_entropy.raw_choice_bits;
+    capabilities.genericSplitTimeBits =
+        audit.public_window_attacks.generic_split_time_bits;
+    capabilities.genericSplitMemoryBits =
+        audit.public_window_attacks.generic_split_memory_bits;
+    capabilities.cryptographicMaterialAllocationFree = true;
+    return capabilities;
+}
+
+GLRProductionAdapter::NativeGL128H64OwnerRootProductResult
+GLRProductionAdapter::EvaluateH64OwnerRootProductOracle(
+    std::uint32_t yRow,
+    std::span<const glscheme::rns::GlrShipDirectGaussian> publicB,
+    std::span<const glscheme::rns::GlrShipDirectGaussian> publicA,
+    const SparseSecretKey& sparseKey) const {
+    return glscheme::rns::glr_gl128_h64_owner_root_product_oracle(
+        m_context, yRow, publicB, publicA, sparseKey.support);
+}
+
 GLRProductionAdapter::NativeGL128H64HiddenSelectorBinding
 GLRProductionAdapter::BindH64HiddenSelectorManifest(
     const NativeGL128H64HiddenSelectorManifest& manifest) const {

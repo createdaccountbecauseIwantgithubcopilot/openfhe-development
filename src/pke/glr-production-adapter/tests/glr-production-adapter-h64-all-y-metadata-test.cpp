@@ -136,6 +136,37 @@ int main() {
                 !wCapabilities.bootstrapDirectAdmitted,
             "OpenFHE H64 W-action capability projection is malformed");
 
+    const auto structuredAudit = adapter.AuditH64StructuredSecurity();
+    const auto structuredCapabilities =
+        adapter.GetH64StructuredSecurityCapabilities();
+    Require(structuredAudit.schema ==
+                    glscheme::rns::kGl128H64StructuredSecurityAuditSchema &&
+                structuredAudit.checked_free_support_transcript.
+                        reported_classical_bits ==
+                    134.21396542245802 &&
+                structuredAudit.checked_free_support_transcript.
+                    free_support_proxy_only &&
+                !structuredAudit.checked_free_support_transcript.
+                    structured_distribution_modeled &&
+                !structuredAudit.
+                    exact_structured_security_certificate_present &&
+                !structuredAudit.production_security_authorized &&
+                !structuredAudit.bootstrap_direct_admitted &&
+                structuredCapabilities.freeSupportProxyClassicalBits ==
+                    134.21396542245802 &&
+                structuredCapabilities.rawPublicWindowChoiceBits == 640 &&
+                structuredCapabilities.genericSplitTimeBits == 320 &&
+                structuredCapabilities.genericSplitMemoryBits == 320 &&
+                structuredCapabilities.freeSupportProxyOnly &&
+                !structuredCapabilities.
+                    structuredPublicWindowDistributionModeled &&
+                !structuredCapabilities.
+                    exactStructuredSecurityCertificatePresent &&
+                !structuredCapabilities.composedKeyLeakageTheoremPresent &&
+                !structuredCapabilities.productionSecurityAuthorized &&
+                !structuredCapabilities.bootstrapDirectAdmitted,
+            "structured H64 audit must retain free-support proxy posture");
+
     const auto dft = adapter.GetCanonicalDirectDftGenerationConfig();
     Require(dft.profile ==
                     Adapter::NativeDftPlaintextGenerationConfig::Profile::

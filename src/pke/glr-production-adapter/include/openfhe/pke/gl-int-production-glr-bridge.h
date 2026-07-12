@@ -39,6 +39,7 @@ public:
         bool denseEq5IntegerBatch{true};
         bool fullChainSymmetricTErrEncryption{true};
         bool fullChainBGVModSwitch{true};
+        bool fullChainBGVModSwitchExactIntegerSemantics{true};
         bool fullChainPublicTErrEncryption{true};
         bool compactSeededPublicA{true};
         bool fullChainDenseTernaryOwnerKeygen{true};

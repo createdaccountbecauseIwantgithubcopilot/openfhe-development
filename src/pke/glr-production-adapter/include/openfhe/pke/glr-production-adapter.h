@@ -15,6 +15,8 @@
 #include "glscheme/gl128_ciphertext_artifact.hpp"
 #include "glscheme/gl128_h64_bootstrap_research.hpp"
 #include "glscheme/gl128_h64_hidden_selector.hpp"
+#include "glscheme/gl128_h64_root_product_oracle.hpp"
+#include "glscheme/gl128_h64_structured_security_audit.hpp"
 #include "glscheme/gl128_h64_w_action_plan.hpp"
 #include "glscheme/glr_device_ks.hpp"
 #include "glscheme/rns_dft_plaintext_provider.hpp"
@@ -34,6 +36,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -343,6 +346,14 @@ public:
         glscheme::rns::GlrH64WActionResearchEvidence;
     using NativeGL128H64WActionPlan =
         glscheme::rns::GlrH64WActionPlan;
+    using NativeGL128H64OwnerRootProductEvidence =
+        glscheme::rns::GlrH64OwnerRootProductEvidence;
+    using NativeGL128H64OwnerRootProductResult =
+        glscheme::rns::GlrH64OwnerRootProductResult;
+    using NativeGL128H64CheckedEstimatorTranscript =
+        glscheme::rns::GlrH64CheckedEstimatorTranscript;
+    using NativeGL128H64StructuredSecurityAudit =
+        glscheme::rns::GlrH64StructuredSecurityAudit;
     using NativeGL128CiphertextArtifactSink =
         glscheme::rns::Gl128CiphertextArtifactSink;
     using NativeGL128CiphertextArtifactSource =
@@ -430,6 +441,30 @@ public:
         bool bootstrapDirectAdmitted = false;
     };
 
+    // Allocation-free projection of the checked structured-H64 audit.  The
+    // 134.213965-bit number is explicitly the free-support SparseTernary(h64)
+    // proxy over Q25P14, not a certificate for the implemented public-window
+    // distribution or its related evaluation-key/KDM exposure.
+    struct NativeGL128H64StructuredSecurityCapabilities final {
+        std::string schema =
+            "openfhe.gl128_h64_structured_security_capabilities.v1";
+        std::string nativeAuditSchema =
+            glscheme::rns::kGl128H64StructuredSecurityAuditSchema;
+        std::string auditCommitment;
+        double freeSupportProxyClassicalBits = 0.0;
+        std::uint32_t rawPublicWindowChoiceBits = 0;
+        std::uint32_t genericSplitTimeBits = 0;
+        std::uint32_t genericSplitMemoryBits = 0;
+        bool cryptographicMaterialAllocationFree = false;
+        bool capabilityQueryMaterializesMaterial = false;
+        bool freeSupportProxyOnly = true;
+        bool structuredPublicWindowDistributionModeled = false;
+        bool exactStructuredSecurityCertificatePresent = false;
+        bool composedKeyLeakageTheoremPresent = false;
+        bool productionSecurityAuthorized = false;
+        bool bootstrapDirectAdmitted = false;
+    };
+
     static_assert(NativeGL128H64ResearchPosture::research_only);
     static_assert(NativeGL128H64ResearchPosture::full_all_y_stc_composed);
     static_assert(NativeGL128H64ResearchAllYStcEvidence::research_only);
@@ -447,6 +482,13 @@ public:
     static_assert(!std::is_constructible_v<
                   NativeGL128DirectBootstrapAuthorizationBundle,
                   NativeGL128H64WActionPlan>);
+    static_assert(NativeGL128H64OwnerRootProductEvidence::owner_only);
+    static_assert(!NativeGL128H64OwnerRootProductEvidence::evaluator_callable);
+    static_assert(!NativeGL128H64OwnerRootProductEvidence::
+                      production_security_authorized);
+    static_assert(!std::is_convertible_v<
+                  NativeGL128H64StructuredSecurityAudit,
+                  NativeGL128DirectBootstrapAuthorizationBundle>);
     static_assert(!std::is_convertible_v<
                   NativeGL128H64ResearchProfileReceipt,
                   NativeGL128DirectBootstrapAuthorizationBundle>);
@@ -1251,6 +1293,16 @@ public:
     NativeGL128H64WActionPlan PlanH64WActionResearch() const;
     NativeGL128H64WActionResearchCapabilities
     GetH64WActionResearchCapabilities() const;
+    NativeGL128H64StructuredSecurityAudit
+    AuditH64StructuredSecurity() const;
+    NativeGL128H64StructuredSecurityCapabilities
+    GetH64StructuredSecurityCapabilities() const;
+    NativeGL128H64OwnerRootProductResult
+    EvaluateH64OwnerRootProductOracle(
+        std::uint32_t yRow,
+        std::span<const glscheme::rns::GlrShipDirectGaussian> publicB,
+        std::span<const glscheme::rns::GlrShipDirectGaussian> publicA,
+        const SparseSecretKey& sparseKey) const;
     NativeGL128H64HiddenSelectorBinding BindH64HiddenSelectorManifest(
         const NativeGL128H64HiddenSelectorManifest& manifest) const;
     NativeGL128H64HiddenSelectorGenerationResult

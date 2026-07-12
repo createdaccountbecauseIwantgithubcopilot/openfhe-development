@@ -66,6 +66,17 @@ static_assert(std::is_same_v<
               Adapter::NativeGL128H64WActionResearchCapabilities>);
 static_assert(std::is_same_v<
               decltype(std::declval<AdapterRef>()
+                           .AuditH64StructuredSecurity()),
+              Adapter::NativeGL128H64StructuredSecurityAudit>);
+static_assert(std::is_same_v<
+              decltype(std::declval<AdapterRef>()
+                           .GetH64StructuredSecurityCapabilities()),
+              Adapter::NativeGL128H64StructuredSecurityCapabilities>);
+static_assert(Adapter::NativeGL128H64OwnerRootProductEvidence::owner_only);
+static_assert(!Adapter::NativeGL128H64OwnerRootProductEvidence::
+                  evaluator_callable);
+static_assert(std::is_same_v<
+              decltype(std::declval<AdapterRef>()
                            .EvaluateH64AllYStCResearch(
                                std::declval<CiphertextRef>(),
                                std::declval<SourceScheduleRef>(),
