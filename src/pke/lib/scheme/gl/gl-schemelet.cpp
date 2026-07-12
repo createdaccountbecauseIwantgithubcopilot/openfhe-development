@@ -797,8 +797,8 @@ std::set<uint32_t> RequiredEvalSumIndices(const CryptoContext<DCRTPoly>& context
 }  // namespace
 
 GLGeometry::GLGeometry(std::size_t dimension) : m_dimension(dimension) {
-    if (dimension != 4 && dimension != 8 && dimension != 16) {
-        throw GLDimensionError("W-free GL vertical slice supports only n=4, n=8, or n=16");
+    if (dimension != 4 && dimension != 8 && dimension != 16 && dimension != 32) {
+        throw GLDimensionError("W-free GL vertical slice supports only n=4, n=8, n=16, or n=32");
     }
 }
 
@@ -844,10 +844,10 @@ bool GLParameters::RequestsExactNativeRing() const noexcept {
 
 void GLParameters::Validate() const {
     const GLGeometry geometry(dimension);
-    if (dimension == 16 &&
+    if ((dimension == 16 || dimension == 32) &&
         (!RequestsExactNativeRing() || securityLevel != HEStd_NotSet)) {
         throw GLNativeModeError(
-            "GL n=16 conformance is restricted to exact ringDimension=32 with HEStd_NotSet");
+            "GL n=16/32 conformance is restricted to exact ringDimension=2n with HEStd_NotSet");
     }
     if (multiplicativeDepth == 0) {
         throw GLDimensionError("GL CKKS transport requires multiplicativeDepth >= 1");
@@ -868,7 +868,7 @@ void GLParameters::Validate() const {
     }
     if (RequestsExactNativeRing() && securityLevel != HEStd_NotSet) {
         throw GLNativeModeError(
-            "exact GL ringDimension=2n is supported only with HEStd_NotSet for n=4/8/16; "
+            "exact GL ringDimension=2n is supported only with HEStd_NotSet for n=4/8/16/32; "
             "these toy dimensions do not satisfy HE-standard security");
     }
 }

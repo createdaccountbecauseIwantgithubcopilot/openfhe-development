@@ -237,7 +237,7 @@ private:
 };
 
 /**
- * Bounded, exact-ring direct-column SHIP implementation for n=4/8/16
+ * Bounded, exact-ring direct-column SHIP implementation for n=4/8/16/32
  * conformance only. Hybrid masked-column material remains n=4/8 because its
  * distinct depth and selector-material contract has not been extended.
  *
@@ -268,7 +268,7 @@ public:
         const GLShipEvaluationKey& evaluationKey) const;
 
     /**
-     * Exact-ring direct-column n=4/8/16 ordinary refresh. Hybrid remains n=4/8.
+     * Exact-ring direct-column n=4/8/16/32 ordinary refresh. Hybrid remains n=4/8.
      *
      * Every independently computed Gaussian X-coefficient lane must have real
      * and imaginary magnitude at most one.  This is an encrypted-message
@@ -295,12 +295,17 @@ private:
     void ValidateEvaluationKey(const GLShipEvaluationKey& evaluationKey) const;
     void ValidateLowSlice(const GLShipLowSliceCiphertext& input,
                           const GLShipEvaluationKey& evaluationKey) const;
+    GLShipHalfBootstrapResult EvalHalfBootstrapValidated(
+        const GLShipLowSliceCiphertext& input,
+        const GLShipEvaluationKey& evaluationKey) const;
     GLShipLowSliceCiphertext NormalizeAndSwitchRow(
         const Ciphertext<DCRTPoly>& input, const GLShipEvaluationKey& evaluationKey,
         std::size_t row) const;
+    std::vector<Plaintext> MakeXForwardDiagonals(uint32_t level) const;
     Ciphertext<DCRTPoly> EvalXForward(
         const GLShipHalfBootstrapResult& input,
-        const GLShipEvaluationKey& evaluationKey) const;
+        const GLShipEvaluationKey& evaluationKey,
+        const std::vector<Plaintext>& diagonals) const;
 
     GLShipParameters m_parameters;
     GLGeometry m_geometry;

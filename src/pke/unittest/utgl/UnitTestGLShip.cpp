@@ -858,12 +858,11 @@ TEST(GLShip, ExactN8RefreshOnlyAllY) {
     EXPECT_LT(MaxError(decoded.GetValues(), values), 5e-2);
 }
 
-TEST(GLShip, ExactN16DirectRefreshOnlyIndependentOracleAndNegatives) {
-    constexpr std::size_t n = 16;
+void RunExactDirectRefreshOnlyIndependentOracleAndNegatives(std::size_t n) {
     GLSchemelet gl(ExactParameters(n, 5));
     GLShipSchemelet ship(gl, ShipParameters(n, 2));
     const auto primary = gl.KeyGen();
-    auto client = ship.KeyGen(primary, {{3, 1}, {14, -1}});
+    auto client = ship.KeyGen(primary, {{3, 1}, {static_cast<uint32_t>(n - 2), -1}});
 
     const auto values = RefreshMatrix(n);
     const auto encoded = gl.Encode(GLPlaintext(n, values));
@@ -951,6 +950,14 @@ TEST(GLShip, ExactN16DirectRefreshOnlyIndependentOracleAndNegatives) {
                       Format::EVALUATION, true);
         EXPECT_NE(native->GetElements()[1], zero);
     }
+}
+
+TEST(GLShip, ExactN16DirectRefreshOnlyIndependentOracleAndNegatives) {
+    RunExactDirectRefreshOnlyIndependentOracleAndNegatives(16);
+}
+
+TEST(GLShip, ExactN32DirectRefreshOnlyIndependentOracleAndNegatives) {
+    RunExactDirectRefreshOnlyIndependentOracleAndNegatives(32);
 }
 
 TEST(GLShip, EncryptedSelectorIsLoadBearing) {
@@ -1268,6 +1275,7 @@ TEST(GLShip, HybridParametersValidateAndDepth) {
     GLSchemelet gl4(ExactParameters(4, 6));
     GLSchemelet gl8(ExactParameters(8, 7));
     GLSchemelet gl16(ExactParameters(16, 6));
+    GLSchemelet gl32(ExactParameters(32, 6));
     EXPECT_NO_THROW(GLShipSchemelet(gl4, HybridShipParameters(4, 2, 2)));
     EXPECT_NO_THROW(GLShipSchemelet(gl8, HybridShipParameters(8, 3, 4)));
     EXPECT_NO_THROW(GLShipSchemelet(gl8, HybridShipParameters(8, 3, 2)));
@@ -1279,6 +1287,9 @@ TEST(GLShip, HybridParametersValidateAndDepth) {
     EXPECT_NO_THROW(GLShipSchemelet(gl8, ShipParameters(8, 3)));
     EXPECT_NO_THROW(GLShipSchemelet(gl16, ShipParameters(16, 2)));
     EXPECT_THROW(GLShipSchemelet(gl16, HybridShipParameters(16, 2, 2)),
+                 GLShipUnsupportedError);
+    EXPECT_NO_THROW(GLShipSchemelet(gl32, ShipParameters(32, 2)));
+    EXPECT_THROW(GLShipSchemelet(gl32, HybridShipParameters(32, 2, 2)),
                  GLShipUnsupportedError);
 
     // Negative #1: direct parameters take no hybrid coarse fields.

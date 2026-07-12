@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <exception>
 #include <limits>
 #include <set>
 #include <sstream>
@@ -34,6 +35,29 @@ uint32_t CeilLog2(std::size_t value) {
         ++result;
     }
     return result;
+}
+
+std::vector<int32_t> RequiredXForwardRotations(
+    const GLShipParameters& parameters, std::size_t dimension) {
+    // Match OpenFHE's square BSGS split for a one-level dense linear
+    // transform: baby rotations 1..b-1 and giant rotations b,2b,... .
+    const auto babyStep = static_cast<std::size_t>(
+        std::ceil(std::sqrt(static_cast<double>(dimension))));
+    const auto giantStep = (dimension + babyStep - 1) / babyStep;
+    std::set<int32_t> rotations;
+    for (std::size_t baby = 1; baby < babyStep; ++baby) {
+        rotations.insert(static_cast<int32_t>(baby));
+    }
+    for (std::size_t giant = 1; giant < giantStep; ++giant) {
+        rotations.insert(static_cast<int32_t>(babyStep * giant));
+    }
+    if (parameters.selection == GLShipSelection::HYBRID_MASKED_COLUMN) {
+        for (uint32_t digit = 0; digit < CeilLog2(parameters.coarseBlockSize); ++digit) {
+            rotations.insert(static_cast<int32_t>(
+                dimension - (std::size_t{1} << digit)));
+        }
+    }
+    return {rotations.begin(), rotations.end()};
 }
 
 // The hybrid coarse block size theta must be a power of two in [2, n] that
@@ -376,9 +400,9 @@ void GLShipParameters::Validate(const GLGeometry& geometry,
     // The dimension gate fires before any selection logic, so every selection
     // mode keeps failing closed at n=4096 pending production parameters.
     if (dimension != geometry.GetDimension() ||
-        (dimension != 4 && dimension != 8 && dimension != 16)) {
+        (dimension != 4 && dimension != 8 && dimension != 16 && dimension != 32)) {
         throw GLShipParameterError(
-            "GL SHIP conformance supports matching n=4/8, plus direct-column n=16");
+            "GL SHIP conformance supports matching n=4/8, plus direct-column n=16/32");
     }
     if (!std::isfinite(gamma) || gamma <= 2.0) {
         throw GLShipParameterError("GL SHIP gamma must be finite and greater than two");
@@ -394,7 +418,7 @@ void GLShipParameters::Validate(const GLGeometry& geometry,
         throw GLShipUnsupportedError(
             "GL SHIP currently supports direct-column and hybrid masked-column selection only");
     }
-    if (selection == GLShipSelection::HYBRID_MASKED_COLUMN && dimension == 16) {
+    if (selection == GLShipSelection::HYBRID_MASKED_COLUMN && dimension >= 16) {
         throw GLShipUnsupportedError(
             "GL SHIP hybrid conformance remains restricted to n=4 or n=8");
     }
@@ -431,7 +455,7 @@ void GLShipParameters::Validate(const GLGeometry& geometry,
         throw GLNativeModeError("GL SHIP requires exact ringDimension=2n; transport rings are rejected");
     }
     if (glParameters.securityLevel != HEStd_NotSet) {
-        throw GLNativeModeError("GL SHIP n=4/8/16 is an HEStd_NotSet conformance mode only");
+        throw GLNativeModeError("GL SHIP n=4/8/16/32 is an HEStd_NotSet conformance mode only");
     }
     if (glParameters.scalingTechnique != FLEXIBLEAUTO) {
         throw GLShipUnsupportedError(
@@ -786,11 +810,8 @@ GLShipClientMaterial GLShipSchemelet::KeyGen(
     conjugationKeys->emplace(conjugationIndex,
                              generatedConjugationKeys->at(conjugationIndex));
 
-    std::vector<int32_t> xForwardRotations;
-    xForwardRotations.reserve(m_geometry.GetDimension() - 1);
-    for (std::size_t rotation = 1; rotation < m_geometry.GetDimension(); ++rotation) {
-        xForwardRotations.push_back(static_cast<int32_t>(rotation));
-    }
+    const auto xForwardRotations =
+        RequiredXForwardRotations(m_parameters, m_geometry.GetDimension());
     auto xForwardKeys = m_context->GetScheme()->EvalAtIndexKeyGen(
         primaryKeyPair.secretKey, xForwardRotations);
     if (!xForwardKeys || xForwardKeys->empty()) {
@@ -1066,7 +1087,8 @@ void GLShipSchemelet::ValidateEvaluationKey(
         throw GLShipEvaluationKeyError("GL SHIP X-forward rotation-key map is missing");
     }
     const auto cyclotomicOrder = static_cast<uint32_t>(m_context->GetCyclotomicOrder());
-    for (std::size_t rotation = 1; rotation < m_geometry.GetDimension(); ++rotation) {
+    for (const auto rotation :
+         RequiredXForwardRotations(m_parameters, m_geometry.GetDimension())) {
         const auto automorphismIndex = m_context->GetScheme()->FindAutomorphismIndex(
             static_cast<uint32_t>(rotation), cyclotomicOrder);
         const auto found = evaluationKey.m_xForwardKeys->find(automorphismIndex);
@@ -1294,6 +1316,12 @@ GLShipHalfBootstrapResult GLShipSchemelet::EvalHalfBootstrap(
     const GLShipLowSliceCiphertext& input,
     const GLShipEvaluationKey& evaluationKey) const {
     ValidateEvaluationKey(evaluationKey);
+    return EvalHalfBootstrapValidated(input, evaluationKey);
+}
+
+GLShipHalfBootstrapResult GLShipSchemelet::EvalHalfBootstrapValidated(
+    const GLShipLowSliceCiphertext& input,
+    const GLShipEvaluationKey& evaluationKey) const {
     ValidateLowSlice(input, evaluationKey);
 
     const auto n = m_geometry.GetDimension();
@@ -1630,9 +1658,51 @@ GLShipLowSliceCiphertext GLShipSchemelet::NormalizeAndSwitchRow(
     return result;
 }
 
+std::vector<Plaintext> GLShipSchemelet::MakeXForwardDiagonals(
+    uint32_t level) const {
+    const auto n = m_geometry.GetDimension();
+    const auto order = m_geometry.GetNativeCyclotomicOrder();
+    const auto babyStep = static_cast<std::size_t>(
+        std::ceil(std::sqrt(static_cast<double>(n))));
+    const long double pi = std::acos(-1.0L);
+    std::vector<std::complex<long double>> roots(n);
+    std::size_t exponent = 1;
+    for (std::size_t slot = 0; slot < n; ++slot) {
+        const long double angle = 2.0L * pi * static_cast<long double>(exponent) /
+                                  static_cast<long double>(order);
+        roots[slot] = std::polar(1.0L, angle);
+        exponent = (exponent * 5) % order;
+    }
+
+    std::vector<Plaintext> diagonals;
+    diagonals.reserve(n);
+    for (std::size_t rotation = 0; rotation < n; ++rotation) {
+        std::vector<std::complex<double>> diagonal(n);
+        for (std::size_t slot = 0; slot < n; ++slot) {
+            const auto coefficient = (slot + rotation) % n;
+            const auto value = std::pow(roots[slot], static_cast<int>(coefficient));
+            diagonal[slot] = {static_cast<double>(value.real()),
+                              static_cast<double>(value.imag())};
+        }
+        // Halevi-Shoup BSGS: the outer Rot_{bj} is applied after the inner
+        // sum, so pre-rotate D_{bj+i} by -bj.  OpenFHE's linear-transform
+        // precomputation uses this same shifted-diagonal convention.
+        const auto giantRotation = babyStep * (rotation / babyStep);
+        diagonal = Rotate(diagonal, -static_cast<int32_t>(giantRotation));
+        auto plaintext = m_context->MakeCKKSPackedPlaintext(
+            diagonal, 1, level, nullptr, static_cast<uint32_t>(n));
+        if (!plaintext) {
+            throw GLShipStateError("GL XFwd BSGS diagonal encoding failed");
+        }
+        diagonals.push_back(std::move(plaintext));
+    }
+    return diagonals;
+}
+
 Ciphertext<DCRTPoly> GLShipSchemelet::EvalXForward(
     const GLShipHalfBootstrapResult& input,
-    const GLShipEvaluationKey& evaluationKey) const {
+    const GLShipEvaluationKey& evaluationKey,
+    const std::vector<Plaintext>& diagonals) const {
     if (input.m_representation != GLShipRepresentation::X_COEFFICIENT_SLOTS ||
         input.m_dimension != m_geometry.GetDimension() || !input.m_context ||
         input.m_context.get() != m_context.get() || !input.m_ciphertext ||
@@ -1651,58 +1721,66 @@ Ciphertext<DCRTPoly> GLShipSchemelet::EvalXForward(
     }
 
     const auto n = m_geometry.GetDimension();
-    const auto order = m_geometry.GetNativeCyclotomicOrder();
-    const long double pi = std::acos(-1.0L);
-    std::vector<std::complex<long double>> roots(n);
-    std::size_t exponent = 1;
-    for (std::size_t slot = 0; slot < n; ++slot) {
-        const long double angle = 2.0L * pi * static_cast<long double>(exponent) /
-                                  static_cast<long double>(order);
-        roots[slot] = std::polar(1.0L, angle);
-        exponent = (exponent * 5) % order;
+    if (diagonals.size() != n ||
+        std::any_of(diagonals.begin(), diagonals.end(),
+                    [&](const Plaintext& diagonal) {
+                        return !diagonal ||
+                               diagonal->GetLevel() != input.m_ciphertext->GetLevel();
+                    })) {
+        throw GLShipStateError("GL XFwd BSGS diagonal bank does not match the input level");
+    }
+
+    const auto babyStep = static_cast<std::size_t>(
+        std::ceil(std::sqrt(static_cast<double>(n))));
+    const auto giantStep = (n + babyStep - 1) / babyStep;
+    std::vector<Ciphertext<DCRTPoly>> babies;
+    babies.reserve(babyStep);
+    babies.push_back(input.m_ciphertext->Clone());
+    for (std::size_t baby = 1; baby < babyStep; ++baby) {
+        auto rotated = m_context->GetScheme()->EvalAtIndex(
+            input.m_ciphertext, static_cast<uint32_t>(baby),
+            *evaluationKey.m_xForwardKeys);
+        if (!rotated || rotated->NumberCiphertextElements() != 2) {
+            throw GLShipStateError("GL XFwd BSGS baby rotation failed");
+        }
+        babies.push_back(std::move(rotated));
     }
 
     Ciphertext<DCRTPoly> accumulated;
-    for (std::size_t rotation = 0; rotation < n; ++rotation) {
-        Ciphertext<DCRTPoly> rotated;
-        if (rotation == 0) {
-            rotated = input.m_ciphertext->Clone();
+    for (std::size_t giant = 0; giant < giantStep; ++giant) {
+        Ciphertext<DCRTPoly> inner;
+        for (std::size_t baby = 0; baby < babyStep; ++baby) {
+            const auto rotation = giant * babyStep + baby;
+            if (rotation >= n) {
+                break;
+            }
+            auto term = m_context->EvalMult(babies[baby], diagonals[rotation]);
+            if (!term) {
+                throw GLShipStateError("GL XFwd BSGS diagonal multiplication failed");
+            }
+            if (inner) {
+                m_context->EvalAddInPlace(inner, term);
+            }
+            else {
+                inner = std::move(term);
+            }
         }
-        else {
-            rotated = m_context->GetScheme()->EvalAtIndex(
-                input.m_ciphertext, static_cast<uint32_t>(rotation),
+        if (!inner) {
+            throw GLShipStateError("GL XFwd BSGS produced an empty giant step");
+        }
+        if (giant != 0) {
+            inner = m_context->GetScheme()->EvalAtIndex(
+                inner, static_cast<uint32_t>(giant * babyStep),
                 *evaluationKey.m_xForwardKeys);
-        }
-        if (!rotated || rotated->NumberCiphertextElements() != 2) {
-            throw GLShipStateError("GL XFwd rotation failed");
-        }
-
-        // Positive EvalAtIndex rotations are left rotations:
-        // Rot_k(v)[j] = v[(j+k) mod n].  Therefore diagonal k is
-        // D_k[j] = zeta_j^((j+k) mod n), and sum_k D_k*Rot_k(v) is
-        // exactly sum_x zeta_j^x v[x].
-        std::vector<std::complex<double>> diagonal(n);
-        for (std::size_t slot = 0; slot < n; ++slot) {
-            const auto coefficient = (slot + rotation) % n;
-            const auto value = std::pow(roots[slot], static_cast<int>(coefficient));
-            diagonal[slot] = {static_cast<double>(value.real()),
-                              static_cast<double>(value.imag())};
-        }
-        auto plaintext = m_context->MakeCKKSPackedPlaintext(
-            diagonal, 1, input.m_ciphertext->GetLevel(), nullptr,
-            static_cast<uint32_t>(n));
-        if (!plaintext) {
-            throw GLShipStateError("GL XFwd diagonal encoding failed");
-        }
-        auto term = m_context->EvalMult(rotated, plaintext);
-        if (!term) {
-            throw GLShipStateError("GL XFwd diagonal multiplication failed");
+            if (!inner || inner->NumberCiphertextElements() != 2) {
+                throw GLShipStateError("GL XFwd BSGS giant rotation failed");
+            }
         }
         if (accumulated) {
-            m_context->EvalAddInPlace(accumulated, term);
+            m_context->EvalAddInPlace(accumulated, inner);
         }
         else {
-            accumulated = std::move(term);
+            accumulated = std::move(inner);
         }
     }
     if (!accumulated || accumulated->GetNoiseScaleDeg() != 2) {
@@ -1746,12 +1824,37 @@ GLCiphertext GLShipSchemelet::RefreshOnly(
         }
     }
 
-    std::vector<Ciphertext<DCRTPoly>> refreshedRows;
-    refreshedRows.reserve(m_geometry.GetRowCount());
-    for (std::size_t row = 0; row < m_geometry.GetRowCount(); ++row) {
-        const auto low = NormalizeAndSwitchRow(input.GetRows()[row], evaluationKey, row);
-        const auto coefficientSlots = EvalHalfBootstrap(low, evaluationKey);
-        refreshedRows.push_back(EvalXForward(coefficientSlots, evaluationKey));
+    const auto rowCount = m_geometry.GetRowCount();
+    std::vector<Ciphertext<DCRTPoly>> refreshedRows(rowCount);
+    const auto xForwardDiagonals = MakeXForwardDiagonals(
+        SelectionEvaluationDepth(m_parameters) - 1);
+    std::exception_ptr rowFailure;
+#if !defined(__MINGW32__) && !defined(__MINGW64__)
+    #pragma omp parallel for num_threads(OpenFHEParallelControls.GetThreadLimit(rowCount))
+#endif
+    for (int64_t signedRow = 0; signedRow < static_cast<int64_t>(rowCount); ++signedRow) {
+        const auto row = static_cast<std::size_t>(signedRow);
+        try {
+            const auto low = NormalizeAndSwitchRow(
+                input.GetRows()[row], evaluationKey, row);
+            const auto coefficientSlots =
+                EvalHalfBootstrapValidated(low, evaluationKey);
+            refreshedRows[row] =
+                EvalXForward(coefficientSlots, evaluationKey, xForwardDiagonals);
+        }
+        catch (...) {
+#if !defined(__MINGW32__) && !defined(__MINGW64__)
+            #pragma omp critical(gl_ship_refresh_row_failure)
+#endif
+            {
+                if (!rowFailure) {
+                    rowFailure = std::current_exception();
+                }
+            }
+        }
+    }
+    if (rowFailure) {
+        std::rethrow_exception(rowFailure);
     }
 
     return GLCiphertext(m_geometry, m_context, std::move(refreshedRows));

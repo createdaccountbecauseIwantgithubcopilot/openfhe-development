@@ -677,12 +677,14 @@ TEST(GLSchemelet, EvalMatMulReferenceNegatives) {
 
 TEST(GLSchemelet, DimensionAndMissingRowNegatives) {
     EXPECT_THROW((void)GLGeometry(2), GLDimensionError);
-    EXPECT_THROW((void)GLGeometry(32), GLDimensionError);
+    EXPECT_THROW((void)GLGeometry(64), GLDimensionError);
     EXPECT_THROW((void)GLPlaintext(4, std::vector<std::complex<double>>(15)), GLDimensionError);
 
     auto tooSmallRing = TestParameters(8, 8);
     EXPECT_THROW((void)GLSchemelet(tooSmallRing), GLDimensionError);
     EXPECT_THROW((void)GLSchemelet(TestParameters(16, 512)),
+                 GLNativeModeError);
+    EXPECT_THROW((void)GLSchemelet(TestParameters(32, 512)),
                  GLNativeModeError);
 
     GLSchemelet scheme4(TestParameters(4));

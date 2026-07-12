@@ -214,7 +214,7 @@ private:
  * keys per family.  One big switch performs n^2 KeySwitchCore calls.  A
  * production construction needs a fused R' decomposition/key layout and must
  * assess security against OpenFHE HYBRID's full QP modulus and all 2n
- * correlated sliced keys.  The n=4/8/16 exact-ring mode is HEStd_NotSet test code,
+ * correlated sliced keys.  The n=4/8/16/32 exact-ring mode is HEStd_NotSet test code,
  * not a security or performance claim.
  */
 class GLNativeEvalKey final {
@@ -337,8 +337,8 @@ private:
  * storage to OpenFHE; this slice does not assert bit-level polynomial-
  * coefficient parity with an independent GL X-axis codec.  With
  * ringDimension=2n the OpenFHE cyclotomic order is exactly 4n, matching
- * R ~= Z[X]/Phi_{4n}; for n=4/8/16 this mode is intentionally restricted to
- * HEStd_NotSet and is not a security claim. The n=16 conformance point is
+ * R ~= Z[X]/Phi_{4n}; for n=4/8/16/32 this mode is intentionally restricted to
+ * HEStd_NotSet and is not a security claim. The n=16/32 conformance points are
  * exact-ring only; n=4/8 may also use a larger transport ring, which is not a
  * native-R equivalence.
  *
