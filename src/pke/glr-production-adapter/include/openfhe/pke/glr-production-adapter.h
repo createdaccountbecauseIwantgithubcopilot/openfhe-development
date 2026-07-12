@@ -88,6 +88,9 @@ public:
         glscheme::rns::GlrShipDirectVectorDensePrimarySecurityEvidence;
     using NativeDirectVectorProductionAuthorizationEvidence =
         glscheme::rns::GlrShipDirectVectorProductionAuthorizationEvidence;
+    using NativeDirectVectorSelectorStorageAdmissionEvidence =
+        glscheme::rns::
+            GlrShipDirectVectorProductionSelectorStorageAdmissionEvidence;
     using NativeDirectVectorAllYStcEvidence =
         glscheme::rns::GlrShipDirectAllYStcEvidence;
     using NativeDirectVectorFullReturnEvidence =
@@ -147,6 +150,23 @@ public:
         bool metadataAuthorizationOnly = true;
         bool productionH40CiphertextValueExecutionPerformed = false;
         bool productionH40DecryptedValueNoiseAcceptanceRecorded = false;
+    };
+
+    // Metadata-only projection of the separately authorized production-sized
+    // selector store.  `native` admits the exact canonical encoded payload
+    // despite its total exceeding the generic p257 cap; it does not widen
+    // that generic cap.  The copied plan and the two transcript roots keep a
+    // persisted receipt tied to the same dual-certificate authorization.
+    struct DirectVectorPrimarySelectorStorageAuthorization {
+        NativeDirectVectorSelectorStorageAdmissionEvidence native;
+        NativeDirectVectorPlan canonicalPlan;
+        bool metadataAuthorizationOnly = true;
+        bool canonicalPlanBound = false;
+        bool bothSecurityRootsBound = false;
+        bool selectorGenerationEnabled = false;
+        bool selectorManifestOrPayloadGenerated = false;
+        bool selectorMaterialReady = false;
+        bool valueExecution = false;
     };
 
     // Receipt for the already-staged target-geometry h=2/stride-2 value rung.
@@ -551,6 +571,12 @@ public:
         const SecurityReport& sparseH40SecurityReport,
         const NativeDirectVectorDensePrimarySecurityEvidence&
             densePrimarySecurity) const;
+    DirectVectorPrimarySelectorStorageAuthorization
+    AuthorizeDirectVectorPrimarySelectorStorage(
+        const DirectVectorPrimaryAuthorization& authorization) const;
+    void ValidateDirectVectorPrimarySelectorStorageAuthorization(
+        const DirectVectorPrimarySelectorStorageAuthorization& storage,
+        const DirectVectorPrimaryAuthorization& authorization) const;
 
     // Binds a completed owner-observed h=2 staging run to the exact
     // GL-128-257-N32 L4 -> L8 direct-vector evidence.  This is intentionally

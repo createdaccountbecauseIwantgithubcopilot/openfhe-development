@@ -1398,6 +1398,126 @@ void RequireDirectVectorPrimaryAuthorization(
     }
 }
 
+bool DirectVectorSelectorStorageEvidenceEquals(
+    const GLRProductionAdapter::
+        NativeDirectVectorSelectorStorageAdmissionEvidence& lhs,
+    const GLRProductionAdapter::
+        NativeDirectVectorSelectorStorageAdmissionEvidence& rhs) {
+    return lhs.schema == rhs.schema &&
+           lhs.selector_admission.kind == rhs.selector_admission.kind &&
+           lhs.selector_admission.full_selector_payload_bytes ==
+               rhs.selector_admission.full_selector_payload_bytes &&
+           lhs.selector_admission.stored_selector_payload_bytes ==
+               rhs.selector_admission.stored_selector_payload_bytes &&
+           lhs.selector_admission.streamed_peak_selector_bytes ==
+               rhs.selector_admission.streamed_peak_selector_bytes &&
+           lhs.selector_admission.full_manifest_commitment ==
+               rhs.selector_admission.full_manifest_commitment &&
+           lhs.selector_admission.transport_manifest_commitment ==
+               rhs.selector_admission.transport_manifest_commitment &&
+           lhs.production_authorization_schema ==
+               rhs.production_authorization_schema &&
+           lhs.parameter_fingerprint == rhs.parameter_fingerprint &&
+           lhs.support_commitment == rhs.support_commitment &&
+           lhs.sparse_security_transcript_sha256 ==
+               rhs.sparse_security_transcript_sha256 &&
+           lhs.dense_security_transcript_sha256 ==
+               rhs.dense_security_transcript_sha256 &&
+           lhs.selector_level == rhs.selector_level &&
+           lhs.active_q_primes == rhs.active_q_primes &&
+           lhs.signed_selector_count == rhs.signed_selector_count &&
+           lhs.production_metadata_authorization_bound ==
+               rhs.production_metadata_authorization_bound &&
+           lhs.compact_authenticated_streaming_admitted ==
+               rhs.compact_authenticated_streaming_admitted &&
+           lhs.generic_512_mib_cap_widened ==
+               rhs.generic_512_mib_cap_widened &&
+           lhs.production_generator_enabled ==
+               rhs.production_generator_enabled &&
+           lhs.manifest_or_payload_generated ==
+               rhs.manifest_or_payload_generated;
+}
+
+GLRProductionAdapter::DirectVectorPrimarySelectorStorageAuthorization
+MakeDirectVectorPrimarySelectorStorageAuthorization(
+    const GLRProductionAdapter::Context& context,
+    const GLRProductionAdapter::DirectVectorPrimaryAuthorization&
+        authorization) {
+    if (!authorization.metadataAuthorizationOnly ||
+        authorization.productionH40CiphertextValueExecutionPerformed ||
+        authorization.productionH40DecryptedValueNoiseAcceptanceRecorded ||
+        !DirectVectorAllYReturnPreflightEquals(
+            authorization.allYReturn,
+            MakeDirectVectorPrimaryAllYReturnPreflight(context))) {
+        throw GlrError(
+            "GLRProductionAdapter: selector-storage source authorization "
+            "overstates h40 execution or has a forged all-Y ledger");
+    }
+
+    GLRProductionAdapter::DirectVectorPrimarySelectorStorageAuthorization out;
+    out.native =
+        glscheme::rns::
+            glr_authorize_ship_direct_vector_gl128_selector_storage(
+                authorization.native);
+    out.canonicalPlan = authorization.native.plan;
+    if (out.native.selector_admission.stored_selector_payload_bytes !=
+            UINT64_C(7046575360) ||
+        out.native.selector_admission.streamed_peak_selector_bytes !=
+            UINT64_C(33030176) ||
+        out.native.selector_admission.stored_selector_payload_bytes <=
+            (UINT64_C(512) << 20) ||
+        out.native.selector_level != 4 || out.native.active_q_primes != 21 ||
+        out.native.signed_selector_count != 640 ||
+        out.native.sparse_security_transcript_sha256 !=
+            authorization.native.sparse_h40_security
+                .estimator_transcript_sha256 ||
+        out.native.dense_security_transcript_sha256 !=
+            authorization.native.dense_primary_security.transcript_sha256 ||
+        !out.native.production_metadata_authorization_bound ||
+        !out.native.compact_authenticated_streaming_admitted ||
+        out.native.generic_512_mib_cap_widened ||
+        out.native.production_generator_enabled ||
+        out.native.manifest_or_payload_generated) {
+        throw GlrError(
+            "GLRProductionAdapter: native selector-storage authorization "
+            "did not return the exact metadata-only 7,046,575,360-byte "
+            "canonical admission");
+    }
+    out.metadataAuthorizationOnly = true;
+    out.canonicalPlanBound = true;
+    out.bothSecurityRootsBound = true;
+    out.selectorGenerationEnabled = false;
+    out.selectorManifestOrPayloadGenerated = false;
+    out.selectorMaterialReady = false;
+    out.valueExecution = false;
+    return out;
+}
+
+void RequireDirectVectorPrimarySelectorStorageAuthorization(
+    const GLRProductionAdapter::
+        DirectVectorPrimarySelectorStorageAuthorization& actual,
+    const GLRProductionAdapter::
+        DirectVectorPrimarySelectorStorageAuthorization& expected) {
+    if (!DirectVectorSelectorStorageEvidenceEquals(actual.native,
+                                                   expected.native) ||
+        !DirectVectorPlanEquals(actual.canonicalPlan,
+                                expected.canonicalPlan) ||
+        actual.metadataAuthorizationOnly !=
+            expected.metadataAuthorizationOnly ||
+        actual.canonicalPlanBound != expected.canonicalPlanBound ||
+        actual.bothSecurityRootsBound != expected.bothSecurityRootsBound ||
+        actual.selectorGenerationEnabled !=
+            expected.selectorGenerationEnabled ||
+        actual.selectorManifestOrPayloadGenerated !=
+            expected.selectorManifestOrPayloadGenerated ||
+        actual.selectorMaterialReady != expected.selectorMaterialReady ||
+        actual.valueExecution != expected.valueExecution) {
+        throw GlrError(
+            "GLRProductionAdapter: selector-storage receipt is forged, "
+            "cross-authorization, or overstates material/value readiness");
+    }
+}
+
 double ExpectedDirectVectorH2OutputScale(
     const GLRProductionAdapter::Context& context) {
     double leafScale = context.params.delta * context.params.delta;
@@ -1773,6 +1893,23 @@ void GLRProductionAdapter::ValidateDirectVectorPrimaryAuthorization(
         MakeDirectVectorPrimaryAuthorization(
             m_context, supportCommitment, sparseH40SecurityReport,
             densePrimarySecurity));
+}
+
+GLRProductionAdapter::DirectVectorPrimarySelectorStorageAuthorization
+GLRProductionAdapter::AuthorizeDirectVectorPrimarySelectorStorage(
+    const DirectVectorPrimaryAuthorization& authorization) const {
+    return MakeDirectVectorPrimarySelectorStorageAuthorization(
+        m_context, authorization);
+}
+
+void GLRProductionAdapter::
+    ValidateDirectVectorPrimarySelectorStorageAuthorization(
+        const DirectVectorPrimarySelectorStorageAuthorization& storage,
+        const DirectVectorPrimaryAuthorization& authorization) const {
+    RequireDirectVectorPrimarySelectorStorageAuthorization(
+        storage,
+        MakeDirectVectorPrimarySelectorStorageAuthorization(
+            m_context, authorization));
 }
 
 GLRProductionAdapter::DirectVectorH2Stride2SmokeReceipt

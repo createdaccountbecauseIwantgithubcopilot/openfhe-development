@@ -308,6 +308,8 @@ int main() {
         const Adapter::DirectVectorAllYReturnPreflight&;
     using DirectAuthorizationRef =
         const Adapter::DirectVectorPrimaryAuthorization&;
+    using DirectStorageAuthorizationRef =
+        const Adapter::DirectVectorPrimarySelectorStorageAuthorization&;
     using DensePrimaryRef = const Adapter::
         NativeDirectVectorDensePrimarySecurityEvidence&;
     using DirectSmokeEvidenceRef =
@@ -341,6 +343,18 @@ int main() {
                                    std::declval<const std::string&>(),
                                    std::declval<SecurityReportRef>(),
                                    std::declval<DensePrimaryRef>())),
+                  void>);
+    static_assert(std::is_same_v<
+                  decltype(std::declval<AdapterRef>()
+                               .AuthorizeDirectVectorPrimarySelectorStorage(
+                                   std::declval<DirectAuthorizationRef>())),
+                  Adapter::
+                      DirectVectorPrimarySelectorStorageAuthorization>);
+    static_assert(std::is_same_v<
+                  decltype(std::declval<AdapterRef>()
+                               .ValidateDirectVectorPrimarySelectorStorageAuthorization(
+                                   std::declval<DirectStorageAuthorizationRef>(),
+                                   std::declval<DirectAuthorizationRef>())),
                   void>);
     static_assert(std::is_same_v<
                   decltype(std::declval<AdapterRef>()
@@ -687,6 +701,128 @@ int main() {
         }
         Require(rejected,
                 "cross-transcript dense-primary authorization was accepted");
+    }
+
+    // Production selector storage has a separate core capability: the exact
+    // canonical encoded bank exceeds the generic 512-MiB p257 total cap, but
+    // its one-record-plus-expanded-ciphertext streaming peak stays bounded.
+    // The generic admission must continue to reject the same plan.
+    bool genericSelectorCapRejected = false;
+    try {
+        (void)glscheme::rns::glr_admit_ship_direct_selector_material(
+            directNative.plan,
+            glscheme::rns::GlrShipDirectSelectorAdmissionKind::
+                compact_authenticated_streamed);
+    }
+    catch (const glscheme::rns::GlrError& error) {
+        genericSelectorCapRejected =
+            std::string(error.what()).find("512 MiB") != std::string::npos;
+    }
+    Require(genericSelectorCapRejected,
+            "canonical selector admission widened the generic 512-MiB cap");
+
+    const Adapter::DirectVectorPrimarySelectorStorageAuthorization
+        selectorStorage =
+            adapter.AuthorizeDirectVectorPrimarySelectorStorage(
+                directAuthorization);
+    adapter.ValidateDirectVectorPrimarySelectorStorageAuthorization(
+        selectorStorage, directAuthorization);
+    const auto& nativeStorage = selectorStorage.native;
+    Require(nativeStorage.schema ==
+                    glscheme::rns::
+                        kGlrShipDirectVectorGl128SelectorStorageAdmissionSchema &&
+                nativeStorage.production_authorization_schema ==
+                    directNative.schema &&
+                nativeStorage.parameter_fingerprint ==
+                    directNative.parameter_fingerprint &&
+                nativeStorage.support_commitment ==
+                    directNative.support_commitment &&
+                nativeStorage.sparse_security_transcript_sha256 ==
+                    directNative.sparse_h40_security
+                        .estimator_transcript_sha256 &&
+                nativeStorage.dense_security_transcript_sha256 ==
+                    directNative.dense_primary_security.transcript_sha256 &&
+                nativeStorage.selector_level == 4 &&
+                nativeStorage.active_q_primes == 21 &&
+                nativeStorage.signed_selector_count == 640 &&
+                nativeStorage.selector_admission.kind ==
+                    glscheme::rns::GlrShipDirectSelectorAdmissionKind::
+                        compact_authenticated_streamed &&
+                nativeStorage.selector_admission.full_selector_payload_bytes ==
+                    directNative.plan.exact_resident_selector_bytes &&
+                nativeStorage.selector_admission.stored_selector_payload_bytes ==
+                    7046575360ULL &&
+                nativeStorage.selector_admission.streamed_peak_selector_bytes ==
+                    33030176ULL &&
+                nativeStorage.production_metadata_authorization_bound &&
+                nativeStorage.compact_authenticated_streaming_admitted &&
+                !nativeStorage.generic_512_mib_cap_widened &&
+                !nativeStorage.production_generator_enabled &&
+                !nativeStorage.manifest_or_payload_generated &&
+                selectorStorage.metadataAuthorizationOnly &&
+                selectorStorage.canonicalPlanBound &&
+                selectorStorage.bothSecurityRootsBound &&
+                !selectorStorage.selectorGenerationEnabled &&
+                !selectorStorage.selectorManifestOrPayloadGenerated &&
+                !selectorStorage.selectorMaterialReady &&
+                !selectorStorage.valueExecution &&
+                selectorStorage.canonicalPlan.selector_level == 4 &&
+                selectorStorage.canonicalPlan.active_q_primes == 21 &&
+                selectorStorage.canonicalPlan
+                        .exact_encoded_compact_selector_bytes ==
+                    7046575360ULL &&
+                selectorStorage.canonicalPlan
+                        .compact_streamed_peak_selector_bytes ==
+                    33030176ULL,
+            "selector-storage receipt lost its canonical plan/security-root/"
+            "bounded-storage binding");
+
+    const auto rejectedStorageReceipt = [&](auto mutate) {
+        auto forged = selectorStorage;
+        mutate(forged);
+        try {
+            adapter.ValidateDirectVectorPrimarySelectorStorageAuthorization(
+                forged, directAuthorization);
+        }
+        catch (const glscheme::rns::GlrError&) {
+            return true;
+        }
+        return false;
+    };
+    Require(rejectedStorageReceipt([](auto& forged) {
+                --forged.native.selector_admission
+                      .stored_selector_payload_bytes;
+            }),
+            "forged selector encoded-byte total was accepted");
+    Require(rejectedStorageReceipt([](auto& forged) {
+                forged.native.sparse_security_transcript_sha256[0] ^= 1;
+            }),
+            "cross-root selector-storage receipt was accepted");
+    Require(rejectedStorageReceipt([](auto& forged) {
+                ++forged.canonicalPlan.signed_selector_count;
+            }),
+            "cross-plan selector-storage receipt was accepted");
+    Require(rejectedStorageReceipt([](auto& forged) {
+                forged.selectorMaterialReady = true;
+            }),
+            "metadata-only selector receipt was promoted to material ready");
+    Require(rejectedStorageReceipt([](auto& forged) {
+                forged.valueExecution = true;
+            }),
+            "metadata-only selector receipt was promoted to value execution");
+    {
+        auto forgedSource = directAuthorization;
+        ++forgedSource.native.plan.signed_selector_count;
+        bool rejected = false;
+        try {
+            (void)adapter.AuthorizeDirectVectorPrimarySelectorStorage(
+                forgedSource);
+        }
+        catch (const glscheme::rns::GlrError&) {
+            rejected = true;
+        }
+        Require(rejected,
+                "selector storage accepted a forged source plan");
     }
 
     // The n128/p257 h=2 rung is an explicitly insecure value smoke.  Bind its
