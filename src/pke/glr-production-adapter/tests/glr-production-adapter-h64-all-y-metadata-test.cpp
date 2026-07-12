@@ -197,6 +197,30 @@ int main() {
     Require(generatePrefix != nullptr && executePrefix != nullptr,
             "OpenFHE canonical H64 prefix-splice execution seam is absent");
 
+    const auto muxrot = adapter.GetH64P257RightMuxRotCapabilities();
+    Require(muxrot.schema ==
+                    "openfhe.gl128_h64_p257_right_muxrot_capabilities.v1" &&
+                muxrot.xwCoordinatesPerRequest == 32768 &&
+                muxrot.distinctEncryptedWBitsExecuted == 1 &&
+                muxrot.authenticatedWBitControlUses == 2 &&
+                muxrot.rightRotationAmount == 255 &&
+                muxrot.rotationKeyLevel == 2 &&
+                muxrot.rotationSpecialPrimeCount == 13 &&
+                muxrot.peakExpandedKeyBytes == 159383552 &&
+                muxrot.cpuValueExecutionExposed &&
+                muxrot.encryptedPrefixSpliceExecuted &&
+                muxrot.keyedWRotationsExecuted &&
+                !muxrot.encryptedDenominatorExecuted &&
+                !muxrot.completeEightBitWActionExecuted &&
+                !muxrot.exactNoiseEvidencePresent &&
+                !muxrot.productionSecurityAuthorized &&
+                !muxrot.bootstrapDirectAdmitted,
+            "OpenFHE canonical H64 right-MuxRot capability is malformed");
+    auto generateMuxRot = &Adapter::GenerateH64P257RightMuxRotMaterial;
+    auto executeMuxRot = &Adapter::EvaluateH64P257RightMuxRotCpu;
+    Require(generateMuxRot != nullptr && executeMuxRot != nullptr,
+            "OpenFHE canonical H64 right-MuxRot seam is absent");
+
     const auto structuredAudit = adapter.AuditH64StructuredSecurity();
     const auto structuredCapabilities =
         adapter.GetH64StructuredSecurityCapabilities();

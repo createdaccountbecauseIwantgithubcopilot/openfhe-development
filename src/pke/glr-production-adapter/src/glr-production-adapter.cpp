@@ -2824,6 +2824,45 @@ GLRProductionAdapter::EvaluateH64P257PrefixSpliceCpu(
         m_context, material, requests);
 }
 
+GLRProductionAdapter::NativeGL128H64P257RightMuxRotCapabilities
+GLRProductionAdapter::GetH64P257RightMuxRotCapabilities() const {
+    (void)glscheme::rns::glr_gl128_validate_context(m_context);
+    NativeGL128H64P257RightMuxRotCapabilities capabilities;
+    if (!capabilities.cpuValueExecutionExposed ||
+        !capabilities.encryptedPrefixSpliceExecuted ||
+        !capabilities.keyedWRotationsExecuted ||
+        capabilities.encryptedDenominatorExecuted ||
+        capabilities.completeEightBitWActionExecuted ||
+        capabilities.exactNoiseEvidencePresent ||
+        capabilities.productionSecurityAuthorized ||
+        capabilities.bootstrapDirectAdmitted) {
+        throw GlrError(
+            "GLRProductionAdapter: canonical right-MuxRot capability "
+            "overstates execution or security admission");
+    }
+    return capabilities;
+}
+
+GLRProductionAdapter::NativeGL128H64P257RightMuxRotMaterial
+GLRProductionAdapter::GenerateH64P257RightMuxRotMaterial(
+    const SparseSecretKey& sparseKey,
+    const NativeGL128H64HiddenSelectorOwnerSeed& ownerSeed,
+    std::uint64_t seed) const {
+    (void)glscheme::rns::glr_gl128_validate_context(m_context);
+    GlrRngOwner rng = MakeRng(seed);
+    return glscheme::rns::glr_generate_h64_p257_right_muxrot_material(
+        m_context, sparseKey, ownerSeed, *rng);
+}
+
+GLRProductionAdapter::NativeGL128H64P257RightMuxRotResult
+GLRProductionAdapter::EvaluateH64P257RightMuxRotCpu(
+    const NativeGL128H64P257RightMuxRotMaterial& material,
+    std::span<const NativeGL128H64P257OneBitRequest> requests) const {
+    (void)glscheme::rns::glr_gl128_validate_context(m_context);
+    return glscheme::rns::glr_h64_p257_right_muxrot_cpu(
+        m_context, material, requests);
+}
+
 GLRProductionAdapter::NativeGL128H64StructuredSecurityAudit
 GLRProductionAdapter::AuditH64StructuredSecurity() const {
     const auto transcript =

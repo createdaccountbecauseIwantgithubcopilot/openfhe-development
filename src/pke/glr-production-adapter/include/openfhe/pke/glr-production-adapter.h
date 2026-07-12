@@ -18,6 +18,7 @@
 #include "glscheme/gl128_h64_p257_one_bit.hpp"
 #include "glscheme/gl128_h64_p257_one_bit_gpu.hpp"
 #include "glscheme/gl128_h64_p257_prefix_splice.hpp"
+#include "glscheme/gl128_h64_p257_right_muxrot.hpp"
 #include "glscheme/gl128_h64_root_product_oracle.hpp"
 #include "glscheme/gl128_h64_structured_security_audit.hpp"
 #include "glscheme/gl128_h64_w_action_plan.hpp"
@@ -371,6 +372,12 @@ public:
         glscheme::rns::GlrH64P257PrefixSpliceEvidence;
     using NativeGL128H64P257PrefixSpliceResult =
         glscheme::rns::GlrH64P257PrefixSpliceResult;
+    using NativeGL128H64P257RightMuxRotMaterial =
+        glscheme::rns::GlrH64P257RightMuxRotMaterial;
+    using NativeGL128H64P257RightMuxRotEvidence =
+        glscheme::rns::GlrH64P257RightMuxRotEvidence;
+    using NativeGL128H64P257RightMuxRotResult =
+        glscheme::rns::GlrH64P257RightMuxRotResult;
     using NativeGL128H64CheckedEstimatorTranscript =
         glscheme::rns::GlrH64CheckedEstimatorTranscript;
     using NativeGL128H64StructuredSecurityAudit =
@@ -487,6 +494,30 @@ public:
         bool bootstrapDirectAdmitted = false;
     };
 
+    struct NativeGL128H64P257RightMuxRotCapabilities final {
+        std::string schema =
+            "openfhe.gl128_h64_p257_right_muxrot_capabilities.v1";
+        std::string nativeMaterialSchema =
+            "glscheme.gl128_h64_p257_right_muxrot_material.v1";
+        std::string nativeEvidenceSchema =
+            "glscheme.gl128_h64_p257_right_muxrot_evidence.v1";
+        std::uint64_t xwCoordinatesPerRequest = 32768;
+        std::uint32_t distinctEncryptedWBitsExecuted = 1;
+        std::uint32_t authenticatedWBitControlUses = 2;
+        std::uint32_t rightRotationAmount = 255;
+        std::uint32_t rotationKeyLevel = 2;
+        std::uint32_t rotationSpecialPrimeCount = 13;
+        std::uint64_t peakExpandedKeyBytes = 159383552;
+        bool cpuValueExecutionExposed = true;
+        bool encryptedPrefixSpliceExecuted = true;
+        bool keyedWRotationsExecuted = true;
+        bool encryptedDenominatorExecuted = false;
+        bool completeEightBitWActionExecuted = false;
+        bool exactNoiseEvidencePresent = false;
+        bool productionSecurityAuthorized = false;
+        bool bootstrapDirectAdmitted = false;
+    };
+
     // Executable CPU anchor for one canonical encrypted W-index bit.  This
     // is deliberately a distinct capability from the metadata-only complete
     // logarithmic plan: it covers the full 32,768-coordinate grid and the
@@ -573,6 +604,9 @@ public:
     static_assert(!NativeGL128H64P257OneBitGpuEvidence::gpu_h64_bootstrap_ready);
     static_assert(NativeGL128H64P257PrefixSpliceEvidence::research_only);
     static_assert(!NativeGL128H64P257PrefixSpliceEvidence::
+                      production_security_authorized);
+    static_assert(NativeGL128H64P257RightMuxRotEvidence::research_only);
+    static_assert(!NativeGL128H64P257RightMuxRotEvidence::
                       production_security_authorized);
     static_assert(!std::is_convertible_v<
                   NativeGL128H64P257OneBitResult,
@@ -1408,6 +1442,15 @@ public:
         std::uint64_t seed) const;
     NativeGL128H64P257PrefixSpliceResult EvaluateH64P257PrefixSpliceCpu(
         const NativeGL128H64P257PrefixSpliceMaterial& material,
+        std::span<const NativeGL128H64P257OneBitRequest> requests) const;
+    NativeGL128H64P257RightMuxRotCapabilities
+    GetH64P257RightMuxRotCapabilities() const;
+    NativeGL128H64P257RightMuxRotMaterial GenerateH64P257RightMuxRotMaterial(
+        const SparseSecretKey& sparseKey,
+        const NativeGL128H64HiddenSelectorOwnerSeed& ownerSeed,
+        std::uint64_t seed) const;
+    NativeGL128H64P257RightMuxRotResult EvaluateH64P257RightMuxRotCpu(
+        const NativeGL128H64P257RightMuxRotMaterial& material,
         std::span<const NativeGL128H64P257OneBitRequest> requests) const;
     NativeGL128H64StructuredSecurityAudit
     AuditH64StructuredSecurity() const;
