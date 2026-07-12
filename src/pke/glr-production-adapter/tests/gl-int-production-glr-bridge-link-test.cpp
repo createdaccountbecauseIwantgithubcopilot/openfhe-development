@@ -12,6 +12,8 @@ int main() {
                    capabilities.fullChainBGVModSwitch &&
                    capabilities.fullChainPublicTErrEncryption &&
                    capabilities.compactSeededPublicA &&
+                   capabilities.fullChainSwitchIntSmall &&
+                   capabilities.fullChainSwitchIntBig &&
                    !capabilities.productionSecurityAuthorized &&
                    !capabilities.bootstrapDirectAdmitted
                ? 0

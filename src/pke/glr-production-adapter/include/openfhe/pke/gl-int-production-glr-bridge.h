@@ -41,6 +41,8 @@ public:
         bool fullChainBGVModSwitch{true};
         bool fullChainPublicTErrEncryption{true};
         bool compactSeededPublicA{true};
+        bool fullChainSwitchIntSmall{true};
+        bool fullChainSwitchIntBig{true};
         bool productionSecurityAuthorized{false};
         bool bootstrapDirectAdmitted{false};
     };
@@ -108,6 +110,16 @@ public:
         InterMatrixRotation,
         Transpose,
         ConjugationFamilySwap,
+    };
+
+    enum class FullChainSwitchKind : std::uint8_t {
+        Square,
+        ConjugationFamilySwap,
+        RowRotation,
+        InterMatrixRotation,
+        Transpose,
+        ConjugateTranspose,
+        ProductConjugateTranspose,
     };
 
     /**
@@ -181,6 +193,47 @@ public:
         std::string m_nativeKeyLineageCommitment;
     };
 
+    struct IntegerSwitchResult {
+        glscheme::rns::GlrPoly b;
+        glscheme::rns::GlrPoly a;
+    };
+
+    /** Generic seeded-a full-chain SwitchInt_small/SwitchInt_big key. */
+    class FullChainIntegerSwitchKey final {
+    public:
+        FullChainIntegerSwitchKey(const FullChainIntegerSwitchKey&) = delete;
+        FullChainIntegerSwitchKey& operator=(
+            const FullChainIntegerSwitchKey&) = delete;
+        FullChainIntegerSwitchKey(
+            FullChainIntegerSwitchKey&&) noexcept = default;
+        FullChainIntegerSwitchKey& operator=(
+            FullChainIntegerSwitchKey&&) noexcept = default;
+        ~FullChainIntegerSwitchKey() = default;
+
+        FullChainSwitchKind GetKind() const noexcept;
+        std::int32_t GetAmount() const noexcept;
+        std::uint32_t GetKeyLevel() const noexcept;
+        std::size_t GetMaterializedBytes() const noexcept;
+        std::size_t GetCompactStoredBytes() const noexcept;
+        const std::string& GetNativeKeyLineageCommitment() const noexcept;
+        bool IsBigSwitch() const noexcept;
+        bool UsesSeededPublicA() const noexcept;
+        bool UsesTErrors() const noexcept;
+        bool IsSecurityAuthorized() const noexcept;
+
+    private:
+        friend class GLIntProductionGLRBridge;
+        FullChainIntegerSwitchKey(
+            FullChainSwitchKind kind, std::int32_t amount,
+            glscheme::rns::GlrSwitchKey native,
+            std::string nativeKeyLineageCommitment);
+
+        FullChainSwitchKind m_kind{FullChainSwitchKind::Square};
+        std::int32_t m_amount{0};
+        glscheme::rns::GlrSwitchKey m_native;
+        std::string m_nativeKeyLineageCommitment;
+    };
+
     explicit GLIntProductionGLRBridge(
         const GLRProductionAdapter& adapter);
 
@@ -226,6 +279,14 @@ public:
     CiphertextImport EncryptFullChainPublic(
         const DenseIntegerBatch& batch, const IntegerPublicKey& publicKey,
         std::uint64_t seed = 0) const;
+    /** keyLevel=0 covers Q25; keyLevel=18 is the compact Q7/L18 corridor. */
+    FullChainIntegerSwitchKey GenerateFullChainIntegerSwitchKey(
+        const OwnerBinding& owner, FullChainSwitchKind kind,
+        std::int32_t amount = 0, std::uint32_t keyLevel = 0,
+        std::uint64_t seed = 0) const;
+    IntegerSwitchResult ApplyFullChainIntegerSwitch(
+        const glscheme::rns::GlrPoly& input,
+        const FullChainIntegerSwitchKey& evaluationKey) const;
     NativeCiphertext ModSwitchFullChain(
         const NativeCiphertext& ciphertext) const;
 
@@ -265,6 +326,23 @@ private:
     void MultiplyRpByRInSlots(
         glscheme::rns::GlrPoly* rp,
         const glscheme::rns::GlrPoly& r) const;
+    std::pair<glscheme::rns::GlrKskId, std::int32_t>
+    NormalizeFullChainSwitchKind(FullChainSwitchKind kind,
+                                 std::int32_t amount) const;
+    glscheme::rns::GlrPoly BuildFullChainSwitchSource(
+        const OwnerBinding& owner, FullChainSwitchKind kind,
+        std::int32_t amount, std::uint32_t keyLevel) const;
+    void ConvertSwitchKeyErrorsToTErr(
+        glscheme::rns::GlrSwitchKey* key,
+        const glscheme::rns::GlrPoly& source,
+        const OwnerBinding& owner) const;
+    void AccumulateIntegerSwitchDigit(
+        glscheme::rns::GlrPoly* b, glscheme::rns::GlrPoly* a,
+        const glscheme::rns::GlrPoly& lifted,
+        const glscheme::rns::GlrSwitchKey& key,
+        std::size_t digit) const;
+    glscheme::rns::GlrPoly BGVModDownSpecialPoly(
+        const glscheme::rns::GlrPoly& input) const;
     glscheme::rns::GlrPoly BGVModSwitchPoly(
         const glscheme::rns::GlrPoly& input) const;
 

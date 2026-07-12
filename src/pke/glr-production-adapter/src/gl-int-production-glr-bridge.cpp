@@ -309,6 +309,71 @@ bool GLIntProductionGLRBridge::IntegerPublicKey::IsSecurityAuthorized() const no
     return false;
 }
 
+GLIntProductionGLRBridge::FullChainIntegerSwitchKey::
+    FullChainIntegerSwitchKey(
+        FullChainSwitchKind kind, std::int32_t amount,
+        glscheme::rns::GlrSwitchKey native,
+        std::string nativeKeyLineageCommitment)
+    : m_kind(kind),
+      m_amount(amount),
+      m_native(std::move(native)),
+      m_nativeKeyLineageCommitment(
+          std::move(nativeKeyLineageCommitment)) {}
+
+GLIntProductionGLRBridge::FullChainSwitchKind
+GLIntProductionGLRBridge::FullChainIntegerSwitchKey::GetKind() const noexcept {
+    return m_kind;
+}
+
+std::int32_t GLIntProductionGLRBridge::FullChainIntegerSwitchKey::
+    GetAmount() const noexcept {
+    return m_amount;
+}
+
+std::uint32_t GLIntProductionGLRBridge::FullChainIntegerSwitchKey::
+    GetKeyLevel() const noexcept {
+    return m_native.key_level;
+}
+
+std::size_t GLIntProductionGLRBridge::FullChainIntegerSwitchKey::
+    GetMaterializedBytes() const noexcept {
+    return static_cast<std::size_t>(m_native.byte_size());
+}
+
+std::size_t GLIntProductionGLRBridge::FullChainIntegerSwitchKey::
+    GetCompactStoredBytes() const noexcept {
+    std::size_t bytes = m_native.public_a_seed.has_value()
+                            ? m_native.public_a_seed->size()
+                            : 0;
+    for (const auto& digit : m_native.b_digits) {
+        bytes += digit.data.size() * sizeof(std::uint64_t);
+    }
+    return bytes;
+}
+
+const std::string& GLIntProductionGLRBridge::FullChainIntegerSwitchKey::
+    GetNativeKeyLineageCommitment() const noexcept {
+    return m_nativeKeyLineageCommitment;
+}
+
+bool GLIntProductionGLRBridge::FullChainIntegerSwitchKey::IsBigSwitch() const noexcept {
+    return m_native.ring == GlrRing::Rp;
+}
+
+bool GLIntProductionGLRBridge::FullChainIntegerSwitchKey::
+    UsesSeededPublicA() const noexcept {
+    return m_native.public_a_seed.has_value();
+}
+
+bool GLIntProductionGLRBridge::FullChainIntegerSwitchKey::UsesTErrors() const noexcept {
+    return true;
+}
+
+bool GLIntProductionGLRBridge::FullChainIntegerSwitchKey::
+    IsSecurityAuthorized() const noexcept {
+    return false;
+}
+
 void GLIntProductionGLRBridge::DenseIntegerBatch::Validate() const {
     if (values.size() != kDenseIntegerSlotCount) {
         throw GLDimensionError(
@@ -653,6 +718,335 @@ void GLIntProductionGLRBridge::MultiplyRpByRInSlots(
             }
         }
     }
+}
+
+std::pair<glscheme::rns::GlrKskId, std::int32_t>
+GLIntProductionGLRBridge::NormalizeFullChainSwitchKind(
+    FullChainSwitchKind kind, std::int32_t amount) const {
+    const auto& context = m_adapter->GetContext();
+    const auto normalize = [](std::int32_t value, std::int32_t modulus) {
+        auto normalized = value % modulus;
+        return normalized < 0 ? normalized + modulus : normalized;
+    };
+    glscheme::rns::GlrKskId id;
+    switch (kind) {
+        case FullChainSwitchKind::Square:
+            id.direction =
+                glscheme::rns::GlrKsDirection::primary_sq_to_primary;
+            break;
+        case FullChainSwitchKind::ConjugationFamilySwap:
+            id.direction =
+                glscheme::rns::GlrKsDirection::conjugation_to_primary;
+            break;
+        case FullChainSwitchKind::RowRotation:
+            amount = normalize(amount,
+                               static_cast<std::int32_t>(context.n()));
+            if (amount == 0) {
+                throw GLDimensionError(
+                    "full-chain row SwitchInt requires a nonzero amount");
+            }
+            id.direction = glscheme::rns::GlrKsDirection::row_rotation;
+            id.amount = amount;
+            break;
+        case FullChainSwitchKind::InterMatrixRotation:
+            amount = normalize(amount,
+                               static_cast<std::int32_t>(context.phi()));
+            if (amount == 0) {
+                throw GLDimensionError(
+                    "full-chain W SwitchInt requires a nonzero amount");
+            }
+            id.direction = glscheme::rns::GlrKsDirection::w_rotation;
+            id.amount = amount;
+            break;
+        case FullChainSwitchKind::Transpose:
+            id.direction =
+                glscheme::rns::GlrKsDirection::transpose_to_primary;
+            break;
+        case FullChainSwitchKind::ConjugateTranspose:
+            id.direction = glscheme::rns::GlrKsDirection::
+                primary_conjtranspose_to_primary;
+            break;
+        case FullChainSwitchKind::ProductConjugateTranspose:
+            id.direction = glscheme::rns::GlrKsDirection::
+                primary_product_conjtranspose_to_primary;
+            break;
+    }
+    if (kind != FullChainSwitchKind::RowRotation &&
+        kind != FullChainSwitchKind::InterMatrixRotation && amount != 0) {
+        throw GLDimensionError(
+            "non-rotation full-chain SwitchInt key amount must be zero");
+    }
+    return {id, amount};
+}
+
+GlrPoly GLIntProductionGLRBridge::BuildFullChainSwitchSource(
+    const OwnerBinding& owner, FullChainSwitchKind kind,
+    std::int32_t amount, std::uint32_t keyLevel) const {
+    const auto& context = m_adapter->GetContext();
+    GlrPoly secret = glscheme::rns::glr_restrict_to_key_level(
+        context, owner.GetNativeSecretKey().s, keyLevel);
+    PolyWipe secretWipe(secret);
+    switch (kind) {
+        case FullChainSwitchKind::Square:
+            return RingMultiply(secret, secret);
+        case FullChainSwitchKind::ConjugationFamilySwap: {
+            glscheme::rns::GlrCoeffAutomorphism automorphism;
+            automorphism.x_alpha = -1;
+            automorphism.w_alpha = -1;
+            automorphism.conjugate = true;
+            return glscheme::rns::glr_apply_coeff_automorphism(
+                context, secret, automorphism);
+        }
+        case FullChainSwitchKind::RowRotation: {
+            glscheme::rns::GlrCoeffAutomorphism automorphism;
+            automorphism.x_alpha = static_cast<std::int64_t>(
+                glscheme::rns::glr_powmod(5, amount,
+                                           4ull * context.n()));
+            return glscheme::rns::glr_apply_coeff_automorphism(
+                context, secret, automorphism);
+        }
+        case FullChainSwitchKind::InterMatrixRotation: {
+            glscheme::rns::GlrCoeffAutomorphism automorphism;
+            automorphism.w_alpha = static_cast<std::int64_t>(
+                glscheme::rns::glr_powmod(context.params.gamma, amount,
+                                           context.p_()));
+            return glscheme::rns::glr_apply_coeff_automorphism(
+                context, secret, automorphism);
+        }
+        case FullChainSwitchKind::Transpose: {
+            GlrPoly embedded = glscheme::rns::glr_embed_r_into(
+                context, secret, GlrRing::Rp);
+            PolyWipe embeddedWipe(embedded);
+            glscheme::rns::GlrCoeffAutomorphism automorphism;
+            automorphism.swap_xy = true;
+            return glscheme::rns::glr_apply_coeff_automorphism(
+                context, embedded, automorphism);
+        }
+        case FullChainSwitchKind::ConjugateTranspose:
+        case FullChainSwitchKind::ProductConjugateTranspose: {
+            GlrPoly embedded = glscheme::rns::glr_embed_r_into(
+                context, secret, GlrRing::Rp);
+            PolyWipe embeddedWipe(embedded);
+            glscheme::rns::GlrCoeffAutomorphism automorphism;
+            automorphism.x_alpha = -1;
+            automorphism.w_alpha = -1;
+            automorphism.swap_xy = true;
+            automorphism.conjugate = true;
+            GlrPoly conjugated =
+                glscheme::rns::glr_apply_coeff_automorphism(
+                    context, embedded, automorphism);
+            if (kind == FullChainSwitchKind::ConjugateTranspose) {
+                return conjugated;
+            }
+            PolyWipe conjugatedWipe(conjugated);
+            return RingMultiply(embedded, conjugated);
+        }
+    }
+    throw GLContextMismatchError("invalid full-chain SwitchInt source kind");
+}
+
+void GLIntProductionGLRBridge::ConvertSwitchKeyErrorsToTErr(
+    glscheme::rns::GlrSwitchKey* key, const GlrPoly& source,
+    const OwnerBinding& owner) const {
+    const auto& context = m_adapter->GetContext();
+    if (key == nullptr || key->special_prime_count != 0 ||
+        key->key_level >= context.params.levels() ||
+        source.ring != key->ring || source.level != key->key_level ||
+        !source.extended || source.domain != GlrDomain::Coeff ||
+        key->b_digits.size() != key->dnum ||
+        key->a_digits.size() != key->dnum) {
+        throw GLKeyContextMismatchError(
+            "full-chain SwitchInt t*e conversion key/source mismatch");
+    }
+    GlrPoly destination = glscheme::rns::glr_restrict_to_key_level(
+        context, owner.GetNativeSecretKey().s, key->key_level);
+    PolyWipe destinationWipe(destination);
+    if (key->ring != GlrRing::R) {
+        GlrPoly embedded = glscheme::rns::glr_embed_r_into(
+            context, destination, key->ring);
+        PolyWipe embeddedWipe(embedded);
+        destination.secure_clear();
+        destination = std::move(embedded);
+    }
+    glscheme::rns::glr_to_slots(context, destination);
+    const auto groups =
+        glscheme::rns::glr_digit_groups(context.params, key->key_level);
+    if (groups.size() != key->dnum) {
+        throw GLKeyContextMismatchError(
+            "full-chain SwitchInt key digit grouping mismatch");
+    }
+    const auto chainLength = context.params.levels();
+    for (std::size_t digit = 0; digit < groups.size(); ++digit) {
+        std::vector<std::uint64_t> gadget(
+            chainLength + context.params.p_special.size(), 0);
+        for (std::uint32_t q = groups[digit].first;
+             q < groups[digit].second; ++q) {
+            const auto modulus = context.params.q_chain[q].q;
+            auto specialProduct = std::uint64_t{1};
+            for (const auto& special : context.params.p_special) {
+                specialProduct = glscheme::rns::glr_mulmod(
+                    specialProduct, special.q % modulus, modulus);
+            }
+            gadget[q] = specialProduct;
+        }
+
+        GlrPoly residual = key->b_digits[digit];
+        PolyWipe residualWipe(residual);
+        GlrPoly product = key->a_digits[digit];
+        PolyWipe productWipe(product);
+        glscheme::rns::glr_mul_pointwise_inplace(
+            context, product, destination);
+        glscheme::rns::glr_add_inplace(context, residual, product);
+        product.secure_clear();
+
+        GlrPoly message = source;
+        PolyWipe messageWipe(message);
+        glscheme::rns::glr_residue_scalar_mul_inplace(
+            context, message, gadget);
+        glscheme::rns::glr_to_slots(context, message);
+        glscheme::rns::glr_sub_inplace(context, residual, message);
+        message.secure_clear();
+
+        glscheme::rns::glr_scalar_mul_inplace(
+            context, residual, 1579008);
+        glscheme::rns::glr_add_inplace(
+            context, key->b_digits[digit], residual);
+    }
+    key->key_error_sigma *= 1579009.0;
+}
+
+void GLIntProductionGLRBridge::AccumulateIntegerSwitchDigit(
+    GlrPoly* b, GlrPoly* a, const GlrPoly& lifted,
+    const glscheme::rns::GlrSwitchKey& key, std::size_t digit) const {
+    const auto& context = m_adapter->GetContext();
+    if (b == nullptr || a == nullptr || digit >= key.dnum ||
+        b->domain != GlrDomain::Slot || a->domain != GlrDomain::Slot ||
+        lifted.domain != GlrDomain::Slot || !b->extended || !a->extended ||
+        !lifted.extended || b->level != lifted.level ||
+        a->level != lifted.level || b->ring != key.ring ||
+        a->ring != key.ring || lifted.ring != key.ring) {
+        throw GLContextMismatchError(
+            "full-chain SwitchInt digit accumulation shape mismatch");
+    }
+    const auto activeInputQ = context.active_q_primes(lifted.level);
+    const auto activeKeyQ = context.active_q_primes(key.key_level);
+    const auto coefficients = lifted.ring_coeffs(context);
+    const auto planes = lifted.prime_count(context);
+    for (std::uint32_t plane = 0; plane < planes; ++plane) {
+        const auto chainIndex =
+            plane < activeInputQ
+                ? plane
+                : static_cast<std::uint32_t>(context.params.levels() +
+                                             plane - activeInputQ);
+        const auto keyPlane =
+            plane < activeInputQ
+                ? plane
+                : static_cast<std::uint32_t>(activeKeyQ +
+                                             plane - activeInputQ);
+        const auto modulus = context.modulus_at(chainIndex).q;
+        const auto& mont = context.plans_at(chainIndex, 0).w_axis.mont;
+        for (std::uint32_t lane = 0; lane < 2; ++lane) {
+            const auto* input = lifted.lane_ptr(context, plane, lane);
+            const auto* keyB =
+                key.b_digits[digit].lane_ptr(context, keyPlane, lane);
+            const auto* keyA =
+                key.a_digits[digit].lane_ptr(context, keyPlane, lane);
+            auto* outputB = b->lane_ptr(context, plane, lane);
+            auto* outputA = a->lane_ptr(context, plane, lane);
+            for (std::size_t coefficient = 0; coefficient < coefficients;
+                 ++coefficient) {
+                const auto factor =
+                    glscheme::rns::glr_to_mont(mont, input[coefficient]);
+                outputB[coefficient] = glscheme::rns::glr_mod_add(
+                    outputB[coefficient],
+                    glscheme::rns::glr_mont_mul(
+                        mont, factor, keyB[coefficient]),
+                    modulus);
+                outputA[coefficient] = glscheme::rns::glr_mod_add(
+                    outputA[coefficient],
+                    glscheme::rns::glr_mont_mul(
+                        mont, factor, keyA[coefficient]),
+                    modulus);
+            }
+        }
+    }
+}
+
+GlrPoly GLIntProductionGLRBridge::BGVModDownSpecialPoly(
+    const GlrPoly& input) const {
+    const auto& context = m_adapter->GetContext();
+    if (!input.extended || input.active_special_prime_count(context) == 0) {
+        throw GLContextMismatchError(
+            "full-chain integer BGV ModDown requires an extended polynomial");
+    }
+    const auto originalDomain = input.domain;
+    GlrPoly current = input;
+    if (current.domain == GlrDomain::Slot) {
+        glscheme::rns::glr_to_coeffs(context, current);
+    }
+    auto specialCount = current.active_special_prime_count(context);
+    const auto activeQ = context.active_q_primes(current.level);
+    constexpr std::uint64_t t = 1579009;
+    while (specialCount != 0) {
+        const auto droppedSpecial = specialCount - 1;
+        const auto droppedPlane = activeQ + droppedSpecial;
+        const auto& droppedModulus =
+            context.params.p_special[droppedSpecial];
+        const auto tInverse = glscheme::rns::glr_invmod(
+            t % droppedModulus.q, droppedModulus.q);
+        const bool remainsExtended = droppedSpecial != 0;
+        GlrPoly output = GlrPoly::zero(
+            context, current.ring, current.level, remainsExtended,
+            GlrDomain::Coeff,
+            remainsExtended ? droppedSpecial : std::uint32_t{0});
+        const auto coefficients = current.ring_coeffs(context);
+        for (std::size_t flat = 0; flat < coefficients; ++flat) {
+            const auto dropped = GaussianAtFlat(
+                context, current, droppedPlane, droppedModulus, flat);
+            const auto correctionFor = [&](std::uint64_t value) {
+                const auto product = glscheme::rns::glr_mulmod(
+                    value, tInverse, droppedModulus.q);
+                return CenterResidue(
+                    product == 0 ? 0 : droppedModulus.q - product,
+                    droppedModulus.q);
+            };
+            const auto realCorrection = correctionFor(dropped.first);
+            const auto imaginaryCorrection = correctionFor(dropped.second);
+            const auto survivingPlanes = activeQ + droppedSpecial;
+            for (std::uint32_t plane = 0; plane < survivingPlanes; ++plane) {
+                const auto chainIndex =
+                    plane < activeQ
+                        ? plane
+                        : static_cast<std::uint32_t>(
+                              context.params.levels() + plane - activeQ);
+                const auto& modulus = context.modulus_at(chainIndex);
+                const auto currentValue = GaussianAtFlat(
+                    context, current, plane, modulus, flat);
+                const auto dropInverse = glscheme::rns::glr_invmod(
+                    droppedModulus.q % modulus.q, modulus.q);
+                const auto reduce = [&](std::uint64_t value,
+                                        std::int64_t correction) {
+                    const auto tCorrection = glscheme::rns::glr_mulmod(
+                        t % modulus.q, SignedMod(correction, modulus.q),
+                        modulus.q);
+                    const auto numerator = glscheme::rns::glr_mod_add(
+                        value, tCorrection, modulus.q);
+                    return glscheme::rns::glr_mulmod(
+                        numerator, dropInverse, modulus.q);
+                };
+                SetGaussianAtFlat(
+                    context, &output, plane, modulus, flat,
+                    reduce(currentValue.first, realCorrection),
+                    reduce(currentValue.second, imaginaryCorrection));
+            }
+        }
+        current = std::move(output);
+        --specialCount;
+    }
+    if (originalDomain == GlrDomain::Slot) {
+        glscheme::rns::glr_to_slots(context, current);
+    }
+    return current;
 }
 
 GlrPoly GLIntProductionGLRBridge::BGVModSwitchPoly(
@@ -1549,6 +1943,110 @@ GLIntProductionGLRBridge::EncryptFullChainPublic(
         publicKey.m_nativeKeyLineageCommitment;
     result.receipt.ownerSecretLineageBound = true;
     return result;
+}
+
+GLIntProductionGLRBridge::FullChainIntegerSwitchKey
+GLIntProductionGLRBridge::GenerateFullChainIntegerSwitchKey(
+    const OwnerBinding& owner, FullChainSwitchKind kind,
+    std::int32_t amount, std::uint32_t keyLevel,
+    std::uint64_t seed) const {
+    ValidateOwner(owner.GetReceipt().integerKeyTag, owner,
+                  "full-chain SwitchInt key generation");
+    const auto& context = m_adapter->GetContext();
+    if (keyLevel >= context.params.levels()) {
+        throw GLDepthError(
+            "full-chain SwitchInt key level is outside the modulus chain");
+    }
+    const auto normalized = NormalizeFullChainSwitchKind(kind, amount);
+    amount = normalized.second;
+    GlrRngOwner rng(glscheme::rns::glr_rng_create(seed));
+    if (!rng) {
+        throw GlrError("full-chain SwitchInt key RNG creation failed");
+    }
+    GlrPoly source =
+        BuildFullChainSwitchSource(owner, kind, amount, keyLevel);
+    PolyWipe sourceWipe(source);
+    auto native = glscheme::rns::glr_make_switch_key(
+        context, std::move(source), owner.GetNativeSecretKey().s,
+        normalized.first, 3.2, *rng, keyLevel);
+
+    GlrPoly conversionSource =
+        BuildFullChainSwitchSource(owner, kind, amount, keyLevel);
+    PolyWipe conversionSourceWipe(conversionSource);
+    ConvertSwitchKeyErrorsToTErr(&native, conversionSource, owner);
+    return FullChainIntegerSwitchKey(
+        kind, amount, std::move(native),
+        owner.GetReceipt().nativeKeyLineageCommitment);
+}
+
+GLIntProductionGLRBridge::IntegerSwitchResult
+GLIntProductionGLRBridge::ApplyFullChainIntegerSwitch(
+    const GlrPoly& input,
+    const FullChainIntegerSwitchKey& evaluationKey) const {
+    const auto& context = m_adapter->GetContext();
+    const auto& key = evaluationKey.m_native;
+    const auto normalized = NormalizeFullChainSwitchKind(
+        evaluationKey.m_kind, evaluationKey.m_amount);
+    if (input.ring != key.ring || input.extended ||
+        input.level < key.key_level ||
+        input.level >= context.params.levels() || key.special_prime_count != 0 ||
+        key.parameter_fingerprint !=
+            glscheme::rns::glr_parameter_fingerprint(context.params) ||
+        !(key.id == normalized.first) || key.dnum == 0 ||
+        key.b_digits.size() != key.dnum ||
+        key.a_digits.size() != key.dnum ||
+        !key.public_a_seed.has_value() ||
+        !IsSha256Text(evaluationKey.m_nativeKeyLineageCommitment) ||
+        !key.digit_group_override.empty()) {
+        throw GLKeyContextMismatchError(
+            "full-chain SwitchInt input/key metadata mismatch");
+    }
+    const auto groups =
+        glscheme::rns::glr_digit_groups(context.params, input.level);
+    if (groups.empty() || groups.size() > key.dnum) {
+        throw GLDepthError(
+            "full-chain SwitchInt key does not cover the active digit groups");
+    }
+    for (std::size_t digit = 0; digit < key.dnum; ++digit) {
+        for (const auto* polynomial :
+             {&key.b_digits[digit], &key.a_digits[digit]}) {
+            if (polynomial->ring != key.ring ||
+                polynomial->domain != GlrDomain::Slot ||
+                polynomial->level != key.key_level ||
+                !polynomial->extended ||
+                polynomial->active_special_prime_count(context) !=
+                    context.params.p_special.size()) {
+                throw GLKeyContextMismatchError(
+                    "full-chain SwitchInt key digit shape mismatch");
+            }
+        }
+    }
+
+    const auto originalDomain = input.domain;
+    GlrPoly coefficient = input;
+    if (coefficient.domain == GlrDomain::Slot) {
+        glscheme::rns::glr_to_coeffs(context, coefficient);
+    }
+    GlrPoly b = GlrPoly::zero(context, key.ring, input.level, true,
+                              GlrDomain::Slot);
+    GlrPoly a = GlrPoly::zero(context, key.ring, input.level, true,
+                              GlrDomain::Slot);
+    for (std::size_t digit = 0; digit < groups.size(); ++digit) {
+        GlrPoly lifted = glscheme::rns::glr_mod_up(
+            context, coefficient, groups[digit].first,
+            groups[digit].second);
+        glscheme::rns::glr_to_slots(context, lifted);
+        AccumulateIntegerSwitchDigit(&b, &a, lifted, key, digit);
+    }
+    glscheme::rns::glr_to_coeffs(context, b);
+    glscheme::rns::glr_to_coeffs(context, a);
+    b = BGVModDownSpecialPoly(b);
+    a = BGVModDownSpecialPoly(a);
+    if (originalDomain == GlrDomain::Slot) {
+        glscheme::rns::glr_to_slots(context, b);
+        glscheme::rns::glr_to_slots(context, a);
+    }
+    return {std::move(b), std::move(a)};
 }
 
 GLIntProductionGLRBridge::DenseIntegerBatch
