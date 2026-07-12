@@ -40,6 +40,7 @@ public:
     using Context = glscheme::rns::GlrContext;
     using SecretKey = glscheme::rns::GlrSecretKey;
     using PublicKey = glscheme::rns::GlrPublicKey;
+    using CompactPublicKey = glscheme::rns::GlrCompactPublicKey;
     using MatrixBatch = glscheme::rns::GlrMatrixBatch;
     using Plaintext = glscheme::rns::GlrPlaintext;
     using Ciphertext = glscheme::rns::GlrCiphertext;
@@ -1000,13 +1001,18 @@ public:
         const Ciphertext& canonicalCiphertext,
         const OrdinaryRefreshExecutionMaterialView& material) const;
 
-    // GLScheme's current owner-side encryption API is symmetric.  A zero seed
-    // requests operating-system entropy; nonzero seeds are deterministic and
-    // intended for tests/reproducible experiments.
+    // A zero seed requests operating-system entropy; nonzero seeds are
+    // deterministic and intended for reproducible experiments.  Compact
+    // public keys retain b plus one public 256-bit seed for exact a expansion.
     SecretKey KeyGen(std::uint64_t seed = 0) const;
     PublicKey PublicKeyGen(const SecretKey& secretKey,
                            std::uint64_t seed = 0) const;
+    CompactPublicKey CompactPublicKeyGen(
+        const SecretKey& secretKey, std::uint64_t seed = 0) const;
+    PublicKey ExpandCompactPublicKey(
+        const CompactPublicKey& compactPublicKey) const;
     std::uint64_t PublicKeyResidentBytes() const;
+    std::uint64_t CompactPublicKeyMaterialBytes() const;
 
     Plaintext Encode(const MatrixBatch& matrices, double scale,
                      std::uint32_t level = 0,
@@ -1016,6 +1022,10 @@ public:
     Ciphertext Encrypt(const SecretKey& secretKey, const Plaintext& plaintext,
                        std::uint64_t seed = 0, bool slotDomain = true) const;
     Ciphertext Encrypt(const PublicKey& publicKey, const Plaintext& plaintext,
+                       std::uint64_t seed = 0,
+                       bool slotDomain = true) const;
+    Ciphertext Encrypt(const CompactPublicKey& publicKey,
+                       const Plaintext& plaintext,
                        std::uint64_t seed = 0,
                        bool slotDomain = true) const;
     Plaintext Decrypt(const SecretKey& secretKey,

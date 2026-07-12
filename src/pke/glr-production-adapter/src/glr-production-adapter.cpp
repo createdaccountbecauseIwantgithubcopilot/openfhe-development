@@ -3058,8 +3058,28 @@ GLRProductionAdapter::PublicKey GLRProductionAdapter::PublicKeyGen(
         m_context, secretKey, *rng);
 }
 
+GLRProductionAdapter::CompactPublicKey
+GLRProductionAdapter::CompactPublicKeyGen(
+    const SecretKey& secretKey, std::uint64_t seed) const {
+    RequireProductionSecretKey(m_context, secretKey);
+    GlrRngOwner rng = MakeRng(seed);
+    return glscheme::rns::glr_gl128_keygen_compact_public(
+        m_context, secretKey, *rng);
+}
+
+GLRProductionAdapter::PublicKey
+GLRProductionAdapter::ExpandCompactPublicKey(
+    const CompactPublicKey& compactPublicKey) const {
+    return glscheme::rns::glr_gl128_expand_compact_public_key(
+        m_context, compactPublicKey);
+}
+
 std::uint64_t GLRProductionAdapter::PublicKeyResidentBytes() const {
     return glscheme::rns::glr_public_key_resident_bytes(m_context);
+}
+
+std::uint64_t GLRProductionAdapter::CompactPublicKeyMaterialBytes() const {
+    return glscheme::rns::glr_compact_public_key_material_bytes(m_context);
 }
 
 GLRProductionAdapter::Plaintext GLRProductionAdapter::Encode(
@@ -3107,6 +3127,27 @@ GLRProductionAdapter::Ciphertext GLRProductionAdapter::Encrypt(
         throw GlrError(
             "GLRProductionAdapter: public encryption requires a "
             "profile-generated concrete primary-lineage public key");
+    }
+    GlrRngOwner rng = MakeRng(seed);
+    if (slotDomain) {
+        return glscheme::rns::glr_gl128_encrypt_public(
+            m_context, publicKey, plaintext, *rng);
+    }
+    return glscheme::rns::glr_encrypt_public(
+        m_context, publicKey, plaintext, *rng, slotDomain);
+}
+
+GLRProductionAdapter::Ciphertext GLRProductionAdapter::Encrypt(
+    const CompactPublicKey& publicKey, const Plaintext& plaintext,
+    std::uint64_t seed, bool slotDomain) const {
+    RequireProductionPlaintext(m_context, plaintext);
+    if (publicKey.parameter_fingerprint !=
+            glscheme::rns::glr_parameter_fingerprint(m_context.params) ||
+        publicKey.key_id != "primary" ||
+        !IsCanonicalSha256Root(publicKey.key_lineage_commitment)) {
+        throw GlrError(
+            "GLRProductionAdapter: compact public encryption requires a "
+            "profile-generated concrete primary-lineage key");
     }
     GlrRngOwner rng = MakeRng(seed);
     if (slotDomain) {
