@@ -13,6 +13,7 @@
 #include "glscheme/gl128_bootstrap_research.hpp"
 #include "glscheme/gl128_bootstrap_acceptance.hpp"
 #include "glscheme/gl128_ciphertext_artifact.hpp"
+#include "glscheme/gl128_h64_bootstrap_research.hpp"
 #include "glscheme/gl128_h64_hidden_selector.hpp"
 #include "glscheme/glr_device_ks.hpp"
 #include "glscheme/rns_dft_plaintext_provider.hpp"
@@ -323,6 +324,16 @@ public:
         glscheme::rns::GlrH64SparseFoldEvidence;
     using NativeGL128H64SparseFoldResult =
         glscheme::rns::GlrH64SparseFoldResult;
+    using NativeGL128H64AllYPublicSourceScheduleEntry =
+        glscheme::rns::GlrH64AllYPublicSourceScheduleEntry;
+    using NativeGL128H64AllYPublicSourceSchedule =
+        glscheme::rns::GlrH64AllYPublicSourceSchedule;
+    using NativeGL128H64AllYPublicRootProviderResolver =
+        glscheme::rns::GlrH64AllYPublicRootProviderResolver;
+    using NativeGL128H64ResearchAllYStcEvidence =
+        glscheme::rns::Gl128H64ResearchAllYStcEvidence;
+    using NativeGL128H64ResearchAllYStcResult =
+        glscheme::rns::Gl128H64ResearchAllYStcResult;
     using NativeGL128CiphertextArtifactSink =
         glscheme::rns::Gl128CiphertextArtifactSink;
     using NativeGL128CiphertextArtifactSource =
@@ -372,12 +383,13 @@ public:
                   NativeGL128ResearchBootstrapAcceptanceReceipt>);
 
     // The H64 lane is a bounded executable research composition only.  It
-    // returns a primary-domain L14 root for one branch and deliberately has
-    // no all-Y/StC or production-authorization conversion seam.
+    // retains the one-branch L14 seam and additionally composes all 128 rows,
+    // both branches per row, and authenticated forward StC to primary L18.
+    // Neither surface has a production-authorization conversion seam.
     struct NativeGL128H64ResearchPosture final {
         static constexpr bool research_only = true;
         static constexpr bool one_branch_sparse_fold_executable = true;
-        static constexpr bool full_all_y_stc_composed = false;
+        static constexpr bool full_all_y_stc_composed = true;
         static constexpr bool exact_estimator_evidence_present = false;
         static constexpr bool exact_noise_evidence_present = false;
         static constexpr bool production_security_claim = false;
@@ -385,7 +397,12 @@ public:
     };
 
     static_assert(NativeGL128H64ResearchPosture::research_only);
-    static_assert(!NativeGL128H64ResearchPosture::full_all_y_stc_composed);
+    static_assert(NativeGL128H64ResearchPosture::full_all_y_stc_composed);
+    static_assert(NativeGL128H64ResearchAllYStcEvidence::research_only);
+    static_assert(!NativeGL128H64ResearchAllYStcEvidence::
+                      production_security_claim);
+    static_assert(!NativeGL128H64ResearchAllYStcEvidence::
+                      production_authorization_admitted);
     static_assert(
         !NativeGL128H64ResearchPosture::production_security_claim);
     static_assert(
@@ -408,6 +425,24 @@ public:
     static_assert(!std::is_constructible_v<
                   NativeGL128BootstrapResult,
                   NativeGL128H64SparseFoldResult>);
+    static_assert(!std::is_copy_constructible_v<
+                  NativeGL128H64ResearchAllYStcResult>);
+    static_assert(!std::is_convertible_v<
+                  NativeGL128H64ResearchAllYStcResult,
+                  NativeGL128BootstrapResult>);
+    static_assert(!std::is_constructible_v<
+                  NativeGL128BootstrapResult,
+                  NativeGL128H64ResearchAllYStcResult>);
+    static_assert(!std::is_convertible_v<
+                  NativeGL128H64ResearchAllYStcResult,
+                  NativeGL128DirectBootstrapAuthorizationBundle>);
+
+    static constexpr std::uint32_t kH64AllYRows =
+        glscheme::rns::kGl128H64AllYRows;
+    static constexpr std::uint32_t kH64AllYBranchesPerRow =
+        glscheme::rns::kGl128H64AllYBranchesPerRow;
+    static constexpr std::uint32_t kH64AllYBranchFoldCount =
+        glscheme::rns::kGl128H64AllYBranchFoldCount;
 
     static constexpr std::size_t kLegacyDftPlaintextEntryCount =
         glscheme::rns::kGlrDftPlaintextEntryCount;
@@ -1165,9 +1200,12 @@ public:
         double normalizationRelativeTolerance =
             glscheme::rns::kGl128BootstrapNormalizationRelativeTolerance) const;
 
-    // Exact H64 research aliases and thin native composition.  The terminal
-    // call returns one branch's primary-domain L14 root only; it does not
-    // perform all-Y packing, forward StC, renewal, or authorization.
+    // Exact H64 research aliases and thin native composition.  The one-branch
+    // call returns a primary-domain L14 root.  The all-Y call binds an
+    // immutable 256-source schedule, resolves one concrete public-root
+    // provider at a time, streams 128 recombined rows into authenticated
+    // forward StC, and returns a distinct research-only primary L18 result.
+    // No H64 type converts to production authorization or BootstrapDirect.
     NativeGL128H64ResearchProfileReceipt GetH64ResearchProfile() const;
     NativeGL128H64HiddenSelectorPlan PlanH64HiddenSelector() const;
     NativeGL128H64HiddenSelectorBinding BindH64HiddenSelectorManifest(
@@ -1214,6 +1252,22 @@ public:
         const NativeGL128H64PublicRootProviderBinding& publicRootBinding,
         const NativeKeyProvider& evaluationKeys,
         const NativeGL128H64SparseFoldKskBinding& sparseFoldKeys) const;
+    NativeGL128H64AllYPublicSourceSchedule PlanH64AllYPublicSources(
+        const Ciphertext& normalizedSparseQ0) const;
+    std::string GetH64AllYPublicSourceScheduleCommitment(
+        const NativeGL128H64AllYPublicSourceSchedule& schedule) const;
+    NativeGL128H64AllYPublicRootProviderResolver
+    MakeH64AllYPublicRootProviderResolver() const;
+    NativeGL128H64ResearchAllYStcResult EvaluateH64AllYStCResearch(
+        const Ciphertext& normalizedSparseQ0,
+        const NativeGL128H64AllYPublicSourceSchedule& sourceSchedule,
+        const NativeGL128ValidatedH64HiddenSelectorSession& hiddenSelector,
+        const NativeGL128H64AllYPublicRootProviderResolver&
+            rootProviderResolver,
+        const NativeKeyProvider& evaluationKeys,
+        const NativeGL128H64SparseFoldKskBinding& sparseFoldKeys,
+        const NativeValidatedDftPlaintextProviderSession& dftSession,
+        const NativeCtsStcConfig& config = {}) const;
 
     // Owner-side exhaustive post-bootstrap acceptance.  This is kept out of
     // BootstrapDirect so an evaluator cannot self-author a correctness/noise

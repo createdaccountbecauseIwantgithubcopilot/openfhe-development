@@ -2790,6 +2790,44 @@ GLRProductionAdapter::EvaluateH64OneBranchSparseFold(
         evaluationKeys, sparseFoldKeys);
 }
 
+GLRProductionAdapter::NativeGL128H64AllYPublicSourceSchedule
+GLRProductionAdapter::PlanH64AllYPublicSources(
+    const Ciphertext& normalizedSparseQ0) const {
+    return glscheme::rns::glr_gl128_h64_make_all_y_public_source_schedule(
+        m_context, normalizedSparseQ0);
+}
+
+std::string
+GLRProductionAdapter::GetH64AllYPublicSourceScheduleCommitment(
+    const NativeGL128H64AllYPublicSourceSchedule& schedule) const {
+    (void)glscheme::rns::glr_gl128_validate_context(m_context);
+    return glscheme::rns::
+        glr_gl128_h64_all_y_public_source_schedule_commitment(schedule);
+}
+
+GLRProductionAdapter::NativeGL128H64AllYPublicRootProviderResolver
+GLRProductionAdapter::MakeH64AllYPublicRootProviderResolver() const {
+    return glscheme::rns::
+        glr_make_gl128_h64_concrete_public_root_provider_resolver(m_context);
+}
+
+GLRProductionAdapter::NativeGL128H64ResearchAllYStcResult
+GLRProductionAdapter::EvaluateH64AllYStCResearch(
+    const Ciphertext& normalizedSparseQ0,
+    const NativeGL128H64AllYPublicSourceSchedule& sourceSchedule,
+    const NativeGL128ValidatedH64HiddenSelectorSession& hiddenSelector,
+    const NativeGL128H64AllYPublicRootProviderResolver&
+        rootProviderResolver,
+    const NativeKeyProvider& evaluationKeys,
+    const NativeGL128H64SparseFoldKskBinding& sparseFoldKeys,
+    const NativeValidatedDftPlaintextProviderSession& dftSession,
+    const NativeCtsStcConfig& config) const {
+    return glscheme::rns::glr_gl128_h64_all_y_stc_research(
+        m_context, normalizedSparseQ0, sourceSchedule, hiddenSelector,
+        rootProviderResolver, evaluationKeys, sparseFoldKeys, dftSession,
+        config);
+}
+
 GLRProductionAdapter::NativeGL128BootstrapAcceptanceReceipt
 GLRProductionAdapter::AcceptBootstrapDirect(
     const SecretKey& primaryKey,
