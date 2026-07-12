@@ -19,6 +19,7 @@
 namespace lbcrypto {
 
 inline constexpr std::size_t kGLIntProductionMaxSwitchKeyTerms = 4096;
+inline constexpr std::size_t kGLIntProductionMaxAuxSwitchInputTerms = 8;
 
 enum class GLIntProductionSwitchDirection : uint8_t {
     SmallSquareToPrimary,
@@ -93,6 +94,39 @@ private:
     std::vector<Term> m_k1;
 };
 
+/**
+ * Two-plane RLWE evaluation key for the paper's auxiliary-modulus SwitchInt.
+ * Each plane satisfies b+a*s_dst=q_o*s_source+t*e; q_o is the tail prime.
+ */
+class GLIntProductionAuxSwitchKey final {
+public:
+    GLIntProductionSwitchDirection GetDirection() const noexcept;
+    const std::string& GetDestinationKeyTag() const noexcept;
+    uint32_t GetAuxiliaryModulus() const noexcept;
+    const std::vector<GLIntProductionCiphertextPlane>& GetPlanes() const noexcept;
+    bool UsesTErrors() const noexcept;
+    bool UsesNoiseScalingModSwitch() const noexcept;
+    bool IsSecurityAuthorized() const noexcept;
+    void Validate() const;
+
+private:
+    friend class GLIntProductionSwitchCore;
+
+    GLIntProductionAuxSwitchKey(
+        GLIntWBatchedParameters parameters, GLIntWBatchedCodecRoots roots,
+        GLIntProductionSwitchDirection direction,
+        std::string destinationKeyTag, uint32_t auxiliaryModulus,
+        std::vector<GLIntProductionCiphertextPlane> planes);
+
+    GLIntWBatchedParameters m_parameters;
+    GLIntWBatchedCodecRoots m_roots;
+    GLIntProductionSwitchDirection m_direction{
+        GLIntProductionSwitchDirection::SmallSquareToPrimary};
+    std::string m_destinationKeyTag;
+    uint32_t m_auxiliaryModulus{0};
+    std::vector<GLIntProductionCiphertextPlane> m_planes;
+};
+
 class GLIntProductionSwitchResult final {
 public:
     GLIntProductionSwitchDirection GetDirection() const noexcept;
@@ -118,10 +152,14 @@ private:
 struct GLIntProductionSwitchCapabilities {
     bool denseRPrimeInput{true};
     bool boundedSparseEvaluationKey{true};
+    bool denseAuxiliaryEvaluationKey{true};
+    bool boundedSparseAuxiliaryInput{true};
     bool switchIntSmall{true};
     bool switchIntBig{true};
-    bool gadgetDecomposition{false};
-    bool noisyEvaluationKey{false};
+    bool gadgetDecomposition{true};
+    bool noisyEvaluationKey{true};
+    bool auxiliaryModulusKeySwitch{true};
+    bool noiseScalingModSwitch{true};
     bool securityAuthorized{false};
     bool ciphertextMatMul{false};
 };
@@ -129,15 +167,19 @@ struct GLIntProductionSwitchCapabilities {
 /**
  * Exact bounded SwitchInt algebra for the production quotient ring.
  *
- * SmallSquare keys switch s(X,W)^2 to s(X,W).  BigTranspose keys switch
- * s(Y,W) to s(X,W).  Apply multiplies a complete dense R'_q input by the two
- * sparse evaluation-key components, including both X/Y I-wraps and exact
- * Phi_257(W) fan-out.  Owner verification recomputes the source relation from
- * the supplied primary secret without exposing that secret.
+ * SmallSquare keys switch s(X,W)^2 to s(X,W).  BigTranspose keys switch the
+ * integer cross-lane source s(-I,Y^-1,W^-1) to s(I,X,W), including inverse
+ * Y/W exponents, Gaussian-sign changes, both I-wraps, and exact Phi_257(W)
+ * fan-out.  Owner verification recomputes the source relation from the
+ * supplied primary secret without exposing that secret.
  *
- * This is the real key-switch equation but not yet the production gadget/RNS
- * construction: keys contain no t*e noise or gadget digits, so security and
- * ciphertext-matmul capabilities remain false.
+ * The original sparse-key methods remain fast, noise-free algebra anchors.
+ * The Aux methods implement the paper's real one-digit q_o gadget path:
+ * dense two-plane RLWE keys satisfy b+a*s=q_o*s_source+t*e, a bounded sparse
+ * base-q input is centered and lifted to qq_o, and coefficientwise BGV
+ * ModReduce returns to q.  The two-prime basis, sparse owner secret, and
+ * bounded input are not a security authorization or a full ciphertext-matmul
+ * integration.
  */
 class GLIntProductionSwitchCore final {
 public:
@@ -155,6 +197,13 @@ public:
         const GLIntProductionSecretKey& primaryKey,
         uint64_t seed = 0) const;
 
+    GLIntProductionAuxSwitchKey EvalKeyGenAuxSmallSquare(
+        const GLIntProductionSecretKey& primaryKey,
+        uint64_t seed = 0) const;
+    GLIntProductionAuxSwitchKey EvalKeyGenAuxBigTranspose(
+        const GLIntProductionSecretKey& primaryKey,
+        uint64_t seed = 0) const;
+
     GLIntProductionRNSPolynomial ExtractA(
         const GLIntProductionCiphertext& ciphertext) const;
     GLIntProductionRNSPolynomial MakeMonomial(
@@ -167,6 +216,12 @@ public:
     GLIntProductionSwitchResult SwitchIntBig(
         const GLIntProductionRNSPolynomial& input,
         const GLIntProductionSwitchKey& evaluationKey) const;
+    GLIntProductionSwitchResult SwitchIntAuxSmall(
+        const GLIntProductionRNSPolynomial& input,
+        const GLIntProductionAuxSwitchKey& evaluationKey) const;
+    GLIntProductionSwitchResult SwitchIntAuxBig(
+        const GLIntProductionRNSPolynomial& input,
+        const GLIntProductionAuxSwitchKey& evaluationKey) const;
 
     bool VerifyEvaluationKeyOwner(
         const GLIntProductionSwitchKey& evaluationKey,
@@ -175,6 +230,14 @@ public:
         const GLIntProductionRNSPolynomial& input,
         const GLIntProductionSwitchResult& result,
         const GLIntProductionSwitchKey& evaluationKey,
+        const GLIntProductionSecretKey& primaryKey) const;
+    bool VerifyAuxEvaluationKeyOwner(
+        const GLIntProductionAuxSwitchKey& evaluationKey,
+        const GLIntProductionSecretKey& primaryKey) const;
+    bool VerifyAuxSwitchResultOwner(
+        const GLIntProductionRNSPolynomial& input,
+        const GLIntProductionSwitchResult& result,
+        const GLIntProductionAuxSwitchKey& evaluationKey,
         const GLIntProductionSecretKey& primaryKey) const;
 
 private:
@@ -186,6 +249,10 @@ private:
                             const char* objectName) const;
     void ValidateEvaluationKey(
         const GLIntProductionSwitchKey& evaluationKey,
+        GLIntProductionSwitchDirection direction,
+        const char* operation) const;
+    void ValidateAuxEvaluationKey(
+        const GLIntProductionAuxSwitchKey& evaluationKey,
         GLIntProductionSwitchDirection direction,
         const char* operation) const;
     std::vector<Term> PrimaryTerms(
@@ -203,6 +270,14 @@ private:
     GLIntProductionSwitchResult Apply(
         const GLIntProductionRNSPolynomial& input,
         const GLIntProductionSwitchKey& evaluationKey) const;
+    GLIntProductionAuxSwitchKey AuxEvalKeyGen(
+        const GLIntProductionSecretKey& primaryKey,
+        GLIntProductionSwitchDirection direction, uint64_t seed) const;
+    GLIntProductionSwitchResult ApplyAux(
+        const GLIntProductionRNSPolynomial& input,
+        const GLIntProductionAuxSwitchKey& evaluationKey) const;
+    std::vector<Term> SparseInputTerms(
+        const GLIntProductionRNSPolynomial& input) const;
 
     GLIntWBatchedParameters m_parameters;
     GLIntWBatchedCodecRoots m_roots;

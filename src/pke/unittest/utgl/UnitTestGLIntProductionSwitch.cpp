@@ -21,10 +21,14 @@ TEST(GLIntProductionSwitch, ExactBoundedSmallAndBigEquations) {
     const auto capabilities = switching.GetCapabilities();
     EXPECT_TRUE(capabilities.denseRPrimeInput);
     EXPECT_TRUE(capabilities.boundedSparseEvaluationKey);
+    EXPECT_TRUE(capabilities.denseAuxiliaryEvaluationKey);
+    EXPECT_TRUE(capabilities.boundedSparseAuxiliaryInput);
     EXPECT_TRUE(capabilities.switchIntSmall);
     EXPECT_TRUE(capabilities.switchIntBig);
-    EXPECT_FALSE(capabilities.gadgetDecomposition);
-    EXPECT_FALSE(capabilities.noisyEvaluationKey);
+    EXPECT_TRUE(capabilities.gadgetDecomposition);
+    EXPECT_TRUE(capabilities.noisyEvaluationKey);
+    EXPECT_TRUE(capabilities.auxiliaryModulusKeySwitch);
+    EXPECT_TRUE(capabilities.noiseScalingModSwitch);
     EXPECT_FALSE(capabilities.securityAuthorized);
     EXPECT_FALSE(capabilities.ciphertextMatMul);
 
@@ -68,6 +72,39 @@ TEST(GLIntProductionSwitch, ExactBoundedSmallAndBigEquations) {
             input, result, bigKey, primary));
         EXPECT_THROW((void)switching.SwitchIntSmall(input, bigKey),
                      GLMissingEvaluationKeyError);
+    }
+
+    {
+        const auto auxiliaryKey = switching.EvalKeyGenAuxSmallSquare(
+            primary, 0x415558534d414c4cULL);
+        EXPECT_EQ(auxiliaryKey.GetDirection(),
+                  GLIntProductionSwitchDirection::SmallSquareToPrimary);
+        EXPECT_EQ(auxiliaryKey.GetPlanes().size(), 2u);
+        EXPECT_EQ(auxiliaryKey.GetAuxiliaryModulus(),
+                  rlwe.GetModuli().back());
+        EXPECT_TRUE(auxiliaryKey.UsesTErrors());
+        EXPECT_TRUE(auxiliaryKey.UsesNoiseScalingModSwitch());
+        EXPECT_FALSE(auxiliaryKey.IsSecurityAuthorized());
+        EXPECT_TRUE(switching.VerifyAuxEvaluationKeyOwner(auxiliaryKey,
+                                                           primary));
+        const auto result = switching.SwitchIntAuxSmall(input, auxiliaryKey);
+        EXPECT_EQ(result.GetB().GetLevel(), 1u);
+        EXPECT_EQ(result.GetB().GetPlanes().size(), 1u);
+        EXPECT_TRUE(switching.VerifyAuxSwitchResultOwner(
+            input, result, auxiliaryKey, primary));
+        EXPECT_THROW((void)switching.SwitchIntAuxBig(input, auxiliaryKey),
+                     GLMissingEvaluationKeyError);
+    }
+    {
+        const auto auxiliaryKey = switching.EvalKeyGenAuxBigTranspose(
+            primary, 0x4155584249474b45ULL);
+        EXPECT_EQ(auxiliaryKey.GetDirection(),
+                  GLIntProductionSwitchDirection::BigTransposeToPrimary);
+        EXPECT_TRUE(switching.VerifyAuxEvaluationKeyOwner(auxiliaryKey,
+                                                           primary));
+        const auto result = switching.SwitchIntAuxBig(input, auxiliaryKey);
+        EXPECT_TRUE(switching.VerifyAuxSwitchResultOwner(
+            input, result, auxiliaryKey, primary));
     }
 
     const auto wrongPrimary = rlwe.KeyGen(1, 0x57524f4e47505249ULL);
