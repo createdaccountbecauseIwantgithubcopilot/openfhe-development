@@ -414,6 +414,76 @@ bool NativeRefreshEndpointPreflightEquals(
            lhs.stc_headroom_valid == rhs.stc_headroom_valid;
 }
 
+bool NativeRefreshAllYPreflightEquals(
+    const GLRProductionAdapter::NativeRefreshAllYProductionReceipt& lhs,
+    const GLRProductionAdapter::NativeRefreshAllYProductionReceipt& rhs) {
+    return lhs.schemaVersion == rhs.schemaVersion &&
+           NativeRefreshPreflightEquals(lhs.pack, rhs.pack) &&
+           NativeRefreshEndpointPreflightEquals(lhs.endpoint, rhs.endpoint) &&
+           lhs.y_rows == rhs.y_rows &&
+           lhs.branches_per_y_row == rhs.branches_per_y_row &&
+           lhs.pair_major_row_tile_width == rhs.pair_major_row_tile_width &&
+           lhs.pair_major_row_tiles_per_centered_refresh ==
+               rhs.pair_major_row_tiles_per_centered_refresh &&
+           lhs.logical_all_y_branch_items == rhs.logical_all_y_branch_items &&
+           lhs.scalar_equivalent_branch_invocations ==
+               rhs.scalar_equivalent_branch_invocations &&
+           lhs.scalar_equivalent_exponent_ladder_nodes ==
+               rhs.scalar_equivalent_exponent_ladder_nodes &&
+           lhs.scalar_equivalent_gadget_key_applications ==
+               rhs.scalar_equivalent_gadget_key_applications &&
+           lhs.pair_major_branch_tiles_per_centered_refresh ==
+               rhs.pair_major_branch_tiles_per_centered_refresh &&
+           lhs.total_pair_major_branch_tile_invocations ==
+               rhs.total_pair_major_branch_tile_invocations &&
+           lhs.exact_all_y_coverage == rhs.exact_all_y_coverage &&
+           lhs.context_ciphertext_or_key_allocation_required ==
+               rhs.context_ciphertext_or_key_allocation_required &&
+           lhs.material_schedule_metadata_admitted ==
+               rhs.material_schedule_metadata_admitted &&
+           lhs.ciphertext_value_execution_performed ==
+               rhs.ciphertext_value_execution_performed &&
+           lhs.value_noise_acceptance_recorded ==
+               rhs.value_noise_acceptance_recorded;
+}
+
+GLRProductionAdapter::NativeRefreshAllYProductionReceipt
+MakeNativeRefreshAllYReceipt(
+    const glscheme::rns::GlrShipGl128AllYProductionPreflight& native) {
+    GLRProductionAdapter::NativeRefreshAllYProductionReceipt out;
+    out.pack = native.pack;
+    out.endpoint = native.endpoint;
+    out.schemaVersion = native.schema ==
+                                "glscheme.glr_ship_gl128_all_y_production_preflight.v1"
+                            ? 1U
+                            : 0U;
+    out.y_rows = native.y_rows;
+    out.branches_per_y_row = native.branches_per_y_row;
+    out.pair_major_row_tile_width = native.pair_major_row_tile_width;
+    out.pair_major_row_tiles_per_centered_refresh =
+        native.pair_major_row_tiles_per_centered_refresh;
+    out.logical_all_y_branch_items = native.logical_all_y_branch_items;
+    out.scalar_equivalent_branch_invocations =
+        native.scalar_equivalent_branch_invocations;
+    out.scalar_equivalent_exponent_ladder_nodes =
+        native.scalar_equivalent_exponent_ladder_nodes;
+    out.scalar_equivalent_gadget_key_applications =
+        native.scalar_equivalent_gadget_key_applications;
+    out.pair_major_branch_tiles_per_centered_refresh =
+        native.pair_major_branch_tiles_per_centered_refresh;
+    out.total_pair_major_branch_tile_invocations =
+        native.total_pair_major_branch_tile_invocations;
+    out.exact_all_y_coverage = native.exact_all_y_coverage;
+    out.context_ciphertext_or_key_allocation_required =
+        native.context_ciphertext_or_key_allocation_required;
+    out.material_schedule_metadata_admitted =
+        native.material_schedule_metadata_admitted;
+    out.ciphertext_value_execution_performed =
+        native.ciphertext_value_execution_performed;
+    out.value_noise_acceptance_recorded = native.value_noise_acceptance_recorded;
+    return out;
+}
+
 GLRProductionAdapter::OrdinaryRefreshPreflight
 MakeCanonicalOrdinaryRefreshPreflight(
     const GLRProductionAdapter::Context& context) {
@@ -702,11 +772,15 @@ MakeOrdinaryRefreshAuthorization(
     bool reducedExposureCorridor) {
     constexpr std::uint32_t kFoldKeyLevel = 18;
     constexpr std::uint32_t kTransformMaterialLevel = 17;
-    const auto native =
-        glscheme::rns::glr_ship_refresh_only_endpoint_authorize_gl128(
-            context.params, kFoldKeyLevel, kTransformMaterialLevel,
-            sparseHammingWeight, reducedExposureCorridor, supportCommitment,
-            securityReport);
+    if (sparseHammingWeight != 40U || !reducedExposureCorridor) {
+        throw GlrError(
+            "GLRProductionAdapter: ordinary-refresh authorization requires "
+            "the exact h40 reduced-exposure corridor");
+    }
+    const auto allY =
+        glscheme::rns::glr_ship_refresh_only_gl128_all_y_production_preflight(
+            context.params, supportCommitment, securityReport);
+    const auto& native = allY.authorization;
     const std::string parameterFingerprint =
         glscheme::rns::glr_parameter_fingerprint(context.params);
     if (native.schema !=
@@ -734,6 +808,7 @@ MakeOrdinaryRefreshAuthorization(
     }
 
     GLRProductionAdapter::OrdinaryRefreshAuthorization out;
+    out.nativeAllYProductionPreflight = MakeNativeRefreshAllYReceipt(allY);
     out.profileBindingFingerprint =
         FixedBindingText(native.profile_binding_fingerprint);
     out.supportCommitment = FixedBindingText(native.support_commitment);
@@ -763,7 +838,10 @@ MakeOrdinaryRefreshAuthorization(
 void RequireOrdinaryRefreshAuthorization(
     const GLRProductionAdapter::OrdinaryRefreshAuthorization& actual,
     const GLRProductionAdapter::OrdinaryRefreshAuthorization& expected) {
-    if (!BindingTextEquals(actual.profileBindingFingerprint,
+    if (!NativeRefreshAllYPreflightEquals(
+            actual.nativeAllYProductionPreflight,
+            expected.nativeAllYProductionPreflight) ||
+        !BindingTextEquals(actual.profileBindingFingerprint,
                            expected.profileBindingFingerprint) ||
         !BindingTextEquals(actual.supportCommitment,
                            expected.supportCommitment) ||
@@ -853,6 +931,33 @@ void RequireCanonicalOrdinaryRefreshExecutionEvidence(
         throw GlrError(
             "GLRProductionAdapter: native ordinary-refresh evidence does not "
             "bind the canonical stage ledger and full all-Y pack census");
+    }
+}
+
+void RequireOrdinaryRefreshEvidenceMatchesAllYReceipt(
+    const GLRProductionAdapter::NativeRefreshEndpointEvidence& evidence,
+    const GLRProductionAdapter::NativeRefreshAllYProductionReceipt& receipt) {
+    if (receipt.schemaVersion != 1U ||
+        receipt.y_rows != 128U || receipt.branches_per_y_row != 2U ||
+        receipt.logical_all_y_branch_items != 256ULL ||
+        receipt.pair_major_row_tile_width != 8U ||
+        receipt.pair_major_row_tiles_per_centered_refresh != 16U ||
+        receipt.pair_major_branch_tiles_per_centered_refresh != 32ULL ||
+        receipt.total_pair_major_branch_tile_invocations != 1048576ULL ||
+        !receipt.exact_all_y_coverage ||
+        receipt.context_ciphertext_or_key_allocation_required ||
+        !receipt.material_schedule_metadata_admitted ||
+        receipt.ciphertext_value_execution_performed ||
+        receipt.value_noise_acceptance_recorded ||
+        evidence.pack.centered_refreshes != receipt.pack.centered_refreshes ||
+        evidence.pack.coefficients_packed != receipt.pack.coefficients_packed ||
+        evidence.pack.exponent_ladder_nodes !=
+            receipt.scalar_equivalent_exponent_ladder_nodes ||
+        evidence.pack.gadget_applies !=
+            receipt.scalar_equivalent_gadget_key_applications) {
+        throw GlrError(
+            "GLRProductionAdapter: native ordinary-refresh evidence is not "
+            "bound to the canonical all-Y production preflight receipt");
     }
 }
 
@@ -1095,7 +1200,7 @@ GLRProductionAdapter::ExecuteOrdinaryRefresh(
     // both external bindings and the selector/gadget/KSK join.  It is not
     // accepted as a caller parameter and is not copied into endpoint admission;
     // the native endpoint independently recomputes the same authorization.
-    (void)MakeOrdinaryRefreshAuthorization(
+    const auto authorization = MakeOrdinaryRefreshAuthorization(
         m_context, selectorManifest.support_commitment,
         *material.securityReport, kSparseHammingWeight,
         /*reducedExposureCorridor=*/true);
@@ -1125,12 +1230,16 @@ GLRProductionAdapter::ExecuteOrdinaryRefresh(
     config.security_report = material.securityReport;
 
     OrdinaryRefreshExecutionResult out;
+    out.nativeAllYProductionPreflight =
+        authorization.nativeAllYProductionPreflight;
     out.nativeResult =
         glscheme::rns::glr_ship_refresh_only_endpoint_prime(
             m_context, canonicalCiphertext, parameters, config,
             &out.nativeEvidence);
     ValidateOrdinaryRefreshExecutionEvidence(
         out.nativeResult, out.nativeEvidence);
+    RequireOrdinaryRefreshEvidenceMatchesAllYReceipt(
+        out.nativeEvidence, out.nativeAllYProductionPreflight);
     if (out.nativeResult.representation !=
             glscheme::rns::GlrShipRefreshOnlyEndpointRepresentation::
                 refreshed_xy ||

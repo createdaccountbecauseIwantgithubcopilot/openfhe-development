@@ -187,6 +187,8 @@ int main() {
     static_assert(std::is_trivially_copyable_v<
                   Adapter::OrdinaryRefreshPreflight>);
     static_assert(std::is_trivially_copyable_v<
+                  Adapter::NativeRefreshAllYProductionReceipt>);
+    static_assert(std::is_trivially_copyable_v<
                   Adapter::OrdinaryRefreshAuthorization>);
     static_assert(std::is_aggregate_v<
                   Adapter::OrdinaryRefreshExecutionMaterialView>);
@@ -756,6 +758,28 @@ int main() {
                 !refresh.productionExecutionExposed,
             "ordinary-refresh authorization is not exact Q7+P14/h40 "
             "policy-only evidence");
+    const auto& allYReceipt =
+        refreshAuthorization.nativeAllYProductionPreflight;
+    Require(allYReceipt.schemaVersion == 1 &&
+                allYReceipt.y_rows == 128 &&
+                allYReceipt.branches_per_y_row == 2 &&
+                allYReceipt.logical_all_y_branch_items == 256ULL &&
+                allYReceipt.pair_major_row_tile_width == 8 &&
+                allYReceipt.pair_major_row_tiles_per_centered_refresh == 16 &&
+                allYReceipt.total_pair_major_branch_tile_invocations ==
+                    1048576ULL &&
+                allYReceipt.scalar_equivalent_branch_invocations ==
+                    8388608ULL &&
+                allYReceipt.scalar_equivalent_exponent_ladder_nodes ==
+                    335544320ULL &&
+                allYReceipt.scalar_equivalent_gadget_key_applications ==
+                    671088640ULL &&
+                allYReceipt.exact_all_y_coverage &&
+                !allYReceipt.context_ciphertext_or_key_allocation_required &&
+                allYReceipt.material_schedule_metadata_admitted &&
+                !allYReceipt.ciphertext_value_execution_performed &&
+                !allYReceipt.value_noise_acceptance_recorded,
+            "ordinary-refresh authorization lost the canonical all-Y receipt");
 
     const auto rejectedAuthorizationCall = [&](const std::string& support,
                                                 const auto& report,
@@ -827,6 +851,11 @@ int main() {
             }),
             "copied cross-support authorization evidence did not fail "
             "closed");
+    Require(rejectedAuthorizationForgery([](auto& forged) {
+                --forged.nativeAllYProductionPreflight
+                      .total_pair_major_branch_tile_invocations;
+            }),
+            "forged all-Y production receipt did not fail closed");
     Require(rejectedAuthorizationForgery([](auto& forged) {
                 forged.estimatorTranscriptSha256.bytes[0] ^= 1;
             }),

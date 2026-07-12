@@ -79,6 +79,30 @@ public:
         }
     };
 
+    // Fixed-layout projection of the native all-Y production preflight.  The
+    // native object owns schema/authorization strings; those bindings are
+    // carried separately below so authorization remains trivially copyable.
+    struct NativeRefreshAllYProductionReceipt {
+        NativeRefreshTracePreflight pack;
+        NativeRefreshEndpointPreflight endpoint;
+        std::uint32_t schemaVersion = 0;
+        std::uint32_t y_rows = 0;
+        std::uint32_t branches_per_y_row = 0;
+        std::uint32_t pair_major_row_tile_width = 0;
+        std::uint32_t pair_major_row_tiles_per_centered_refresh = 0;
+        std::uint64_t logical_all_y_branch_items = 0;
+        std::uint64_t scalar_equivalent_branch_invocations = 0;
+        std::uint64_t scalar_equivalent_exponent_ladder_nodes = 0;
+        std::uint64_t scalar_equivalent_gadget_key_applications = 0;
+        std::uint64_t pair_major_branch_tiles_per_centered_refresh = 0;
+        std::uint64_t total_pair_major_branch_tile_invocations = 0;
+        bool exact_all_y_coverage = false;
+        bool context_ciphertext_or_key_allocation_required = true;
+        bool material_schedule_metadata_admitted = false;
+        bool ciphertext_value_execution_performed = false;
+        bool value_noise_acceptance_recorded = false;
+    };
+
     enum class OrdinaryRefreshAvailability : std::uint8_t {
         // This fixed census never owns or attests execution material.  The
         // separately typed ExecuteOrdinaryRefresh seam remains contingent on
@@ -177,6 +201,7 @@ public:
     // recomputes authorization from its actual material/report and calls the
     // native endpoint, so this policy-only result always remains false.
     struct OrdinaryRefreshAuthorization {
+        NativeRefreshAllYProductionReceipt nativeAllYProductionPreflight;
         FixedProfileBindingText profileBindingFingerprint;
         FixedProfileBindingText supportCommitment;
         FixedProfileBindingText bootstrapProfileFingerprint;
@@ -222,6 +247,7 @@ public:
     struct OrdinaryRefreshExecutionResult {
         NativeRefreshEndpointResult nativeResult;
         NativeRefreshEndpointEvidence nativeEvidence;
+        NativeRefreshAllYProductionReceipt nativeAllYProductionPreflight;
         bool productionExecutionExposed = false;
     };
 
