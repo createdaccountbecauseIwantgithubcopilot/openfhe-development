@@ -17,9 +17,10 @@
 // clear oracle recomputed in-test with plain integers.  Toy dims n=4/8 with
 // HEStd_NotSet remain conformance geometry, not a security claim.  The
 // fixed-size W-batched census validates production-sized Section-4 geometry;
-// a separate n=4,p=3,t=97 codec exercises genuine p>1 plaintext semantics
-// without claiming ciphertext execution, security, serialization, or integer
-// bootstrapping.
+// a separate n=4,p=3,t=97 codec and sliced BGV aggregate exercise genuine
+// p>1 plaintext plus linear ciphertext semantics under W-constant s(X),
+// without claiming fused W-dependent transport, security, serialization,
+// matrix multiplication, or integer bootstrapping.
 
 #include "gtest/gtest.h"
 
@@ -50,6 +51,9 @@ static_assert(std::is_trivially_copyable_v<GLIntWBatchedParameters> &&
                   std::is_trivially_copyable_v<GLIntOperationCensusEntry> &&
                   std::is_trivially_copyable_v<GLIntWBatchedCensus>,
               "the production/W-batched census must remain fixed-size and allocation-free");
+static_assert(!std::is_default_constructible_v<GLIntWBatchedSlicedCiphertext> &&
+                  !std::is_aggregate_v<GLIntWBatchedSlicedCiphertext>,
+              "the bounded W-batched ciphertext must have no public shadow or unchecked shape");
 
 using IntMatrix = std::vector<int64_t>;
 
@@ -428,7 +432,8 @@ TEST(GLInt, WBatchedProductionParameterAndOperationCensus) {
     // is not silently upgraded from a shape calculation to an execution or
     // security claim.
     EXPECT_FALSE(census.boundedPlaintextCodecImplemented);
-    EXPECT_FALSE(census.wBatchedCiphertextExecutionImplemented);
+    EXPECT_FALSE(census.boundedSlicedCiphertextImplemented);
+    EXPECT_FALSE(census.nativeFusedWTransportImplemented);
     EXPECT_FALSE(census.securityAuthorized);
     EXPECT_FALSE(census.aggregateSerializationImplemented);
     EXPECT_FALSE(census.integerBootstrapImplemented);
@@ -436,7 +441,7 @@ TEST(GLInt, WBatchedProductionParameterAndOperationCensus) {
     ASSERT_EQ(census.operations.size(), kGLIntOperationCensusSize);
     for (std::size_t index = 0; index < census.operations.size(); ++index) {
         EXPECT_EQ(static_cast<std::size_t>(census.operations[index].operation), index);
-        EXPECT_FALSE(census.operations[index].boundedPlaintextPathImplemented);
+        EXPECT_FALSE(census.operations[index].boundedConformancePathImplemented);
         EXPECT_FALSE(census.operations[index].productionValuePathImplemented);
     }
     const auto& encode = census.operations[static_cast<std::size_t>(GLIntOperation::Encode)];
@@ -522,13 +527,14 @@ TEST(GLInt, WBatchedN4P3ExactCodecEquation5AndRoundTrip) {
     EXPECT_EQ(census.encodedCoefficientStorageBytes, 512u);
     EXPECT_EQ(census.decodedBranchPairStorageBytes, 512u);
     EXPECT_TRUE(census.boundedPlaintextCodecImplemented);
-    EXPECT_FALSE(census.wBatchedCiphertextExecutionImplemented);
+    EXPECT_TRUE(census.boundedSlicedCiphertextImplemented);
+    EXPECT_FALSE(census.nativeFusedWTransportImplemented);
     EXPECT_TRUE(census.operations[static_cast<std::size_t>(GLIntOperation::Encode)]
-                    .boundedPlaintextPathImplemented);
+                    .boundedConformancePathImplemented);
     EXPECT_TRUE(census.operations[static_cast<std::size_t>(GLIntOperation::Decode)]
-                    .boundedPlaintextPathImplemented);
+                    .boundedConformancePathImplemented);
     EXPECT_TRUE(census.operations[static_cast<std::size_t>(GLIntOperation::InterMatrixRotate)]
-                    .boundedPlaintextPathImplemented);
+                    .boundedConformancePathImplemented);
     for (const auto& operation : census.operations) {
         EXPECT_FALSE(operation.productionValuePathImplemented);
     }
@@ -669,6 +675,203 @@ TEST(GLInt, WBatchedN4P3CodecNegativesAndProductionAllocationGate) {
     EXPECT_EQ(productionCensus.gaussianCoefficientCount, 4194304u);
     EXPECT_EQ(productionCensus.encodedCoefficientStorageBytes, 67108864u);
     EXPECT_THROW((void)GLIntWBatchedPlaintextCodec(production), GLIntParameterError);
+}
+
+TEST(GLInt, WBatchedSlicedBGVEncryptDecryptAndContract) {
+    const auto parameters = GLIntWBatchedParameters::ConformanceN4P3T97();
+    const GLIntWBatchedSlicedSchemelet scheme(parameters);
+    EXPECT_EQ(scheme.GetSliceCount(), 8u);
+    EXPECT_EQ(scheme.GetCryptoContext()->GetRingDimension(), 8u);
+    EXPECT_EQ(scheme.GetCryptoContext()->GetCyclotomicOrder(), 16u);
+    EXPECT_EQ(scheme.GetCryptoContext()->GetCryptoParameters()->GetPlaintextModulus(), 97u);
+    EXPECT_TRUE(scheme.UsesWConstantSecretEmbedding());
+    EXPECT_FALSE(scheme.SupportsNativeFusedWTransport());
+    EXPECT_FALSE(scheme.SupportsCiphertextMatMul());
+    EXPECT_FALSE(scheme.IsSecurityAuthorized());
+    EXPECT_FALSE(scheme.SupportsSerialization());
+    EXPECT_FALSE(scheme.SupportsBootstrap());
+
+    const GLIntWBatchedPlaintext input(parameters, WBatchedPlusValues(), WBatchedMinusValues());
+    const auto encoded = scheme.GetCodec().Encode(input);
+    const auto keys    = scheme.KeyGen();
+
+    const auto ciphertext = scheme.Encrypt(keys.publicKey, encoded);
+    ASSERT_EQ(ciphertext.GetSlices().size(), 8u);
+    EXPECT_EQ(ciphertext.GetKeyTag(), keys.publicKey->GetKeyTag());
+    for (const auto& slice : ciphertext.GetSlices()) {
+        ASSERT_TRUE(slice != nullptr);
+        EXPECT_EQ(slice->GetEncodingType(), COEF_PACKED_ENCODING);
+        EXPECT_EQ(slice->GetElements().size(), 2u);
+        EXPECT_EQ(slice->GetCryptoContext().get(), scheme.GetCryptoContext().get());
+        EXPECT_EQ(slice->GetLevel(), 0u);
+    }
+
+    const auto decrypted = scheme.Decrypt(keys.secretKey, ciphertext);
+    EXPECT_EQ(decrypted.GetCoefficients(), encoded.GetCoefficients());
+    const auto decoded = scheme.GetCodec().Decode(decrypted);
+    EXPECT_EQ(decoded.GetValues(GLIntBranch::Plus), input.GetValues(GLIntBranch::Plus));
+    EXPECT_EQ(decoded.GetValues(GLIntBranch::Minus), input.GetValues(GLIntBranch::Minus));
+
+    const auto symmetric = scheme.Encrypt(keys.secretKey, encoded);
+    EXPECT_EQ(scheme.Decrypt(keys.secretKey, symmetric).GetCoefficients(),
+              encoded.GetCoefficients());
+
+    const auto census = MakeGLIntWBatchedCensus(parameters);
+    EXPECT_TRUE(census.boundedSlicedCiphertextImplemented);
+    for (const auto operation : {GLIntOperation::EncryptPublic, GLIntOperation::EncryptSecret,
+                                 GLIntOperation::Decrypt, GLIntOperation::Add,
+                                 GLIntOperation::Subtract, GLIntOperation::Negate,
+                                 GLIntOperation::InterMatrixRotate}) {
+        EXPECT_TRUE(census.operations[static_cast<std::size_t>(operation)]
+                        .boundedConformancePathImplemented);
+        EXPECT_FALSE(census.operations[static_cast<std::size_t>(operation)]
+                         .productionValuePathImplemented);
+    }
+    EXPECT_FALSE(census.nativeFusedWTransportImplemented);
+    EXPECT_FALSE(census.securityAuthorized);
+    EXPECT_FALSE(census.integerBootstrapImplemented);
+}
+
+TEST(GLInt, WBatchedSlicedBGVLinearOperationsExact) {
+    const auto parameters = GLIntWBatchedParameters::ConformanceN4P3T97();
+    const GLIntWBatchedSlicedSchemelet scheme(parameters);
+    const auto keys = scheme.KeyGen();
+    const GLIntWBatchedPlaintext leftPlain(parameters, WBatchedPlusValues(), WBatchedMinusValues());
+    const auto rightPlain = scheme.GetCodec().RotateInterMatrix(leftPlain, 1);
+    const auto left = scheme.Encrypt(keys.publicKey, scheme.GetCodec().Encode(leftPlain));
+    const auto right = scheme.Encrypt(keys.publicKey, scheme.GetCodec().Encode(rightPlain));
+
+    const auto combine = [](const std::vector<int64_t>& lhs, const std::vector<int64_t>& rhs,
+                            int sign) {
+        std::vector<int64_t> output(lhs.size());
+        for (std::size_t index = 0; index < lhs.size(); ++index) {
+            output[index] = Canonical(lhs[index] + sign * rhs[index], kWBatchedModulus);
+        }
+        return output;
+    };
+    const auto negate = [](const std::vector<int64_t>& values) {
+        std::vector<int64_t> output(values.size());
+        for (std::size_t index = 0; index < values.size(); ++index) {
+            output[index] = Canonical(-values[index], kWBatchedModulus);
+        }
+        return output;
+    };
+
+    const GLIntWBatchedPlaintext expectedAdd(
+        parameters,
+        combine(leftPlain.GetValues(GLIntBranch::Plus), rightPlain.GetValues(GLIntBranch::Plus), 1),
+        combine(leftPlain.GetValues(GLIntBranch::Minus), rightPlain.GetValues(GLIntBranch::Minus), 1));
+    const GLIntWBatchedPlaintext expectedSubtract(
+        parameters,
+        combine(leftPlain.GetValues(GLIntBranch::Plus), rightPlain.GetValues(GLIntBranch::Plus), -1),
+        combine(leftPlain.GetValues(GLIntBranch::Minus), rightPlain.GetValues(GLIntBranch::Minus), -1));
+    const GLIntWBatchedPlaintext expectedNegate(
+        parameters, negate(leftPlain.GetValues(GLIntBranch::Plus)),
+        negate(leftPlain.GetValues(GLIntBranch::Minus)));
+
+    const auto add = scheme.Add(left, right);
+    const auto subtract = scheme.Subtract(left, right);
+    const auto negated = scheme.Negate(left);
+    EXPECT_EQ(scheme.Decrypt(keys.secretKey, add).GetCoefficients(),
+              scheme.GetCodec().Encode(expectedAdd).GetCoefficients());
+    EXPECT_EQ(scheme.Decrypt(keys.secretKey, subtract).GetCoefficients(),
+              scheme.GetCodec().Encode(expectedSubtract).GetCoefficients());
+    EXPECT_EQ(scheme.Decrypt(keys.secretKey, negated).GetCoefficients(),
+              scheme.GetCodec().Encode(expectedNegate).GetCoefficients());
+    EXPECT_EQ(add.GetKeyTag(), left.GetKeyTag());
+    EXPECT_EQ(subtract.GetKeyTag(), left.GetKeyTag());
+    EXPECT_EQ(negated.GetKeyTag(), left.GetKeyTag());
+    for (const auto* aggregate : {&add, &subtract, &negated}) {
+        for (const auto& slice : aggregate->GetSlices()) {
+            EXPECT_EQ(slice->GetLevel(), 0u);
+            EXPECT_EQ(slice->GetElements().size(), 2u);
+        }
+    }
+}
+
+TEST(GLInt, WBatchedSlicedBGVWRotationMatchesOwnerOracle) {
+    const auto parameters = GLIntWBatchedParameters::ConformanceN4P3T97();
+    const GLIntWBatchedSlicedSchemelet scheme(parameters);
+    const auto keys = scheme.KeyGen();
+    const GLIntWBatchedPlaintext input(parameters, WBatchedPlusValues(), WBatchedMinusValues());
+    const auto encoded = scheme.GetCodec().Encode(input);
+    const auto ciphertext = scheme.Encrypt(keys.publicKey, encoded);
+
+    const auto rotated = scheme.RotateInterMatrix(ciphertext, 1);
+    const auto decrypted = scheme.Decrypt(keys.secretKey, rotated);
+    const auto coefficientOracle = scheme.GetCodec().ApplyWAutomorphism(encoded, 1);
+    EXPECT_EQ(decrypted.GetCoefficients(), coefficientOracle.GetCoefficients());
+    const auto decoded = scheme.GetCodec().Decode(decrypted);
+    const auto ownerOracle = scheme.GetCodec().RotateInterMatrix(input, 1);
+    EXPECT_EQ(decoded.GetValues(GLIntBranch::Plus), ownerOracle.GetValues(GLIntBranch::Plus));
+    EXPECT_EQ(decoded.GetValues(GLIntBranch::Minus), ownerOracle.GetValues(GLIntBranch::Minus));
+    EXPECT_EQ(rotated.GetKeyTag(), ciphertext.GetKeyTag());
+
+    const auto twice = scheme.RotateInterMatrix(rotated, 1);
+    EXPECT_EQ(scheme.Decrypt(keys.secretKey, twice).GetCoefficients(), encoded.GetCoefficients());
+    EXPECT_EQ(scheme.Decrypt(keys.secretKey, scheme.RotateInterMatrix(ciphertext, 0))
+                  .GetCoefficients(),
+              encoded.GetCoefficients());
+}
+
+TEST(GLInt, WBatchedSlicedBGVBindingAndShapeNegatives) {
+    const auto parameters = GLIntWBatchedParameters::ConformanceN4P3T97();
+    const GLIntWBatchedSlicedSchemelet scheme(parameters);
+    const auto keys = scheme.KeyGen();
+    const GLIntWBatchedPlaintext input(parameters, WBatchedPlusValues(), WBatchedMinusValues());
+    const auto encoded = scheme.GetCodec().Encode(input);
+    const auto ciphertext = scheme.Encrypt(keys.publicKey, encoded);
+
+    const auto secondKeys = scheme.KeyGen();
+    const auto secondCiphertext = scheme.Encrypt(secondKeys.publicKey, encoded);
+    EXPECT_THROW((void)scheme.Add(ciphertext, secondCiphertext), GLKeyMismatchError);
+    EXPECT_THROW((void)scheme.Decrypt(secondKeys.secretKey, ciphertext), GLKeyMismatchError);
+
+    const GLIntWBatchedPlaintextCodec alternateCodec(
+        parameters, GLIntWBatchedCodecRoots{85, 61});
+    const auto alternateEncoded = alternateCodec.Encode(input);
+    EXPECT_THROW((void)scheme.Encrypt(keys.publicKey, alternateEncoded), GLContextMismatchError);
+
+    auto depthTwoParameters = GLIntWBatchedParameters::ConformanceN4P3T97(2);
+    const GLIntWBatchedSlicedSchemelet depthTwo(depthTwoParameters);
+    const auto depthTwoKeys = depthTwo.KeyGen();
+    const GLIntWBatchedPlaintext depthTwoInput(depthTwoParameters, WBatchedPlusValues(),
+                                              WBatchedMinusValues());
+    const auto depthTwoCiphertext = depthTwo.Encrypt(
+        depthTwoKeys.publicKey, depthTwo.GetCodec().Encode(depthTwoInput));
+    EXPECT_THROW((void)scheme.Add(ciphertext, depthTwoCiphertext), GLContextMismatchError);
+    EXPECT_THROW((void)scheme.Encrypt(depthTwoKeys.publicKey, encoded),
+                 GLKeyContextMismatchError);
+
+    auto shortSlices = ciphertext.GetSlices();
+    shortSlices.pop_back();
+    EXPECT_THROW((void)GLIntWBatchedSlicedCiphertext(parameters, scheme.GetCodec().GetRoots(),
+                                                     scheme.GetCryptoContext(),
+                                                     std::move(shortSlices)),
+                 GLMissingRowError);
+    auto longSlices = ciphertext.GetSlices();
+    longSlices.push_back(ciphertext.GetSlices().front());
+    EXPECT_THROW((void)GLIntWBatchedSlicedCiphertext(parameters, scheme.GetCodec().GetRoots(),
+                                                     scheme.GetCryptoContext(),
+                                                     std::move(longSlices)),
+                 GLDimensionError);
+    auto nullSlices = ciphertext.GetSlices();
+    nullSlices.front() = nullptr;
+    EXPECT_THROW((void)GLIntWBatchedSlicedCiphertext(parameters, scheme.GetCodec().GetRoots(),
+                                                     scheme.GetCryptoContext(),
+                                                     std::move(nullSlices)),
+                 GLMissingRowError);
+    auto mixedSlices = ciphertext.GetSlices();
+    mixedSlices.back() = depthTwoCiphertext.GetSlices().back();
+    EXPECT_THROW((void)GLIntWBatchedSlicedCiphertext(parameters, scheme.GetCodec().GetRoots(),
+                                                     scheme.GetCryptoContext(),
+                                                     std::move(mixedSlices)),
+                 GLContextMismatchError);
+    EXPECT_THROW((void)ciphertext.At(4, 0), GLDimensionError);
+    EXPECT_THROW((void)scheme.RotateInterMatrix(ciphertext, 2), GLDimensionError);
+    EXPECT_THROW((void)GLIntWBatchedSlicedSchemelet(
+                     GLIntWBatchedParameters::GL128257N32()),
+                 GLIntParameterError);
 }
 
 TEST(GLInt, ParameterSurfacePins) {

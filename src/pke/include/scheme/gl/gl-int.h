@@ -94,7 +94,7 @@ struct GLIntOperationCensusEntry {
     uint8_t consumedLevels{0};
     uint16_t keyRequirements{GLIntKeyNone};
     bool section4Required{true};
-    bool boundedPlaintextPathImplemented{false};
+    bool boundedConformancePathImplemented{false};
     bool productionValuePathImplemented{false};
 };
 
@@ -130,10 +130,11 @@ struct GLIntWBatchedParameters {
  * Fixed-size, trivially-copyable census for a validated W-batched profile.
  *
  * The derived dimensions are the exact Section-4 counts.  Only the bounded
- * n=4,p=3,t=97 receipt reports a plaintext codec; no receipt is evidence of
- * W-batched ciphertext execution, a security-authorized BGV chain, GL
- * aggregate/key serialization, or integer bootstrapping.  `operations`
- * records the p=1 reference surface and remaining p>1 production gaps.
+ * n=4,p=3,t=97 receipt reports a plaintext codec and bounded sliced linear
+ * ciphertext path; no receipt is evidence of native fused W-dependent RLWE
+ * transport, a security-authorized BGV chain, GL aggregate/key serialization,
+ * matrix multiplication, or integer bootstrapping.  `operations` records the
+ * p=1 reference surface and remaining p>1 production gaps.
  */
 struct GLIntWBatchedCensus {
     GLIntWBatchedParameters parameters;
@@ -154,7 +155,8 @@ struct GLIntWBatchedCensus {
     uint32_t logicalBigSwitchFamilyCount{3};  // K1, K2, K3
     uint32_t logicalSmallSwitchFamilyCount{1};
     bool boundedPlaintextCodecImplemented{false};
-    bool wBatchedCiphertextExecutionImplemented{false};
+    bool boundedSlicedCiphertextImplemented{false};
+    bool nativeFusedWTransportImplemented{false};
     bool securityAuthorized{false};
     bool aggregateSerializationImplemented{false};
     bool integerBootstrapImplemented{false};
@@ -289,6 +291,107 @@ private:
     std::array<uint64_t, 4> m_wMinusEval{};
     std::array<uint64_t, 4> m_wPlusInv{};
     std::array<uint64_t, 4> m_wMinusInv{};
+};
+
+/**
+ * Eight-ciphertext bounded aggregate for n=4,p=3: one OpenFHE BGV
+ * coefficient-packed row for every (Y degree, W degree), all under one key.
+ * A row contains the 2n coefficients of Z_t[I,X]/(I^2+1,X^n-I), with real
+ * coefficients at x and imaginary coefficients at x+n.
+ *
+ * There is no cleartext shadow.  This is the exact coefficient slicing of an
+ * R'_t encryption under the deliberately restricted W-constant embedding
+ * s(X) in R_t.  It is not the paper's full W-dependent RLWE secret
+ * distribution and carries no security or fused-transport claim.
+ */
+class GLIntWBatchedSlicedCiphertext final {
+public:
+    GLIntWBatchedSlicedCiphertext(GLIntWBatchedParameters parameters,
+                                  GLIntWBatchedCodecRoots roots,
+                                  CryptoContext<DCRTPoly> context,
+                                  std::vector<Ciphertext<DCRTPoly>> slices);
+
+    const GLIntWBatchedParameters& GetParameters() const noexcept;
+    const GLIntWBatchedCodecRoots& GetRoots() const noexcept;
+    const CryptoContext<DCRTPoly>& GetCryptoContext() const noexcept;
+    const std::vector<Ciphertext<DCRTPoly>>& GetSlices() const noexcept;
+    const Ciphertext<DCRTPoly>& At(std::size_t y, std::size_t w) const;
+    const std::string& GetKeyTag() const;
+    void Validate() const;
+
+private:
+    GLIntWBatchedParameters m_parameters;
+    GLIntWBatchedCodecRoots m_roots;
+    CryptoContext<DCRTPoly> m_context;
+    std::vector<Ciphertext<DCRTPoly>> m_slices;
+};
+
+/**
+ * Smallest honest encrypted Section-4 conformance tranche.
+ *
+ * The message is the genuine n=4,p=3,t=97 coefficient tensor, sliced into
+ * n*phi(p)=8 BGV ciphertexts over the X/Gaussian subring.  With the shared
+ * secret restricted to s(X), encryption/decryption and every linear R'_t
+ * operation are exact; W -> W^(gamma^nu) is a keyless public slice
+ * recombination because that restricted secret is W-invariant.
+ *
+ * Native fused single-RLWE W transport under a W-dependent secret,
+ * ciphertext multiplication/matrix multiplication, security authorization,
+ * serialization, and bootstrapping are explicitly pending.
+ */
+class GLIntWBatchedSlicedSchemelet final {
+public:
+    explicit GLIntWBatchedSlicedSchemelet(GLIntWBatchedParameters parameters);
+    GLIntWBatchedSlicedSchemelet(GLIntWBatchedParameters parameters,
+                                 GLIntWBatchedCodecRoots roots);
+
+    const GLIntWBatchedParameters& GetParameters() const noexcept;
+    const GLIntWBatchedPlaintextCodec& GetCodec() const noexcept;
+    const CryptoContext<DCRTPoly>& GetCryptoContext() const noexcept;
+    std::size_t GetSliceCount() const noexcept;
+    bool UsesWConstantSecretEmbedding() const noexcept;
+    bool SupportsNativeFusedWTransport() const noexcept;
+    bool SupportsCiphertextMatMul() const noexcept;
+    bool IsSecurityAuthorized() const noexcept;
+    bool SupportsSerialization() const noexcept;
+    bool SupportsBootstrap() const noexcept;
+
+    KeyPair<DCRTPoly> KeyGen() const;
+    GLIntWBatchedSlicedCiphertext Encrypt(
+        const PublicKey<DCRTPoly>& publicKey,
+        const GLIntWBatchedEncodedPlaintext& plaintext) const;
+    GLIntWBatchedSlicedCiphertext Encrypt(
+        const PrivateKey<DCRTPoly>& privateKey,
+        const GLIntWBatchedEncodedPlaintext& plaintext) const;
+    GLIntWBatchedEncodedPlaintext Decrypt(
+        const PrivateKey<DCRTPoly>& privateKey,
+        const GLIntWBatchedSlicedCiphertext& ciphertext) const;
+
+    GLIntWBatchedSlicedCiphertext Add(
+        const GLIntWBatchedSlicedCiphertext& lhs,
+        const GLIntWBatchedSlicedCiphertext& rhs) const;
+    GLIntWBatchedSlicedCiphertext Subtract(
+        const GLIntWBatchedSlicedCiphertext& lhs,
+        const GLIntWBatchedSlicedCiphertext& rhs) const;
+    GLIntWBatchedSlicedCiphertext Negate(
+        const GLIntWBatchedSlicedCiphertext& ciphertext) const;
+    GLIntWBatchedSlicedCiphertext RotateInterMatrix(
+        const GLIntWBatchedSlicedCiphertext& ciphertext, std::size_t amount) const;
+
+private:
+    void ValidateEncoded(const GLIntWBatchedEncodedPlaintext& plaintext,
+                         const char* objectName) const;
+    void ValidateAggregate(const GLIntWBatchedSlicedCiphertext& ciphertext,
+                           const char* objectName) const;
+    void ValidateOperands(const GLIntWBatchedSlicedCiphertext& lhs,
+                          const GLIntWBatchedSlicedCiphertext& rhs,
+                          const char* operation) const;
+    void ValidateKey(const PublicKey<DCRTPoly>& key, const char* operation) const;
+    void ValidateKey(const PrivateKey<DCRTPoly>& key, const char* operation) const;
+
+    GLIntWBatchedParameters m_parameters;
+    GLIntWBatchedPlaintextCodec m_codec;
+    CryptoContext<DCRTPoly> m_context;
 };
 
 /**

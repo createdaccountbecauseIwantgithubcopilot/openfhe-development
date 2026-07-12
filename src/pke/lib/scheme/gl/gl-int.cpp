@@ -14,6 +14,10 @@
 // claim.  The coefficient-domain trace/adjoint/transpose kernels are the
 // complex port's kernels verbatim, operating on BGV DCRT towers mod q_i;
 // mod-t correctness emerges at decryption, never by reducing tower values.
+// The bounded n=4,p=3,t=97 extension below adds the genuine W-batched
+// plaintext codec plus linear BGV encryption sliced by (Y,W), explicitly
+// under the W-constant s(X) conformance embedding; it is not native fused
+// W-dependent RLWE transport and makes no security/matmul/bootstrap claim.
 
 #include "scheme/gl/gl-int.h"
 
@@ -174,6 +178,15 @@ std::size_t WBatchedValueIndex(std::size_t n, std::size_t matrix, std::size_t ro
 std::size_t WBatchedCoefficientIndex(std::size_t n, std::size_t phi, std::size_t x,
                                      std::size_t y, std::size_t w) {
     return (x * n + y) * phi + w;
+}
+
+std::size_t WBatchedSliceIndex(std::size_t phi, std::size_t y, std::size_t w) {
+    return y * phi + w;
+}
+
+int64_t CenteredModT(int64_t canonical, uint64_t modulus) {
+    const auto half = static_cast<int64_t>((modulus - 1) / 2);
+    return canonical > half ? canonical - static_cast<int64_t>(modulus) : canonical;
 }
 
 uint64_t CheckedMultiply(uint64_t lhs, uint64_t rhs, const char* quantity) {
@@ -708,12 +721,25 @@ GLIntWBatchedCensus MakeGLIntWBatchedCensus(const GLIntWBatchedParameters& param
     census.operations                     = WFreeOperationCensus();
     if (parameters.IsConformanceN4P3T97()) {
         census.boundedPlaintextCodecImplemented = true;
+        census.boundedSlicedCiphertextImplemented = true;
         census.operations[static_cast<std::size_t>(GLIntOperation::Encode)]
-            .boundedPlaintextPathImplemented = true;
+            .boundedConformancePathImplemented = true;
         census.operations[static_cast<std::size_t>(GLIntOperation::Decode)]
-            .boundedPlaintextPathImplemented = true;
+            .boundedConformancePathImplemented = true;
+        census.operations[static_cast<std::size_t>(GLIntOperation::EncryptPublic)]
+            .boundedConformancePathImplemented = true;
+        census.operations[static_cast<std::size_t>(GLIntOperation::EncryptSecret)]
+            .boundedConformancePathImplemented = true;
+        census.operations[static_cast<std::size_t>(GLIntOperation::Decrypt)]
+            .boundedConformancePathImplemented = true;
+        census.operations[static_cast<std::size_t>(GLIntOperation::Add)]
+            .boundedConformancePathImplemented = true;
+        census.operations[static_cast<std::size_t>(GLIntOperation::Subtract)]
+            .boundedConformancePathImplemented = true;
+        census.operations[static_cast<std::size_t>(GLIntOperation::Negate)]
+            .boundedConformancePathImplemented = true;
         census.operations[static_cast<std::size_t>(GLIntOperation::InterMatrixRotate)]
-            .boundedPlaintextPathImplemented = true;
+            .boundedConformancePathImplemented = true;
     }
     return census;
 }
@@ -1188,6 +1214,443 @@ GLIntWBatchedEncodedPlaintext GLIntWBatchedPlaintextCodec::ApplyWAutomorphism(
         }
     }
     return GLIntWBatchedEncodedPlaintext(m_parameters, m_roots, std::move(output));
+}
+
+// ---------------------------------------------------------------------------
+// Bounded n=4,p=3,t=97 sliced BGV encryption under W-constant s(X)
+// ---------------------------------------------------------------------------
+
+GLIntWBatchedSlicedCiphertext::GLIntWBatchedSlicedCiphertext(
+    GLIntWBatchedParameters parameters, GLIntWBatchedCodecRoots roots,
+    CryptoContext<DCRTPoly> context, std::vector<Ciphertext<DCRTPoly>> slices)
+    : m_parameters(std::move(parameters)),
+      m_roots(std::move(roots)),
+      m_context(std::move(context)),
+      m_slices(std::move(slices)) {
+    Validate();
+}
+
+const GLIntWBatchedParameters& GLIntWBatchedSlicedCiphertext::GetParameters() const noexcept {
+    return m_parameters;
+}
+
+const GLIntWBatchedCodecRoots& GLIntWBatchedSlicedCiphertext::GetRoots() const noexcept {
+    return m_roots;
+}
+
+const CryptoContext<DCRTPoly>& GLIntWBatchedSlicedCiphertext::GetCryptoContext() const noexcept {
+    return m_context;
+}
+
+const std::vector<Ciphertext<DCRTPoly>>&
+GLIntWBatchedSlicedCiphertext::GetSlices() const noexcept {
+    return m_slices;
+}
+
+const Ciphertext<DCRTPoly>& GLIntWBatchedSlicedCiphertext::At(std::size_t y,
+                                                              std::size_t w) const {
+    const auto n   = static_cast<std::size_t>(m_parameters.dimension);
+    const auto phi = static_cast<std::size_t>(m_parameters.cyclotomicPrime - 1);
+    if (y >= n || w >= phi) {
+        throw GLDimensionError("GL integer W-batched sliced ciphertext index is out of range");
+    }
+    return m_slices[WBatchedSliceIndex(phi, y, w)];
+}
+
+const std::string& GLIntWBatchedSlicedCiphertext::GetKeyTag() const {
+    Validate();
+    return m_slices.front()->GetKeyTag();
+}
+
+void GLIntWBatchedSlicedCiphertext::Validate() const {
+    RequireConformanceWBatchedCodec(m_parameters);
+    m_roots.Validate(m_parameters);
+    if (!m_context) {
+        throw GLContextMismatchError("GL integer W-batched sliced ciphertext has no CryptoContext");
+    }
+    const auto n        = static_cast<std::size_t>(m_parameters.dimension);
+    const auto phi      = static_cast<std::size_t>(m_parameters.cyclotomicPrime - 1);
+    const auto expected = n * phi;
+    if (m_context->GetRingDimension() != 2 * n ||
+        m_context->GetCryptoParameters()->GetPlaintextModulus() != m_parameters.plaintextModulus) {
+        throw GLContextMismatchError(
+            "GL integer W-batched sliced ciphertext context does not match its X-ring parameters");
+    }
+    if (m_slices.size() < expected) {
+        throw GLMissingRowError("GL integer W-batched sliced ciphertext is missing a (Y,W) row");
+    }
+    if (m_slices.size() > expected) {
+        throw GLDimensionError("GL integer W-batched sliced ciphertext has extra (Y,W) rows");
+    }
+
+    std::string keyTag;
+    uint32_t level = 0;
+    uint32_t noiseScaleDeg = 0;
+    std::size_t towers = 0;
+    for (std::size_t index = 0; index < m_slices.size(); ++index) {
+        const auto& slice = m_slices[index];
+        if (!slice) {
+            throw GLMissingRowError(RowMessage("GL integer W-batched ciphertext slice is null", index));
+        }
+        if (slice->GetCryptoContext().get() != m_context.get()) {
+            throw GLContextMismatchError(
+                RowMessage("GL integer W-batched slice belongs to a different CryptoContext", index));
+        }
+        if (slice->GetEncodingType() != COEF_PACKED_ENCODING) {
+            throw GLCiphertextError(
+                RowMessage("GL integer W-batched slice is not coefficient-packed BGV", index));
+        }
+        if (slice->GetElements().size() != 2) {
+            throw GLCiphertextError(
+                RowMessage("GL integer W-batched slice is not a two-component ciphertext", index));
+        }
+        const auto sliceTowers = slice->GetElements().front().GetNumOfElements();
+        if (index == 0) {
+            keyTag       = slice->GetKeyTag();
+            level        = slice->GetLevel();
+            noiseScaleDeg = slice->GetNoiseScaleDeg();
+            towers       = sliceTowers;
+            if (keyTag.empty()) {
+                throw GLKeyMismatchError(
+                    "GL integer W-batched slices require a nonempty shared key tag");
+            }
+        }
+        else {
+            if (slice->GetKeyTag() != keyTag) {
+                throw GLKeyMismatchError(
+                    RowMessage("GL integer W-batched slice uses a different key", index));
+            }
+            if (slice->GetLevel() != level || slice->GetNoiseScaleDeg() != noiseScaleDeg ||
+                sliceTowers != towers) {
+                throw GLCiphertextError(
+                    RowMessage("GL integer W-batched slice metadata is not uniform", index));
+            }
+        }
+    }
+}
+
+GLIntWBatchedSlicedSchemelet::GLIntWBatchedSlicedSchemelet(
+    GLIntWBatchedParameters parameters)
+    : GLIntWBatchedSlicedSchemelet(parameters, GLIntWBatchedCodecRoots::Pinned(parameters)) {}
+
+GLIntWBatchedSlicedSchemelet::GLIntWBatchedSlicedSchemelet(
+    GLIntWBatchedParameters parameters, GLIntWBatchedCodecRoots roots)
+    : m_parameters(std::move(parameters)), m_codec(m_parameters, std::move(roots)) {
+    RequireConformanceWBatchedCodec(m_parameters);
+
+    CCParams<CryptoContextBGVRNS> contextParameters;
+    contextParameters.SetPlaintextModulus(m_parameters.plaintextModulus);
+    contextParameters.SetMultiplicativeDepth(m_parameters.multiplicativeDepth);
+    contextParameters.SetScalingTechnique(FIXEDMANUAL);
+    contextParameters.SetSecurityLevel(HEStd_NotSet);
+    contextParameters.SetRingDim(2 * m_parameters.dimension);
+    contextParameters.SetBatchSize(2 * m_parameters.dimension);
+
+    m_context = GenCryptoContext(contextParameters);
+    if (!m_context) {
+        throw GLContextMismatchError(
+            "OpenFHE failed to create the bounded W-batched sliced BGV context");
+    }
+    m_context->Enable(PKE);
+    m_context->Enable(LEVELEDSHE);
+    if (m_context->GetRingDimension() != 2 * m_parameters.dimension ||
+        m_context->GetCryptoParameters()->GetPlaintextModulus() !=
+            m_parameters.plaintextModulus) {
+        throw GLContextMismatchError(
+            "OpenFHE did not preserve the bounded W-batched X-ring context parameters");
+    }
+}
+
+const GLIntWBatchedParameters& GLIntWBatchedSlicedSchemelet::GetParameters() const noexcept {
+    return m_parameters;
+}
+
+const GLIntWBatchedPlaintextCodec& GLIntWBatchedSlicedSchemelet::GetCodec() const noexcept {
+    return m_codec;
+}
+
+const CryptoContext<DCRTPoly>& GLIntWBatchedSlicedSchemelet::GetCryptoContext() const noexcept {
+    return m_context;
+}
+
+std::size_t GLIntWBatchedSlicedSchemelet::GetSliceCount() const noexcept {
+    return static_cast<std::size_t>(m_parameters.dimension) *
+           (m_parameters.cyclotomicPrime - 1);
+}
+
+bool GLIntWBatchedSlicedSchemelet::UsesWConstantSecretEmbedding() const noexcept {
+    return true;
+}
+
+bool GLIntWBatchedSlicedSchemelet::SupportsNativeFusedWTransport() const noexcept {
+    return false;
+}
+
+bool GLIntWBatchedSlicedSchemelet::SupportsCiphertextMatMul() const noexcept {
+    return false;
+}
+
+bool GLIntWBatchedSlicedSchemelet::IsSecurityAuthorized() const noexcept {
+    return false;
+}
+
+bool GLIntWBatchedSlicedSchemelet::SupportsSerialization() const noexcept {
+    return false;
+}
+
+bool GLIntWBatchedSlicedSchemelet::SupportsBootstrap() const noexcept {
+    return false;
+}
+
+KeyPair<DCRTPoly> GLIntWBatchedSlicedSchemelet::KeyGen() const {
+    auto keys = m_context->KeyGen();
+    if (!keys.good()) {
+        throw GLKeyMismatchError("OpenFHE failed to generate the bounded W-batched BGV key pair");
+    }
+    return keys;
+}
+
+void GLIntWBatchedSlicedSchemelet::ValidateEncoded(
+    const GLIntWBatchedEncodedPlaintext& plaintext, const char* objectName) const {
+    plaintext.Validate();
+    if (!SameWBatchedParameters(m_parameters, plaintext.GetParameters())) {
+        throw GLContextMismatchError(std::string(objectName) + " parameters do not match the schemelet");
+    }
+    if (m_codec.GetRoots() != plaintext.GetRoots()) {
+        throw GLContextMismatchError(std::string(objectName) + " roots do not match the schemelet");
+    }
+}
+
+void GLIntWBatchedSlicedSchemelet::ValidateAggregate(
+    const GLIntWBatchedSlicedCiphertext& ciphertext, const char* objectName) const {
+    ciphertext.Validate();
+    if (!SameWBatchedParameters(m_parameters, ciphertext.GetParameters())) {
+        throw GLContextMismatchError(std::string(objectName) + " parameters do not match the schemelet");
+    }
+    if (m_codec.GetRoots() != ciphertext.GetRoots()) {
+        throw GLContextMismatchError(std::string(objectName) + " roots do not match the schemelet");
+    }
+    if (ciphertext.GetCryptoContext().get() != m_context.get()) {
+        throw GLContextMismatchError(std::string(objectName) + " belongs to a different CryptoContext");
+    }
+}
+
+void GLIntWBatchedSlicedSchemelet::ValidateOperands(
+    const GLIntWBatchedSlicedCiphertext& lhs, const GLIntWBatchedSlicedCiphertext& rhs,
+    const char* operation) const {
+    ValidateAggregate(lhs, "left GL integer W-batched ciphertext");
+    ValidateAggregate(rhs, "right GL integer W-batched ciphertext");
+    if (lhs.GetKeyTag() != rhs.GetKeyTag()) {
+        throw GLKeyMismatchError(std::string(operation) + " requires one shared destination key");
+    }
+    const auto& left = lhs.GetSlices().front();
+    const auto& right = rhs.GetSlices().front();
+    if (left->GetLevel() != right->GetLevel() ||
+        left->GetNoiseScaleDeg() != right->GetNoiseScaleDeg() ||
+        left->GetElements().front().GetNumOfElements() !=
+            right->GetElements().front().GetNumOfElements()) {
+        throw GLCiphertextError(std::string(operation) + " requires matching slice metadata");
+    }
+}
+
+void GLIntWBatchedSlicedSchemelet::ValidateKey(const PublicKey<DCRTPoly>& key,
+                                               const char* operation) const {
+    if (!key) {
+        throw GLKeyMismatchError(std::string(operation) + " requires a non-null public key");
+    }
+    if (key->GetCryptoContext().get() != m_context.get()) {
+        throw GLKeyContextMismatchError(std::string(operation) + " key belongs to a different context");
+    }
+}
+
+void GLIntWBatchedSlicedSchemelet::ValidateKey(const PrivateKey<DCRTPoly>& key,
+                                               const char* operation) const {
+    if (!key) {
+        throw GLKeyMismatchError(std::string(operation) + " requires a non-null private key");
+    }
+    if (key->GetCryptoContext().get() != m_context.get()) {
+        throw GLKeyContextMismatchError(std::string(operation) + " key belongs to a different context");
+    }
+}
+
+GLIntWBatchedSlicedCiphertext GLIntWBatchedSlicedSchemelet::Encrypt(
+    const PublicKey<DCRTPoly>& publicKey,
+    const GLIntWBatchedEncodedPlaintext& plaintext) const {
+    ValidateKey(publicKey, "GL integer W-batched public encryption");
+    ValidateEncoded(plaintext, "GL integer W-batched encoded plaintext");
+    const auto n   = static_cast<std::size_t>(m_parameters.dimension);
+    const auto phi = static_cast<std::size_t>(m_parameters.cyclotomicPrime - 1);
+    const auto t   = m_parameters.plaintextModulus;
+    std::vector<Ciphertext<DCRTPoly>> slices;
+    slices.reserve(n * phi);
+    for (std::size_t y = 0; y < n; ++y) {
+        for (std::size_t w = 0; w < phi; ++w) {
+            std::vector<int64_t> coefficients(2 * n);
+            for (std::size_t x = 0; x < n; ++x) {
+                const auto& coefficient = plaintext.At(x, y, w);
+                coefficients[x]     = CenteredModT(coefficient.real, t);
+                coefficients[x + n] = CenteredModT(coefficient.imaginary, t);
+            }
+            auto packed = m_context->MakeCoefPackedPlaintext(coefficients);
+            if (!packed) {
+                throw GLCiphertextError("OpenFHE failed to coefficient-pack a W-batched slice");
+            }
+            auto encrypted = m_context->Encrypt(publicKey, packed);
+            if (!encrypted) {
+                throw GLCiphertextError("OpenFHE failed to encrypt a W-batched coefficient slice");
+            }
+            slices.push_back(std::move(encrypted));
+        }
+    }
+    return GLIntWBatchedSlicedCiphertext(m_parameters, m_codec.GetRoots(), m_context,
+                                         std::move(slices));
+}
+
+GLIntWBatchedSlicedCiphertext GLIntWBatchedSlicedSchemelet::Encrypt(
+    const PrivateKey<DCRTPoly>& privateKey,
+    const GLIntWBatchedEncodedPlaintext& plaintext) const {
+    ValidateKey(privateKey, "GL integer W-batched symmetric encryption");
+    ValidateEncoded(plaintext, "GL integer W-batched encoded plaintext");
+    const auto n   = static_cast<std::size_t>(m_parameters.dimension);
+    const auto phi = static_cast<std::size_t>(m_parameters.cyclotomicPrime - 1);
+    const auto t   = m_parameters.plaintextModulus;
+    std::vector<Ciphertext<DCRTPoly>> slices;
+    slices.reserve(n * phi);
+    for (std::size_t y = 0; y < n; ++y) {
+        for (std::size_t w = 0; w < phi; ++w) {
+            std::vector<int64_t> coefficients(2 * n);
+            for (std::size_t x = 0; x < n; ++x) {
+                const auto& coefficient = plaintext.At(x, y, w);
+                coefficients[x]     = CenteredModT(coefficient.real, t);
+                coefficients[x + n] = CenteredModT(coefficient.imaginary, t);
+            }
+            auto packed = m_context->MakeCoefPackedPlaintext(coefficients);
+            if (!packed) {
+                throw GLCiphertextError("OpenFHE failed to coefficient-pack a W-batched slice");
+            }
+            auto encrypted = m_context->Encrypt(privateKey, packed);
+            if (!encrypted) {
+                throw GLCiphertextError("OpenFHE failed to encrypt a W-batched coefficient slice");
+            }
+            slices.push_back(std::move(encrypted));
+        }
+    }
+    return GLIntWBatchedSlicedCiphertext(m_parameters, m_codec.GetRoots(), m_context,
+                                         std::move(slices));
+}
+
+GLIntWBatchedEncodedPlaintext GLIntWBatchedSlicedSchemelet::Decrypt(
+    const PrivateKey<DCRTPoly>& privateKey,
+    const GLIntWBatchedSlicedCiphertext& ciphertext) const {
+    ValidateKey(privateKey, "GL integer W-batched decryption");
+    ValidateAggregate(ciphertext, "GL integer W-batched ciphertext");
+    if (privateKey->GetKeyTag() != ciphertext.GetKeyTag()) {
+        throw GLKeyMismatchError("GL integer W-batched decryption key does not match the ciphertext");
+    }
+    const auto n   = static_cast<std::size_t>(m_parameters.dimension);
+    const auto phi = static_cast<std::size_t>(m_parameters.cyclotomicPrime - 1);
+    const auto t   = m_parameters.plaintextModulus;
+    std::vector<GLIntGaussianResidue> coefficients(n * n * phi);
+    for (std::size_t y = 0; y < n; ++y) {
+        for (std::size_t w = 0; w < phi; ++w) {
+            Plaintext decoded;
+            const auto result = m_context->Decrypt(privateKey, ciphertext.At(y, w), &decoded);
+            if (!result.isValid || !decoded || decoded->GetEncodingType() != COEF_PACKED_ENCODING) {
+                throw GLCiphertextError("OpenFHE failed to decrypt a W-batched coefficient slice");
+            }
+            const auto& values = decoded->GetCoefPackedValue();
+            if (values.size() < 2 * n) {
+                throw GLDimensionError("decrypted W-batched coefficient slice is too short");
+            }
+            for (std::size_t x = 0; x < n; ++x) {
+                coefficients[WBatchedCoefficientIndex(n, phi, x, y, w)] =
+                    GLIntGaussianResidue{CanonicalModT(values[x], t),
+                                         CanonicalModT(values[x + n], t)};
+            }
+        }
+    }
+    return GLIntWBatchedEncodedPlaintext(m_parameters, m_codec.GetRoots(),
+                                         std::move(coefficients));
+}
+
+GLIntWBatchedSlicedCiphertext GLIntWBatchedSlicedSchemelet::Add(
+    const GLIntWBatchedSlicedCiphertext& lhs,
+    const GLIntWBatchedSlicedCiphertext& rhs) const {
+    ValidateOperands(lhs, rhs, "GL integer W-batched addition");
+    std::vector<Ciphertext<DCRTPoly>> slices;
+    slices.reserve(GetSliceCount());
+    for (std::size_t index = 0; index < GetSliceCount(); ++index) {
+        auto value = m_context->EvalAdd(lhs.GetSlices()[index], rhs.GetSlices()[index]);
+        if (!value) {
+            throw GLCiphertextError("OpenFHE failed a W-batched slice addition");
+        }
+        slices.push_back(std::move(value));
+    }
+    return GLIntWBatchedSlicedCiphertext(m_parameters, m_codec.GetRoots(), m_context,
+                                         std::move(slices));
+}
+
+GLIntWBatchedSlicedCiphertext GLIntWBatchedSlicedSchemelet::Subtract(
+    const GLIntWBatchedSlicedCiphertext& lhs,
+    const GLIntWBatchedSlicedCiphertext& rhs) const {
+    ValidateOperands(lhs, rhs, "GL integer W-batched subtraction");
+    std::vector<Ciphertext<DCRTPoly>> slices;
+    slices.reserve(GetSliceCount());
+    for (std::size_t index = 0; index < GetSliceCount(); ++index) {
+        auto value = m_context->EvalSub(lhs.GetSlices()[index], rhs.GetSlices()[index]);
+        if (!value) {
+            throw GLCiphertextError("OpenFHE failed a W-batched slice subtraction");
+        }
+        slices.push_back(std::move(value));
+    }
+    return GLIntWBatchedSlicedCiphertext(m_parameters, m_codec.GetRoots(), m_context,
+                                         std::move(slices));
+}
+
+GLIntWBatchedSlicedCiphertext GLIntWBatchedSlicedSchemelet::Negate(
+    const GLIntWBatchedSlicedCiphertext& ciphertext) const {
+    ValidateAggregate(ciphertext, "GL integer W-batched ciphertext");
+    std::vector<Ciphertext<DCRTPoly>> slices;
+    slices.reserve(GetSliceCount());
+    for (const auto& slice : ciphertext.GetSlices()) {
+        auto value = m_context->EvalNegate(slice);
+        if (!value) {
+            throw GLCiphertextError("OpenFHE failed a W-batched slice negation");
+        }
+        slices.push_back(std::move(value));
+    }
+    return GLIntWBatchedSlicedCiphertext(m_parameters, m_codec.GetRoots(), m_context,
+                                         std::move(slices));
+}
+
+GLIntWBatchedSlicedCiphertext GLIntWBatchedSlicedSchemelet::RotateInterMatrix(
+    const GLIntWBatchedSlicedCiphertext& ciphertext, std::size_t amount) const {
+    ValidateAggregate(ciphertext, "GL integer W-batched ciphertext");
+    constexpr std::size_t phi = 2;
+    if (amount >= phi) {
+        throw GLDimensionError("GL integer W-batched encrypted rotation amount is out of range");
+    }
+    if (amount == 0) {
+        return GLIntWBatchedSlicedCiphertext(m_parameters, m_codec.GetRoots(), m_context,
+                                             ciphertext.GetSlices());
+    }
+
+    // gamma=2,p=3: W -> W^2 and W^2=-1-W modulo Phi_3(W).
+    // For every Y row: (c0,c1) -> (c0-c1,-c1).  Because s(X) is W-constant,
+    // this public linear recombination remains under the same key.
+    std::vector<Ciphertext<DCRTPoly>> slices(GetSliceCount());
+    for (std::size_t y = 0; y < m_parameters.dimension; ++y) {
+        const auto& c0 = ciphertext.At(y, 0);
+        const auto& c1 = ciphertext.At(y, 1);
+        slices[WBatchedSliceIndex(phi, y, 0)] = m_context->EvalSub(c0, c1);
+        slices[WBatchedSliceIndex(phi, y, 1)] = m_context->EvalNegate(c1);
+        if (!slices[WBatchedSliceIndex(phi, y, 0)] ||
+            !slices[WBatchedSliceIndex(phi, y, 1)]) {
+            throw GLCiphertextError("OpenFHE failed the encrypted W-batched automorphism");
+        }
+    }
+    return GLIntWBatchedSlicedCiphertext(m_parameters, m_codec.GetRoots(), m_context,
+                                         std::move(slices));
 }
 
 // ---------------------------------------------------------------------------
