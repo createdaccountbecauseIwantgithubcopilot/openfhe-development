@@ -34,6 +34,18 @@ uint32_t MulQ(uint32_t lhs, uint32_t rhs, uint32_t modulus) noexcept {
     return static_cast<uint32_t>((static_cast<uint64_t>(lhs) * rhs) % modulus);
 }
 
+uint32_t PowQ(uint32_t base, uint32_t exponent, uint32_t modulus) noexcept {
+    uint32_t result = 1;
+    while (exponent != 0) {
+        if ((exponent & 1) != 0) {
+            result = MulQ(result, base, modulus);
+        }
+        base = MulQ(base, base, modulus);
+        exponent >>= 1;
+    }
+    return result;
+}
+
 uint64_t CanonicalT(int64_t value, uint64_t modulus) noexcept {
     const auto signedModulus = static_cast<int64_t>(modulus);
     const auto remainder     = value % signedModulus;
@@ -226,12 +238,13 @@ void GLIntProductionSecretKey::Validate() const {
 
 GLIntProductionCiphertext::GLIntProductionCiphertext(
     GLIntWBatchedParameters parameters, GLIntWBatchedCodecRoots roots,
-    std::string keyTag, uint32_t level,
+    std::string keyTag, uint32_t level, uint64_t plaintextScale,
     std::vector<GLIntProductionCiphertextPlane> planes)
     : m_parameters(std::move(parameters)),
       m_roots(std::move(roots)),
       m_keyTag(std::move(keyTag)),
       m_level(level),
+      m_plaintextScale(plaintextScale),
       m_planes(std::move(planes)) {
     Validate();
 }
@@ -254,6 +267,10 @@ uint32_t GLIntProductionCiphertext::GetLevel() const noexcept {
     return m_level;
 }
 
+uint64_t GLIntProductionCiphertext::GetPlaintextScale() const noexcept {
+    return m_plaintextScale;
+}
+
 const std::vector<GLIntProductionCiphertextPlane>&
 GLIntProductionCiphertext::GetPlanes() const noexcept {
     return m_planes;
@@ -262,7 +279,8 @@ GLIntProductionCiphertext::GetPlanes() const noexcept {
 void GLIntProductionCiphertext::Validate() const {
     RequireProductionParameters(m_parameters);
     m_roots.Validate(m_parameters);
-    if (m_keyTag.empty() || m_planes.empty() ||
+    if (m_keyTag.empty() || m_plaintextScale == 0 ||
+        m_plaintextScale >= m_parameters.plaintextModulus || m_planes.empty() ||
         m_planes.size() > kGLIntProductionRLWEPlaneCount ||
         m_level + m_planes.size() != kGLIntProductionRLWEPlaneCount) {
         throw GLCiphertextError(
@@ -425,6 +443,10 @@ void GLIntProductionRLWECore::ValidateOperands(
         throw GLCiphertextError(std::string(operation) +
                                 " requires equal RNS levels");
     }
+    if (lhs.GetPlaintextScale() != rhs.GetPlaintextScale()) {
+        throw GLCiphertextError(std::string(operation) +
+                                " requires equal plaintext scales");
+    }
     if (lhs.GetKeyTag() != rhs.GetKeyTag()) {
         throw GLKeyMismatchError(std::string(operation) +
                                  " requires one destination key");
@@ -535,7 +557,8 @@ GLIntProductionCiphertext GLIntProductionRLWECore::Encrypt(
         planes.push_back(std::move(plane));
     }
     return GLIntProductionCiphertext(
-        m_parameters, m_roots, secretKey.GetKeyTag(), 0, std::move(planes));
+        m_parameters, m_roots, secretKey.GetKeyTag(), 0, 1,
+        std::move(planes));
 }
 
 GLIntProductionEncodedPlaintext GLIntProductionRLWECore::Decrypt(
@@ -548,6 +571,9 @@ GLIntProductionEncodedPlaintext GLIntProductionRLWECore::Decrypt(
             "production integer Decrypt key tag does not match ciphertext");
     }
     const auto coefficientCount = ciphertext.GetPlanes().front().b.size();
+    const auto t = static_cast<uint32_t>(m_parameters.plaintextModulus);
+    const auto inverseScale = PowQ(
+        static_cast<uint32_t>(ciphertext.GetPlaintextScale()), t - 2, t);
     std::vector<GLIntGaussianResidue> decoded(coefficientCount);
     bool firstPlane = true;
     for (const auto& plane : ciphertext.GetPlanes()) {
@@ -569,10 +595,12 @@ GLIntProductionEncodedPlaintext GLIntProductionRLWECore::Decrypt(
                     ? static_cast<int64_t>(imaginaryResidue)
                     : static_cast<int64_t>(imaginaryResidue) - plane.modulus;
             const GLIntGaussianResidue coefficient{
-                static_cast<int64_t>(CanonicalT(
-                    centeredReal, m_parameters.plaintextModulus)),
-                static_cast<int64_t>(CanonicalT(
-                    centeredImaginary, m_parameters.plaintextModulus))};
+                static_cast<int64_t>(MulQ(
+                    static_cast<uint32_t>(CanonicalT(centeredReal, t)),
+                    inverseScale, t)),
+                static_cast<int64_t>(MulQ(
+                    static_cast<uint32_t>(CanonicalT(centeredImaginary, t)),
+                    inverseScale, t))};
             if (firstPlane) {
                 decoded[index] = coefficient;
             }
@@ -609,7 +637,8 @@ GLIntProductionCiphertext GLIntProductionRLWECore::Add(
         }
     }
     return GLIntProductionCiphertext(m_parameters, m_roots, lhs.GetKeyTag(),
-                                     lhs.GetLevel(), std::move(planes));
+                                     lhs.GetLevel(), lhs.GetPlaintextScale(),
+                                     std::move(planes));
 }
 
 GLIntProductionCiphertext GLIntProductionRLWECore::Subtract(
@@ -634,7 +663,8 @@ GLIntProductionCiphertext GLIntProductionRLWECore::Subtract(
         }
     }
     return GLIntProductionCiphertext(m_parameters, m_roots, lhs.GetKeyTag(),
-                                     lhs.GetLevel(), std::move(planes));
+                                     lhs.GetLevel(), lhs.GetPlaintextScale(),
+                                     std::move(planes));
 }
 
 GLIntProductionCiphertext GLIntProductionRLWECore::Negate(
@@ -656,7 +686,7 @@ GLIntProductionCiphertext GLIntProductionRLWECore::Negate(
     }
     return GLIntProductionCiphertext(
         m_parameters, m_roots, ciphertext.GetKeyTag(), ciphertext.GetLevel(),
-        std::move(planes));
+        ciphertext.GetPlaintextScale(), std::move(planes));
 }
 
 GLIntProductionCiphertext GLIntProductionRLWECore::ModSwitchDrop(
@@ -666,6 +696,51 @@ GLIntProductionCiphertext GLIntProductionRLWECore::ModSwitchDrop(
         throw GLDepthError(
             "production integer bounded modulus-drop chain is exhausted");
     }
+    const auto droppedModulus = ciphertext.m_planes.back().modulus;
+    const auto t = static_cast<uint32_t>(m_parameters.plaintextModulus);
+    const auto negTInverse = droppedModulus -
+                             PowQ(t % droppedModulus,
+                                  droppedModulus - 2, droppedModulus);
+    for (std::size_t planeIndex = 0;
+         planeIndex + 1 < ciphertext.m_planes.size(); ++planeIndex) {
+        auto& surviving = ciphertext.m_planes[planeIndex];
+        const auto dropInverse = PowQ(
+            droppedModulus % surviving.modulus,
+            surviving.modulus - 2, surviving.modulus);
+        const auto& dropped = ciphertext.m_planes.back();
+        for (const auto& components : {std::pair{&surviving.b, &dropped.b},
+                                       std::pair{&surviving.a, &dropped.a}}) {
+            for (std::size_t index = 0; index < components.first->size();
+                 ++index) {
+                auto reduce = [&](uint32_t survivorValue,
+                                  uint32_t droppedValue) {
+                    const auto deltaResidue = MulQ(
+                        droppedValue, negTInverse, droppedModulus);
+                    const auto centeredDelta =
+                        deltaResidue <= droppedModulus / 2
+                            ? static_cast<int64_t>(deltaResidue)
+                            : static_cast<int64_t>(deltaResidue) -
+                                  droppedModulus;
+                    const auto delta =
+                        SignedToQ(centeredDelta, surviving.modulus);
+                    return MulQ(
+                        AddQ(survivorValue,
+                             MulQ(t % surviving.modulus, delta,
+                                  surviving.modulus),
+                             surviving.modulus),
+                        dropInverse, surviving.modulus);
+                };
+                auto& survivor = (*components.first)[index];
+                const auto& drop = (*components.second)[index];
+                survivor.real = reduce(survivor.real, drop.real);
+                survivor.imaginary =
+                    reduce(survivor.imaginary, drop.imaginary);
+            }
+        }
+    }
+    ciphertext.m_plaintextScale = MulQ(
+        static_cast<uint32_t>(ciphertext.m_plaintextScale),
+        PowQ(droppedModulus % t, t - 2, t), t);
     ciphertext.m_planes.pop_back();
     ++ciphertext.m_level;
     ciphertext.Validate();

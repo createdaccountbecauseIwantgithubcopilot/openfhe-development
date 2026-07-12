@@ -87,6 +87,7 @@ public:
     const GLIntWBatchedCodecRoots& GetRoots() const noexcept;
     const std::string& GetKeyTag() const noexcept;
     uint32_t GetLevel() const noexcept;
+    uint64_t GetPlaintextScale() const noexcept;
     const std::vector<GLIntProductionCiphertextPlane>& GetPlanes() const noexcept;
     void Validate() const;
 
@@ -95,13 +96,14 @@ private:
 
     GLIntProductionCiphertext(
         GLIntWBatchedParameters parameters, GLIntWBatchedCodecRoots roots,
-        std::string keyTag, uint32_t level,
+        std::string keyTag, uint32_t level, uint64_t plaintextScale,
         std::vector<GLIntProductionCiphertextPlane> planes);
 
     GLIntWBatchedParameters m_parameters;
     GLIntWBatchedCodecRoots m_roots;
     std::string m_keyTag;
     uint32_t m_level{0};
+    uint64_t m_plaintextScale{1};
     std::vector<GLIntProductionCiphertextPlane> m_planes;
 };
 
@@ -110,7 +112,7 @@ struct GLIntProductionRLWECapabilities {
     bool symmetricTErrEncryption{true};
     bool exactDecryptionModT{true};
     bool boundedRnsModulusDrop{true};
-    bool noiseScalingModSwitch{false};
+    bool noiseScalingModSwitch{true};
     bool publicKeyEncryption{false};
     bool switchIntSmall{false};
     bool switchIntBig{false};
@@ -128,11 +130,12 @@ struct GLIntProductionRLWECapabilities {
  * plane.  The secret is a real W-dependent sparse element of R and never a
  * cleartext shadow.
  *
- * ModSwitchDrop removes the tail RNS plane without decryption.  It is an
- * exact basis/level drop because every plane independently satisfies the BGV
- * equation; it deliberately does not claim the noise-scaling ModSwitch of a
- * complete 25-prime production chain.  The two-prime prefix and sparse secret
- * are bounded implementation geometry, not a security authorization.
+ * ModSwitchDrop implements the BGV RNS ModReduce equation coefficientwise:
+ * it chooses a t-multiple correction that makes each component divisible by
+ * the dropped prime, divides into the surviving basis, and updates the
+ * plaintext scale by q_drop^-1 mod t.  Decrypt removes that tracked scale.
+ * This is genuine noise-scaling modulus switching, although the bounded
+ * two-prime prefix and sparse secret are not a security authorization.
  */
 class GLIntProductionRLWECore final {
 public:
@@ -164,7 +167,7 @@ public:
     GLIntProductionCiphertext Negate(
         const GLIntProductionCiphertext& ciphertext) const;
 
-    /** Exact evaluator-only RNS tail-plane drop; consumes one bounded level. */
+    /** BGV noise-scaling RNS tail-prime drop; consumes one bounded level. */
     GLIntProductionCiphertext ModSwitchDrop(
         GLIntProductionCiphertext ciphertext) const;
 

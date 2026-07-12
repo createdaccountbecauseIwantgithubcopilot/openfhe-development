@@ -15,7 +15,7 @@
 namespace lbcrypto {
 namespace {
 
-TEST(GLIntProductionRLWE, ExactTErrEncryptDecryptAndBoundedModulusDrop) {
+TEST(GLIntProductionRLWE, ExactTErrEncryptDecryptAndNoiseScalingModSwitch) {
     const GLIntProductionCore codec;
     const GLIntProductionRLWECore rlwe;
     ASSERT_EQ(rlwe.GetModuli().size(), kGLIntProductionRLWEPlaneCount);
@@ -29,7 +29,7 @@ TEST(GLIntProductionRLWE, ExactTErrEncryptDecryptAndBoundedModulusDrop) {
     EXPECT_TRUE(capabilities.symmetricTErrEncryption);
     EXPECT_TRUE(capabilities.exactDecryptionModT);
     EXPECT_TRUE(capabilities.boundedRnsModulusDrop);
-    EXPECT_FALSE(capabilities.noiseScalingModSwitch);
+    EXPECT_TRUE(capabilities.noiseScalingModSwitch);
     EXPECT_FALSE(capabilities.publicKeyEncryption);
     EXPECT_FALSE(capabilities.switchIntSmall);
     EXPECT_FALSE(capabilities.switchIntBig);
@@ -49,8 +49,12 @@ TEST(GLIntProductionRLWE, ExactTErrEncryptDecryptAndBoundedModulusDrop) {
         rlwe.Encrypt(secretKey, plaintext, 0x454e4352595054ULL);
     ASSERT_EQ(ciphertext.GetPlanes().size(), 2u);
     EXPECT_EQ(ciphertext.GetLevel(), 0u);
+    EXPECT_EQ(ciphertext.GetPlaintextScale(), 1u);
     EXPECT_EQ(ciphertext.GetKeyTag(), secretKey.GetKeyTag());
     EXPECT_EQ(ciphertext.GetPlanes().front().b.size(), 128u * 128u * 256u);
+    const auto firstCoefficientBeforeSwitch =
+        ciphertext.GetPlanes().front().b.front();
+    const auto droppedModulus = ciphertext.GetPlanes().back().modulus;
     {
         const auto decrypted = rlwe.Decrypt(secretKey, ciphertext);
         EXPECT_EQ(decrypted.GetCoefficients(), plaintext.GetCoefficients());
@@ -61,6 +65,22 @@ TEST(GLIntProductionRLWE, ExactTErrEncryptDecryptAndBoundedModulusDrop) {
     auto dropped = rlwe.ModSwitchDrop(std::move(ciphertext));
     ASSERT_EQ(dropped.GetPlanes().size(), 1u);
     EXPECT_EQ(dropped.GetLevel(), 1u);
+    EXPECT_NE(dropped.GetPlaintextScale(), 1u);
+    EXPECT_FALSE(dropped.GetPlanes().front().b.front() ==
+                 firstCoefficientBeforeSwitch);
+    auto powMod = [](uint64_t base, uint64_t exponent, uint64_t modulus) {
+        uint64_t result = 1;
+        while (exponent != 0) {
+            if ((exponent & 1) != 0) {
+                result = result * base % modulus;
+            }
+            base = base * base % modulus;
+            exponent >>= 1;
+        }
+        return result;
+    };
+    EXPECT_EQ(dropped.GetPlaintextScale(),
+              powMod(droppedModulus % 1579009u, 1579009u - 2, 1579009u));
     {
         const auto decrypted = rlwe.Decrypt(secretKey, dropped);
         EXPECT_EQ(decrypted.GetCoefficients(), plaintext.GetCoefficients());
