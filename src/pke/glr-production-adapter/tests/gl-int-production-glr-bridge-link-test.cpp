@@ -7,6 +7,11 @@ int main() {
     return capabilities.exactQ2CoefficientBridge &&
                    capabilities.exactQ2SlotBridge &&
                    capabilities.ownerDerivedNativeLineage &&
+                   capabilities.denseEq5IntegerBatch &&
+                   capabilities.fullChainSymmetricTErrEncryption &&
+                   capabilities.fullChainBGVModSwitch &&
+                   capabilities.fullChainPublicTErrEncryption &&
+                   capabilities.compactSeededPublicA &&
                    !capabilities.productionSecurityAuthorized &&
                    !capabilities.bootstrapDirectAdmitted
                ? 0

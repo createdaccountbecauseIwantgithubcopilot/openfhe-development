@@ -39,7 +39,8 @@ public:
         bool denseEq5IntegerBatch{true};
         bool fullChainSymmetricTErrEncryption{true};
         bool fullChainBGVModSwitch{true};
-        bool fullChainPublicTErrEncryption{false};
+        bool fullChainPublicTErrEncryption{true};
+        bool compactSeededPublicA{true};
         bool productionSecurityAuthorized{false};
         bool bootstrapDirectAdmitted{false};
     };
@@ -149,6 +150,37 @@ public:
         std::string m_nativeKeyLineageCommitment;
     };
 
+    /** Compact full-Q ring-R public key: b is stored and uniform a is seeded. */
+    class IntegerPublicKey final {
+    public:
+        IntegerPublicKey(const IntegerPublicKey&) = delete;
+        IntegerPublicKey& operator=(const IntegerPublicKey&) = delete;
+        IntegerPublicKey(IntegerPublicKey&&) noexcept = default;
+        IntegerPublicKey& operator=(IntegerPublicKey&&) noexcept = default;
+        ~IntegerPublicKey() = default;
+
+        std::uint32_t GetKeyLevel() const noexcept;
+        std::size_t GetStoredBytes() const noexcept;
+        const std::string& GetNativeKeyLineageCommitment() const noexcept;
+        bool UsesSeededPublicA() const noexcept;
+        bool UsesTErrors() const noexcept;
+        bool IsSecurityAuthorized() const noexcept;
+
+    private:
+        friend class GLIntProductionGLRBridge;
+        IntegerPublicKey(
+            glscheme::rns::GlrPoly b,
+            glscheme::rns::GlrPublicASeed publicASeed,
+            std::string parameterFingerprint, std::string integerKeyTag,
+            std::string nativeKeyLineageCommitment);
+
+        glscheme::rns::GlrPoly m_b;
+        glscheme::rns::GlrPublicASeed m_publicASeed{};
+        std::string m_parameterFingerprint;
+        std::string m_integerKeyTag;
+        std::string m_nativeKeyLineageCommitment;
+    };
+
     explicit GLIntProductionGLRBridge(
         const GLRProductionAdapter& adapter);
 
@@ -189,6 +221,11 @@ public:
     CiphertextImport EncryptFullChainSymmetric(
         const DenseIntegerBatch& batch, const OwnerBinding& owner,
         std::uint64_t seed = 0) const;
+    IntegerPublicKey GenerateFullChainPublicKey(
+        const OwnerBinding& owner, std::uint64_t seed = 0) const;
+    CiphertextImport EncryptFullChainPublic(
+        const DenseIntegerBatch& batch, const IntegerPublicKey& publicKey,
+        std::uint64_t seed = 0) const;
     NativeCiphertext ModSwitchFullChain(
         const NativeCiphertext& ciphertext) const;
 
@@ -221,6 +258,13 @@ private:
     glscheme::rns::GlrPoly SampleTErr(
         glscheme::rns::GlrRing ring, std::uint32_t level,
         glscheme::rns::GlrRng& rng) const;
+    glscheme::rns::GlrPoly SampleTernaryRp(
+        std::uint32_t level, glscheme::rns::GlrRng& rng) const;
+    void AddTErrInPlace(glscheme::rns::GlrPoly* target,
+                        glscheme::rns::GlrRng& rng) const;
+    void MultiplyRpByRInSlots(
+        glscheme::rns::GlrPoly* rp,
+        const glscheme::rns::GlrPoly& r) const;
     glscheme::rns::GlrPoly BGVModSwitchPoly(
         const glscheme::rns::GlrPoly& input) const;
 

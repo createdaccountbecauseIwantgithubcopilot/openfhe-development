@@ -271,6 +271,44 @@ bool GLIntProductionGLRBridge::IntegerAutomorphismKey::IsSecurityAuthorized() co
     return false;
 }
 
+GLIntProductionGLRBridge::IntegerPublicKey::IntegerPublicKey(
+    GlrPoly b, glscheme::rns::GlrPublicASeed publicASeed,
+    std::string parameterFingerprint, std::string integerKeyTag,
+    std::string nativeKeyLineageCommitment)
+    : m_b(std::move(b)),
+      m_publicASeed(std::move(publicASeed)),
+      m_parameterFingerprint(std::move(parameterFingerprint)),
+      m_integerKeyTag(std::move(integerKeyTag)),
+      m_nativeKeyLineageCommitment(
+          std::move(nativeKeyLineageCommitment)) {}
+
+std::uint32_t
+GLIntProductionGLRBridge::IntegerPublicKey::GetKeyLevel() const noexcept {
+    return m_b.level;
+}
+
+std::size_t
+GLIntProductionGLRBridge::IntegerPublicKey::GetStoredBytes() const noexcept {
+    return m_b.data.size() * sizeof(m_b.data.front()) + m_publicASeed.size();
+}
+
+const std::string& GLIntProductionGLRBridge::IntegerPublicKey::
+    GetNativeKeyLineageCommitment() const noexcept {
+    return m_nativeKeyLineageCommitment;
+}
+
+bool GLIntProductionGLRBridge::IntegerPublicKey::UsesSeededPublicA() const noexcept {
+    return true;
+}
+
+bool GLIntProductionGLRBridge::IntegerPublicKey::UsesTErrors() const noexcept {
+    return true;
+}
+
+bool GLIntProductionGLRBridge::IntegerPublicKey::IsSecurityAuthorized() const noexcept {
+    return false;
+}
+
 void GLIntProductionGLRBridge::DenseIntegerBatch::Validate() const {
     if (values.size() != kDenseIntegerSlotCount) {
         throw GLDimensionError(
@@ -527,6 +565,94 @@ GlrPoly GLIntProductionGLRBridge::SampleTErr(
     }
     glscheme::rns::glr_scalar_mul_inplace(context, error, 1579009);
     return error;
+}
+
+GlrPoly GLIntProductionGLRBridge::SampleTernaryRp(
+    std::uint32_t level, glscheme::rns::GlrRng& rng) const {
+    const auto& context = m_adapter->GetContext();
+    if (level >= context.params.levels()) {
+        throw GLDepthError("full-chain integer ternary sample level is invalid");
+    }
+    GlrPoly output = GlrPoly::zero(context, GlrRing::Rp, level, false,
+                                   GlrDomain::Coeff);
+    for (std::uint32_t y = 0; y < context.n(); ++y) {
+        GlrPoly slice = GlrPoly::zero(context, GlrRing::R, level, false,
+                                      GlrDomain::Coeff);
+        PolyWipe sliceWipe(slice);
+        glscheme::rns::glr_sample_ternary_r(context, slice, rng);
+        glscheme::rns::glr_insert_y_slice(context, output, slice, y);
+    }
+    return output;
+}
+
+void GLIntProductionGLRBridge::AddTErrInPlace(
+    GlrPoly* target, glscheme::rns::GlrRng& rng) const {
+    const auto& context = m_adapter->GetContext();
+    if (target == nullptr || target->domain != GlrDomain::Coeff ||
+        target->extended || target->level >= context.params.levels() ||
+        (target->ring != GlrRing::R && target->ring != GlrRing::Rp)) {
+        throw GLContextMismatchError(
+            "full-chain integer t*e addition received invalid target");
+    }
+    if (target->ring == GlrRing::R) {
+        GlrPoly error = SampleTErr(GlrRing::R, target->level, rng);
+        PolyWipe errorWipe(error);
+        glscheme::rns::glr_add_inplace(context, *target, error);
+        return;
+    }
+
+    const auto rCoefficients =
+        static_cast<std::size_t>(context.n()) * context.phi();
+    for (std::uint32_t y = 0; y < context.n(); ++y) {
+        GlrPoly error = GlrPoly::zero(context, GlrRing::R, target->level,
+                                      false, GlrDomain::Coeff);
+        PolyWipe errorWipe(error);
+        glscheme::rns::glr_sample_error_r(context, error, 3.2, rng);
+        glscheme::rns::glr_scalar_mul_inplace(context, error, 1579009);
+        for (std::uint32_t plane = 0; plane < target->prime_count(context);
+             ++plane) {
+            const auto modulus = context.modulus_at(plane).q;
+            for (std::uint32_t lane = 0; lane < 2; ++lane) {
+                auto* destination = target->lane_ptr(context, plane, lane);
+                const auto* source = error.lane_ptr(context, plane, lane);
+                for (std::size_t wx = 0; wx < rCoefficients; ++wx) {
+                    const auto flat = wx * context.n() + y;
+                    destination[flat] = glscheme::rns::glr_mod_add(
+                        destination[flat], source[wx], modulus);
+                }
+            }
+        }
+    }
+}
+
+void GLIntProductionGLRBridge::MultiplyRpByRInSlots(
+    GlrPoly* rp, const GlrPoly& r) const {
+    const auto& context = m_adapter->GetContext();
+    if (rp == nullptr || rp->ring != GlrRing::Rp || r.ring != GlrRing::R ||
+        rp->domain != GlrDomain::Slot || r.domain != GlrDomain::Slot ||
+        rp->level != r.level || rp->extended != r.extended || rp->extended ||
+        rp->prime_count(context) != r.prime_count(context)) {
+        throw GLContextMismatchError(
+            "full-chain integer Rp-by-R multiplication shape mismatch");
+    }
+    const auto rCoefficients = r.ring_coeffs(context);
+    const auto n = static_cast<std::size_t>(context.n());
+    for (std::uint32_t plane = 0; plane < rp->prime_count(context); ++plane) {
+        const auto& mont = context.plans_at(plane, 0).w_axis.mont;
+        for (std::uint32_t lane = 0; lane < 2; ++lane) {
+            auto* destination = rp->lane_ptr(context, plane, lane);
+            const auto* multiplier = r.lane_ptr(context, plane, lane);
+            for (std::size_t wx = 0; wx < rCoefficients; ++wx) {
+                const auto factor =
+                    glscheme::rns::glr_to_mont(mont, multiplier[wx]);
+                auto* row = destination + wx * n;
+                for (std::size_t y = 0; y < n; ++y) {
+                    row[y] = glscheme::rns::glr_mont_mul(
+                        mont, row[y], factor);
+                }
+            }
+        }
+    }
 }
 
 GlrPoly GLIntProductionGLRBridge::BGVModSwitchPoly(
@@ -1298,11 +1424,9 @@ GLIntProductionGLRBridge::EncryptFullChainSymmetric(
     PolyWipe embeddedWipe(embedded);
     GlrPoly product = RingMultiply(a, embedded);
     PolyWipe productWipe(product);
-    GlrPoly error = SampleTErr(GlrRing::Rp, 0, *rng);
-    PolyWipe errorWipe(error);
     GlrPoly b = std::move(plaintext.poly);
     glscheme::rns::glr_sub_inplace(context, b, product);
-    glscheme::rns::glr_add_inplace(context, b, error);
+    AddTErrInPlace(&b, *rng);
     glscheme::rns::glr_to_slots(context, b);
     glscheme::rns::glr_to_slots(context, a);
 
@@ -1321,6 +1445,108 @@ GLIntProductionGLRBridge::EncryptFullChainSymmetric(
     result.receipt.integerKeyTag = owner.GetReceipt().integerKeyTag;
     result.receipt.nativeKeyLineageCommitment =
         owner.GetReceipt().nativeKeyLineageCommitment;
+    result.receipt.ownerSecretLineageBound = true;
+    return result;
+}
+
+GLIntProductionGLRBridge::IntegerPublicKey
+GLIntProductionGLRBridge::GenerateFullChainPublicKey(
+    const OwnerBinding& owner, std::uint64_t seed) const {
+    ValidateOwner(owner.GetReceipt().integerKeyTag, owner,
+                  "full-chain integer public-key generation");
+    const auto& context = m_adapter->GetContext();
+    GlrRngOwner ownerRng(glscheme::rns::glr_rng_create(seed));
+    if (!ownerRng) {
+        throw GlrError("full-chain integer public-key RNG creation failed");
+    }
+    glscheme::rns::GlrPublicASeed publicASeed{};
+    glscheme::rns::glr_rng_fill_bytes(
+        *ownerRng, publicASeed.data(), publicASeed.size());
+    GlrRngOwner publicARng(
+        glscheme::rns::glr_rng_create_from_key(publicASeed));
+    if (!publicARng) {
+        throw GlrError(
+            "full-chain integer public-a expansion RNG creation failed");
+    }
+    GlrPoly a = GlrPoly::zero(context, GlrRing::R, 0, false,
+                              GlrDomain::Coeff);
+    glscheme::rns::glr_sample_uniform(context, a, *publicARng);
+    GlrPoly secret = RestrictSecretToQ(owner.GetNativeSecretKey().s, 0);
+    PolyWipe secretWipe(secret);
+    GlrPoly b = RingMultiply(a, secret);
+    glscheme::rns::glr_neg_inplace(context, b);
+    AddTErrInPlace(&b, *ownerRng);
+    glscheme::rns::glr_to_slots(context, b);
+    return IntegerPublicKey(
+        std::move(b), std::move(publicASeed),
+        glscheme::rns::glr_parameter_fingerprint(context.params),
+        owner.GetReceipt().integerKeyTag,
+        owner.GetReceipt().nativeKeyLineageCommitment);
+}
+
+GLIntProductionGLRBridge::CiphertextImport
+GLIntProductionGLRBridge::EncryptFullChainPublic(
+    const DenseIntegerBatch& batch, const IntegerPublicKey& publicKey,
+    std::uint64_t seed) const {
+    const auto& context = m_adapter->GetContext();
+    if (publicKey.m_parameterFingerprint !=
+            glscheme::rns::glr_parameter_fingerprint(context.params) ||
+        publicKey.m_integerKeyTag.empty() ||
+        !IsSha256Text(publicKey.m_nativeKeyLineageCommitment) ||
+        publicKey.m_b.ring != GlrRing::R ||
+        publicKey.m_b.domain != GlrDomain::Slot ||
+        publicKey.m_b.level != 0 || publicKey.m_b.extended ||
+        publicKey.m_b.prime_count(context) != context.params.levels()) {
+        throw GLKeyContextMismatchError(
+            "full-chain integer public encryption key mismatch");
+    }
+    auto plaintext = EncodeDenseIntegerBatch(batch);
+    GlrRngOwner encryptionRng(glscheme::rns::glr_rng_create(seed));
+    if (!encryptionRng) {
+        throw GlrError("full-chain integer public encryption RNG creation failed");
+    }
+    GlrRngOwner publicARng(
+        glscheme::rns::glr_rng_create_from_key(publicKey.m_publicASeed));
+    if (!publicARng) {
+        throw GlrError(
+            "full-chain integer public-a expansion RNG creation failed");
+    }
+    GlrPoly publicA = GlrPoly::zero(context, GlrRing::R, 0, false,
+                                    GlrDomain::Coeff);
+    glscheme::rns::glr_sample_uniform(context, publicA, *publicARng);
+    glscheme::rns::glr_to_slots(context, publicA);
+
+    GlrPoly ternary = SampleTernaryRp(0, *encryptionRng);
+    PolyWipe ternaryWipe(ternary);
+    glscheme::rns::glr_to_slots(context, ternary);
+    GlrPoly a = ternary;
+    GlrPoly b = std::move(ternary);
+    MultiplyRpByRInSlots(&b, publicKey.m_b);
+    MultiplyRpByRInSlots(&a, publicA);
+    glscheme::rns::glr_to_coeffs(context, b);
+    glscheme::rns::glr_to_coeffs(context, a);
+    glscheme::rns::glr_add_inplace(context, b, plaintext.poly);
+    AddTErrInPlace(&b, *encryptionRng);
+    AddTErrInPlace(&a, *encryptionRng);
+    glscheme::rns::glr_to_slots(context, b);
+    glscheme::rns::glr_to_slots(context, a);
+
+    CiphertextImport result;
+    result.native.b = std::move(b);
+    result.native.a = std::move(a);
+    result.native.scale = 1.0;
+    result.native.level = 0;
+    result.native.key_id = kUntrustedIntegerKeyDomain;
+    result.native.key_lineage_commitment =
+        publicKey.m_nativeKeyLineageCommitment;
+    result.receipt = MakeReceipt(
+        "Q25-L0-dense-Eq5-public-integer-ciphertext");
+    result.receipt.schema = "openfhe.gl_int.glr_full_chain.v1";
+    result.receipt.nativeLevel = 0;
+    result.receipt.activeQPrimes = context.params.levels();
+    result.receipt.integerKeyTag = publicKey.m_integerKeyTag;
+    result.receipt.nativeKeyLineageCommitment =
+        publicKey.m_nativeKeyLineageCommitment;
     result.receipt.ownerSecretLineageBound = true;
     return result;
 }
