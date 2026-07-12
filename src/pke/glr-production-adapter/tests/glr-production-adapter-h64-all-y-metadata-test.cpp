@@ -49,10 +49,16 @@ int main() {
                     profile.support_commitment &&
                 plan.storage.key_level == 0 &&
                 plan.storage.active_q_primes == 25 &&
-                plan.storage.active_special_primes == 1 &&
+                plan.storage.active_special_primes == 13 &&
                 plan.storage.control_record_count == 640 &&
+                plan.storage.compact_bytes_per_control_pair == 39845952ULL &&
+                plan.storage.full_bytes_per_control_pair == 159383552ULL &&
+                plan.storage.compact_control_material_bytes ==
+                    25501409280ULL &&
+                plan.storage.full_control_material_bytes ==
+                    102005473280ULL &&
                 plan.storage.exact_cryptographic_material_census &&
-                plan.storage.restricted_p1_research_plan &&
+                !plan.storage.restricted_p1_research_plan &&
                 !plan.storage.restricted_p1_noise_certified &&
                 plan.direct_cmux_output_level == 0 &&
                 plan.direct_leaf_rescale_level == 2 &&

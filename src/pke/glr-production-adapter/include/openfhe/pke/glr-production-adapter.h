@@ -1573,6 +1573,13 @@ public:
     // rescale (two physical Q-prime drops on the N32 profile).
     Ciphertext MatMul(const Ciphertext& lhs, const Ciphertext& rhs,
                       const EvaluationKeys& keys) const;
+    // Native Theorem-3.8 A*B^H product.  Unlike MatMul(A, B), rhs is consumed
+    // directly as the circledast right operand, so this exact facade consumes
+    // only the two big-switch product keys and does not spend a third
+    // preparation switch.
+    Ciphertext MatMulAdjoint(const Ciphertext& lhs,
+                            const Ciphertext& rhs,
+                            const EvaluationKeys& keys) const;
     Ciphertext Hadamard(const Ciphertext& lhs, const Ciphertext& rhs,
                        const EvaluationKeys& keys) const;
 
@@ -1588,6 +1595,9 @@ public:
         const Ciphertext& lhs, const Plaintext& rhs,
         const NativeGL128PlainProductOptions& options = {}) const;
     NativeGL128EvaluationResult EvaluateMatMul(
+        const Ciphertext& lhs, const Ciphertext& rhs,
+        const NativeKeyProvider& keys) const;
+    NativeGL128EvaluationResult EvaluateMatMulAdjoint(
         const Ciphertext& lhs, const Ciphertext& rhs,
         const NativeKeyProvider& keys) const;
     NativeGL128EvaluationResult EvaluateHadamard(

@@ -49,6 +49,7 @@ public:
         bool fullChainDenseTraceProduct{true};
         bool fullChainKeyedAutomorphisms{true};
         bool selectableGPUTraceGemm{true};
+        bool strictFullChainReceiptValidation{true};
         bool productionSecurityAuthorized{false};
         bool bootstrapDirectAdmitted{false};
     };

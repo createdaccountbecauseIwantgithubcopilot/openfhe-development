@@ -15,6 +15,7 @@
 #include <limits>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -195,6 +196,56 @@ bool IsSha256Text(const std::string& value) {
         }
     }
     return true;
+}
+
+bool IsFullChainIntegerKeyTag(const std::string& value) {
+    constexpr std::string_view prefix = "gl-int-full-";
+    if (value.size() != prefix.size() + 64 ||
+        value.compare(0, prefix.size(), prefix) != 0) {
+        return false;
+    }
+    return std::all_of(
+        value.begin() + static_cast<std::ptrdiff_t>(prefix.size()),
+        value.end(), [](char c) {
+            return (c >= '0' && c <= '9') ||
+                   (c >= 'a' && c <= 'f');
+        });
+}
+
+bool IsCanonicalFullChainReceipt(
+    const glscheme::rns::GlrContext& context,
+    const GLIntProductionGLRBridge::Receipt& receipt) {
+    return receipt.schema == "openfhe.gl_int.glr_full_chain.v1" &&
+           receipt.parameterFingerprint ==
+               glscheme::rns::glr_parameter_fingerprint(context.params) &&
+           !receipt.representation.empty() &&
+           receipt.admissionRejection == kFullChainBootstrapRejection &&
+           receipt.plaintextModulus == 1579009 &&
+           receipt.nativeLevel < context.params.levels() &&
+           receipt.activeQPrimes ==
+               context.active_q_primes(receipt.nativeLevel) &&
+           receipt.exactModuloT && receipt.denseEq5Layout &&
+           receipt.tErrorInvariant && receipt.denseTernaryOwner &&
+           receipt.ownerSecretLineageBound &&
+           IsSha256Text(receipt.nativeKeyLineageCommitment) &&
+           !receipt.productionSecurityAuthorized &&
+           !receipt.bootstrapDirectAdmitted;
+}
+
+bool IsCanonicalLegacyQ2Receipt(
+    const glscheme::rns::GlrContext& context, std::uint32_t q2Level,
+    const GLIntProductionGLRBridge::Receipt& receipt) {
+    return receipt.schema == "openfhe.gl_int.glr_q2_bridge.v1" &&
+           receipt.parameterFingerprint ==
+               glscheme::rns::glr_parameter_fingerprint(context.params) &&
+           !receipt.representation.empty() &&
+           receipt.admissionRejection == kBootstrapRejection &&
+           receipt.plaintextModulus == 1579009 &&
+           receipt.nativeLevel == q2Level && receipt.activeQPrimes == 2 &&
+           receipt.exactModuloT && !receipt.denseEq5Layout &&
+           !receipt.tErrorInvariant && !receipt.denseTernaryOwner &&
+           !receipt.productionSecurityAuthorized &&
+           !receipt.bootstrapDirectAdmitted;
 }
 
 std::string DomainSeparatedIntegerLineage(
@@ -2208,9 +2259,8 @@ GLIntProductionGLRBridge::RestoreFullChainIntegerSwitchKey(
     const auto& context = m_adapter->GetContext();
     const auto fingerprint =
         glscheme::rns::glr_parameter_fingerprint(context.params);
-    if (ownerReceipt.parameterFingerprint != fingerprint ||
-        !ownerReceipt.ownerSecretLineageBound ||
-        !IsSha256Text(ownerReceipt.nativeKeyLineageCommitment)) {
+    if (!IsCanonicalFullChainReceipt(context, ownerReceipt) ||
+        !IsFullChainIntegerKeyTag(ownerReceipt.integerKeyTag)) {
         throw GLKeyContextMismatchError(
             "full-chain SwitchInt restore owner receipt mismatch");
     }
@@ -2501,6 +2551,7 @@ GLIntProductionGLRBridge::InspectFullChainCiphertext(
     receipt.denseEq5Layout = true;
     receipt.tErrorInvariant = true;
     receipt.ownerSecretLineageBound = true;
+    receipt.denseTernaryOwner = true;
     return receipt;
 }
 
@@ -2600,20 +2651,11 @@ GLIntProductionGLRBridge::ModSwitchFullChain(
 void GLIntProductionGLRBridge::RequireBootstrapDirectAdmission(
     const Receipt& receipt) const {
     const auto& context = m_adapter->GetContext();
-    const auto fingerprint =
-        glscheme::rns::glr_parameter_fingerprint(context.params);
-    const auto q2Receipt = receipt.nativeLevel == m_q2Level &&
-                           receipt.activeQPrimes == 2 &&
-                           !receipt.denseEq5Layout;
-    const auto fullChainReceipt =
-        receipt.schema == "openfhe.gl_int.glr_full_chain.v1" &&
-        receipt.denseEq5Layout && receipt.tErrorInvariant &&
-        receipt.nativeLevel < context.params.levels() &&
-        receipt.activeQPrimes ==
-            context.active_q_primes(receipt.nativeLevel);
-    if (receipt.parameterFingerprint != fingerprint ||
-        (!q2Receipt && !fullChainReceipt) ||
-        receipt.bootstrapDirectAdmitted) {
+    const bool q2Receipt =
+        IsCanonicalLegacyQ2Receipt(context, m_q2Level, receipt);
+    const bool fullChainReceipt =
+        IsCanonicalFullChainReceipt(context, receipt);
+    if (!q2Receipt && !fullChainReceipt) {
         throw GLContextMismatchError(
             "malformed GL integer bridge receipt at bootstrap admission");
     }
@@ -2623,16 +2665,17 @@ void GLIntProductionGLRBridge::RequireBootstrapDirectAdmission(
 
 void GLIntProductionGLRBridge::RequireProductionSecurityAuthorization(
     const Receipt& receipt) const {
-    if (receipt.parameterFingerprint !=
-            glscheme::rns::glr_parameter_fingerprint(
-                m_adapter->GetContext().params) ||
-        receipt.productionSecurityAuthorized) {
+    const auto& context = m_adapter->GetContext();
+    const bool q2Receipt =
+        IsCanonicalLegacyQ2Receipt(context, m_q2Level, receipt);
+    const bool fullChainReceipt =
+        IsCanonicalFullChainReceipt(context, receipt);
+    if (!q2Receipt && !fullChainReceipt) {
         throw GLContextMismatchError(
             "malformed GL integer bridge receipt at security admission");
     }
-    throw GlrError(receipt.denseEq5Layout || receipt.denseTernaryOwner
-                       ? kFullChainSecurityRejection
-                       : kSecurityRejection);
+    throw GlrError(fullChainReceipt ? kFullChainSecurityRejection
+                                    : kSecurityRejection);
 }
 
 }  // namespace lbcrypto

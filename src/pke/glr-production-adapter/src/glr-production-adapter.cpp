@@ -3944,6 +3944,15 @@ GLRProductionAdapter::Ciphertext GLRProductionAdapter::MatMul(
         .ciphertext;
 }
 
+GLRProductionAdapter::Ciphertext GLRProductionAdapter::MatMulAdjoint(
+    const Ciphertext& lhs, const Ciphertext& rhs,
+    const EvaluationKeys& keys) const {
+    const auto& provider = RequireEvaluationKeys(m_context, keys);
+    return glscheme::rns::glr_gl128_matrix_multiply_cipher_adjoint(
+               m_context, lhs, rhs, provider)
+        .ciphertext;
+}
+
 GLRProductionAdapter::Ciphertext GLRProductionAdapter::Hadamard(
     const Ciphertext& lhs, const Ciphertext& rhs,
     const EvaluationKeys& keys) const {
@@ -3983,6 +3992,19 @@ GLRProductionAdapter::EvaluateMatMul(
             "reports secret-material access");
     }
     return glscheme::rns::glr_gl128_matrix_multiply_cipher(
+        m_context, lhs, rhs, keys);
+}
+
+GLRProductionAdapter::NativeGL128EvaluationResult
+GLRProductionAdapter::EvaluateMatMulAdjoint(
+    const Ciphertext& lhs, const Ciphertext& rhs,
+    const NativeKeyProvider& keys) const {
+    if (keys.secret_material_accessed()) {
+        throw GlrError(
+            "GLRProductionAdapter: ct-ct adjoint matrix multiplication "
+            "provider reports secret-material access");
+    }
+    return glscheme::rns::glr_gl128_matrix_multiply_cipher_adjoint(
         m_context, lhs, rhs, keys);
 }
 

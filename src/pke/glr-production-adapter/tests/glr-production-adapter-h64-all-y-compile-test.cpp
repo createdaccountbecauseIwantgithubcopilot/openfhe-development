@@ -37,6 +37,7 @@ using HiddenSelectorRef =
 using ResolverRef =
     const Adapter::NativeGL128H64AllYPublicRootProviderResolver&;
 using KeyProviderRef = const Adapter::NativeKeyProvider&;
+using EvaluationKeysRef = const Adapter::EvaluationKeys&;
 using FoldBindingRef =
     const Adapter::NativeGL128H64SparseFoldKskBinding&;
 using DftSessionRef =
@@ -66,6 +67,18 @@ static_assert(std::is_same_v<
                                std::declval<FoldBindingRef>(),
                                std::declval<DftSessionRef>())),
               Adapter::NativeGL128H64ResearchAllYStcResult>);
+static_assert(std::is_same_v<
+              decltype(std::declval<AdapterRef>().MatMulAdjoint(
+                  std::declval<CiphertextRef>(),
+                  std::declval<CiphertextRef>(),
+                  std::declval<EvaluationKeysRef>())),
+              Adapter::Ciphertext>);
+static_assert(std::is_same_v<
+              decltype(std::declval<AdapterRef>().EvaluateMatMulAdjoint(
+                  std::declval<CiphertextRef>(),
+                  std::declval<CiphertextRef>(),
+                  std::declval<KeyProviderRef>())),
+              Adapter::NativeGL128EvaluationResult>);
 
 int main() {
     return Adapter::NativeGL128H64ResearchPosture::research_only &&
