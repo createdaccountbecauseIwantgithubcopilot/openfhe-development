@@ -53,6 +53,12 @@ constexpr const char* kSecurityRejection =
     "production security rejected: the source uses a support-revealing Q2 "
     "ciphertext and sparse h<=4 Gaussian secret, not the admitted dense "
     "primary plus independently certified h40 bootstrap lineage";
+constexpr const char* kFullChainBootstrapRejection =
+    "BootstrapDirect rejected: the dense integer lineage has no certified "
+    "Q7/L18 m+t*e to SHIP input lift or mod-t refresh theorem";
+constexpr const char* kFullChainSecurityRejection =
+    "production security rejected: the dense ternary full-Q integer path has "
+    "not completed the profile-bound RLWE/noise/bootstrap admission audit";
 constexpr const char* kUntrustedIntegerKeyDomain = "integer-q2-untrusted";
 
 std::size_t CoefficientIndex(std::size_t n, std::size_t phi, std::size_t x,
@@ -201,6 +207,16 @@ std::string DomainSeparatedIntegerLineage(
     return "sha256:" + HashUtil::HashString(payload);
 }
 
+std::string DomainSeparatedFullChainIntegerLineage(
+    const std::string& parameterFingerprint, const std::string& integerKeyTag,
+    const std::string& primaryLineageCommitment) {
+    const auto payload =
+        std::string("openfhe.gl_int.full_chain_untrusted_lineage.v1|") +
+        parameterFingerprint + '|' + integerKeyTag + '|' +
+        primaryLineageCommitment;
+    return "sha256:" + HashUtil::HashString(payload);
+}
+
 }  // namespace
 
 GLIntProductionGLRBridge::OwnerBinding::OwnerBinding(
@@ -274,13 +290,14 @@ bool GLIntProductionGLRBridge::IntegerAutomorphismKey::IsSecurityAuthorized() co
 GLIntProductionGLRBridge::IntegerPublicKey::IntegerPublicKey(
     GlrPoly b, glscheme::rns::GlrPublicASeed publicASeed,
     std::string parameterFingerprint, std::string integerKeyTag,
-    std::string nativeKeyLineageCommitment)
+    std::string nativeKeyLineageCommitment, bool denseTernaryOwner)
     : m_b(std::move(b)),
       m_publicASeed(std::move(publicASeed)),
       m_parameterFingerprint(std::move(parameterFingerprint)),
       m_integerKeyTag(std::move(integerKeyTag)),
       m_nativeKeyLineageCommitment(
-          std::move(nativeKeyLineageCommitment)) {}
+          std::move(nativeKeyLineageCommitment)),
+      m_denseTernaryOwner(denseTernaryOwner) {}
 
 std::uint32_t
 GLIntProductionGLRBridge::IntegerPublicKey::GetKeyLevel() const noexcept {
@@ -290,6 +307,16 @@ GLIntProductionGLRBridge::IntegerPublicKey::GetKeyLevel() const noexcept {
 std::size_t
 GLIntProductionGLRBridge::IntegerPublicKey::GetStoredBytes() const noexcept {
     return m_b.data.size() * sizeof(m_b.data.front()) + m_publicASeed.size();
+}
+
+const std::string& GLIntProductionGLRBridge::IntegerPublicKey::
+    GetParameterFingerprint() const noexcept {
+    return m_parameterFingerprint;
+}
+
+const std::string& GLIntProductionGLRBridge::IntegerPublicKey::
+    GetIntegerKeyTag() const noexcept {
+    return m_integerKeyTag;
 }
 
 const std::string& GLIntProductionGLRBridge::IntegerPublicKey::
@@ -305,6 +332,11 @@ bool GLIntProductionGLRBridge::IntegerPublicKey::UsesTErrors() const noexcept {
     return true;
 }
 
+bool GLIntProductionGLRBridge::IntegerPublicKey::
+    HasDenseTernaryOwnerLineage() const noexcept {
+    return m_denseTernaryOwner;
+}
+
 bool GLIntProductionGLRBridge::IntegerPublicKey::IsSecurityAuthorized() const noexcept {
     return false;
 }
@@ -313,12 +345,16 @@ GLIntProductionGLRBridge::FullChainIntegerSwitchKey::
     FullChainIntegerSwitchKey(
         FullChainSwitchKind kind, std::int32_t amount,
         glscheme::rns::GlrSwitchKey native,
-        std::string nativeKeyLineageCommitment)
+        std::uint32_t activeSpecialPrimeCount,
+        std::string nativeKeyLineageCommitment,
+        bool denseTernaryOwner)
     : m_kind(kind),
       m_amount(amount),
       m_native(std::move(native)),
+      m_activeSpecialPrimeCount(activeSpecialPrimeCount),
       m_nativeKeyLineageCommitment(
-          std::move(nativeKeyLineageCommitment)) {}
+          std::move(nativeKeyLineageCommitment)),
+      m_denseTernaryOwner(denseTernaryOwner) {}
 
 GLIntProductionGLRBridge::FullChainSwitchKind
 GLIntProductionGLRBridge::FullChainIntegerSwitchKey::GetKind() const noexcept {
@@ -333,6 +369,21 @@ std::int32_t GLIntProductionGLRBridge::FullChainIntegerSwitchKey::
 std::uint32_t GLIntProductionGLRBridge::FullChainIntegerSwitchKey::
     GetKeyLevel() const noexcept {
     return m_native.key_level;
+}
+
+std::uint32_t GLIntProductionGLRBridge::FullChainIntegerSwitchKey::
+    GetDigitCount() const noexcept {
+    return m_native.dnum;
+}
+
+std::uint32_t GLIntProductionGLRBridge::FullChainIntegerSwitchKey::
+    GetSpecialPrimeCount() const noexcept {
+    return m_activeSpecialPrimeCount;
+}
+
+GlrRing GLIntProductionGLRBridge::FullChainIntegerSwitchKey::
+    GetRequiredInputRing() const noexcept {
+    return m_native.ring;
 }
 
 std::size_t GLIntProductionGLRBridge::FullChainIntegerSwitchKey::
@@ -352,6 +403,11 @@ std::size_t GLIntProductionGLRBridge::FullChainIntegerSwitchKey::
 }
 
 const std::string& GLIntProductionGLRBridge::FullChainIntegerSwitchKey::
+    GetParameterFingerprint() const noexcept {
+    return m_native.parameter_fingerprint;
+}
+
+const std::string& GLIntProductionGLRBridge::FullChainIntegerSwitchKey::
     GetNativeKeyLineageCommitment() const noexcept {
     return m_nativeKeyLineageCommitment;
 }
@@ -367,6 +423,11 @@ bool GLIntProductionGLRBridge::FullChainIntegerSwitchKey::
 
 bool GLIntProductionGLRBridge::FullChainIntegerSwitchKey::UsesTErrors() const noexcept {
     return true;
+}
+
+bool GLIntProductionGLRBridge::FullChainIntegerSwitchKey::
+    HasDenseTernaryOwnerLineage() const noexcept {
+    return m_denseTernaryOwner;
 }
 
 bool GLIntProductionGLRBridge::FullChainIntegerSwitchKey::
@@ -1148,7 +1209,8 @@ GLIntProductionGLRBridge::ImportOwnerSecret(
             context, native.s, term.x, 0, term.w, term.real,
             term.imaginary);
     }
-    auto receipt = MakeReceipt("owner-secret-full-QP-coefficient");
+    auto receipt = MakeReceipt(
+        "legacy-bounded-Q2-owner-secret-full-QP-coefficient");
     receipt.integerKeyTag = secretKey.GetKeyTag();
     const auto primaryLineageCommitment =
         glscheme::rns::glr_ship_direct_primary_secret_lineage_commitment(
@@ -1168,6 +1230,52 @@ GLIntProductionGLRBridge::ImportOwnerSecret(
         native.secure_clear();
         throw GLKeyContextMismatchError(
             "GL integer owner-secret bridge failed native lineage derivation");
+    }
+    return OwnerBinding(std::move(native), std::move(receipt),
+                        primaryLineageCommitment);
+}
+
+GLIntProductionGLRBridge::OwnerBinding
+GLIntProductionGLRBridge::GenerateFullChainOwnerBinding(
+    std::uint64_t seed) const {
+    const auto& context = m_adapter->GetContext();
+    GlrRngOwner rng(glscheme::rns::glr_rng_create(seed));
+    if (!rng) {
+        throw GlrError("full-chain integer owner-key RNG creation failed");
+    }
+    NativeSecretKey native =
+        glscheme::rns::glr_keygen_primary(context, *rng);
+    const auto primaryLineageCommitment =
+        glscheme::rns::glr_ship_direct_primary_secret_lineage_commitment(
+            context, native);
+    if (!IsSha256Text(primaryLineageCommitment)) {
+        native.secure_clear();
+        throw GLKeyContextMismatchError(
+            "full-chain integer owner key failed primary hash derivation");
+    }
+    auto receipt = MakeReceipt("owner-secret-full-QP-dense-ternary");
+    receipt.schema = "openfhe.gl_int.glr_full_chain.v1";
+    receipt.admissionRejection = kFullChainBootstrapRejection;
+    receipt.nativeLevel = 0;
+    receipt.activeQPrimes = context.params.levels();
+    receipt.denseEq5Layout = true;
+    receipt.tErrorInvariant = true;
+    receipt.denseTernaryOwner = true;
+    receipt.integerKeyTag =
+        "gl-int-full-" + HashUtil::HashString(
+            receipt.parameterFingerprint + '|' +
+            primaryLineageCommitment);
+    native.key_id = kUntrustedIntegerKeyDomain;
+    receipt.nativeKeyLineageCommitment =
+        DomainSeparatedFullChainIntegerLineage(
+            receipt.parameterFingerprint, receipt.integerKeyTag,
+            primaryLineageCommitment);
+    receipt.ownerSecretLineageBound =
+        IsSha256Text(receipt.nativeKeyLineageCommitment);
+    if (!receipt.ownerSecretLineageBound) {
+        native.secure_clear();
+        throw GLKeyContextMismatchError(
+            "full-chain integer owner key failed lineage derivation");
     }
     return OwnerBinding(std::move(native), std::move(receipt),
                         primaryLineageCommitment);
@@ -1251,9 +1359,14 @@ void GLIntProductionGLRBridge::ValidateOwner(
     const auto fingerprint = glscheme::rns::glr_parameter_fingerprint(
         m_adapter->GetContext().params);
     const auto& nativeSecret = owner.GetNativeSecretKey();
-    const auto lineage = DomainSeparatedIntegerLineage(
-        fingerprint, receipt.integerKeyTag,
-        owner.m_primaryLineageCommitment);
+    const auto lineage =
+        receipt.denseTernaryOwner
+            ? DomainSeparatedFullChainIntegerLineage(
+                  fingerprint, receipt.integerKeyTag,
+                  owner.m_primaryLineageCommitment)
+            : DomainSeparatedIntegerLineage(
+                  fingerprint, receipt.integerKeyTag,
+                  owner.m_primaryLineageCommitment);
     if (keyTag != receipt.integerKeyTag ||
         receipt.parameterFingerprint != fingerprint ||
         receipt.nativeKeyLineageCommitment != lineage ||
@@ -1834,8 +1947,18 @@ GLIntProductionGLRBridge::EncryptFullChainSymmetric(
         owner.GetReceipt().nativeKeyLineageCommitment;
     result.receipt = MakeReceipt("Q25-L0-dense-Eq5-integer-ciphertext");
     result.receipt.schema = "openfhe.gl_int.glr_full_chain.v1";
+    result.receipt.admissionRejection =
+        owner.GetReceipt().denseTernaryOwner
+            ? kFullChainBootstrapRejection
+            : kBootstrapRejection;
+    result.receipt.requiredEvaluationKey = "none (fresh symmetric ciphertext)";
+    result.receipt.plaintextScale = 1;
     result.receipt.nativeLevel = 0;
     result.receipt.activeQPrimes = context.params.levels();
+    result.receipt.denseEq5Layout = true;
+    result.receipt.tErrorInvariant = true;
+    result.receipt.denseTernaryOwner =
+        owner.GetReceipt().denseTernaryOwner;
     result.receipt.integerKeyTag = owner.GetReceipt().integerKeyTag;
     result.receipt.nativeKeyLineageCommitment =
         owner.GetReceipt().nativeKeyLineageCommitment;
@@ -1875,7 +1998,8 @@ GLIntProductionGLRBridge::GenerateFullChainPublicKey(
         std::move(b), std::move(publicASeed),
         glscheme::rns::glr_parameter_fingerprint(context.params),
         owner.GetReceipt().integerKeyTag,
-        owner.GetReceipt().nativeKeyLineageCommitment);
+        owner.GetReceipt().nativeKeyLineageCommitment,
+        owner.GetReceipt().denseTernaryOwner);
 }
 
 GLIntProductionGLRBridge::CiphertextImport
@@ -1936,8 +2060,18 @@ GLIntProductionGLRBridge::EncryptFullChainPublic(
     result.receipt = MakeReceipt(
         "Q25-L0-dense-Eq5-public-integer-ciphertext");
     result.receipt.schema = "openfhe.gl_int.glr_full_chain.v1";
+    result.receipt.admissionRejection =
+        publicKey.m_denseTernaryOwner
+            ? kFullChainBootstrapRejection
+            : kBootstrapRejection;
+    result.receipt.requiredEvaluationKey =
+        "none (fresh compact-public-key ciphertext)";
+    result.receipt.plaintextScale = 1;
     result.receipt.nativeLevel = 0;
     result.receipt.activeQPrimes = context.params.levels();
+    result.receipt.denseEq5Layout = true;
+    result.receipt.tErrorInvariant = true;
+    result.receipt.denseTernaryOwner = publicKey.m_denseTernaryOwner;
     result.receipt.integerKeyTag = publicKey.m_integerKeyTag;
     result.receipt.nativeKeyLineageCommitment =
         publicKey.m_nativeKeyLineageCommitment;
@@ -1976,7 +2110,9 @@ GLIntProductionGLRBridge::GenerateFullChainIntegerSwitchKey(
     ConvertSwitchKeyErrorsToTErr(&native, conversionSource, owner);
     return FullChainIntegerSwitchKey(
         kind, amount, std::move(native),
-        owner.GetReceipt().nativeKeyLineageCommitment);
+        static_cast<std::uint32_t>(context.params.p_special.size()),
+        owner.GetReceipt().nativeKeyLineageCommitment,
+        owner.GetReceipt().denseTernaryOwner);
 }
 
 GLIntProductionGLRBridge::IntegerSwitchResult
@@ -2047,6 +2183,325 @@ GLIntProductionGLRBridge::ApplyFullChainIntegerSwitch(
         glscheme::rns::glr_to_slots(context, a);
     }
     return {std::move(b), std::move(a)};
+}
+
+glscheme::rns::GlrCompactSwitchKey
+GLIntProductionGLRBridge::CompactFullChainIntegerSwitchKey(
+    const FullChainIntegerSwitchKey& evaluationKey) const {
+    const auto& context = m_adapter->GetContext();
+    if (evaluationKey.m_native.parameter_fingerprint !=
+            glscheme::rns::glr_parameter_fingerprint(context.params) ||
+        !evaluationKey.m_native.public_a_seed.has_value() ||
+        !IsSha256Text(evaluationKey.m_nativeKeyLineageCommitment)) {
+        throw GLKeyContextMismatchError(
+            "full-chain SwitchInt compaction key metadata mismatch");
+    }
+    return glscheme::rns::glr_compress_switch_key(
+        context, evaluationKey.m_native);
+}
+
+GLIntProductionGLRBridge::FullChainIntegerSwitchKey
+GLIntProductionGLRBridge::RestoreFullChainIntegerSwitchKey(
+    FullChainSwitchKind kind, std::int32_t amount,
+    const glscheme::rns::GlrCompactSwitchKey& compact,
+    const Receipt& ownerReceipt) const {
+    const auto& context = m_adapter->GetContext();
+    const auto fingerprint =
+        glscheme::rns::glr_parameter_fingerprint(context.params);
+    if (ownerReceipt.parameterFingerprint != fingerprint ||
+        !ownerReceipt.ownerSecretLineageBound ||
+        !IsSha256Text(ownerReceipt.nativeKeyLineageCommitment)) {
+        throw GLKeyContextMismatchError(
+            "full-chain SwitchInt restore owner receipt mismatch");
+    }
+    const auto normalized = NormalizeFullChainSwitchKind(kind, amount);
+    amount = normalized.second;
+    auto native =
+        glscheme::rns::glr_expand_switch_key(context, compact);
+    if (!(native.id == normalized.first) ||
+        native.parameter_fingerprint != fingerprint ||
+        native.special_prime_count != 0 ||
+        native.key_error_sigma < 1579009.0 ||
+        !native.public_a_seed.has_value()) {
+        throw GLKeyContextMismatchError(
+            "restored full-chain SwitchInt key is not an integer t*e key");
+    }
+    const auto activeSpecials =
+        native.special_prime_count == 0
+            ? static_cast<std::uint32_t>(context.params.p_special.size())
+            : native.special_prime_count;
+    return FullChainIntegerSwitchKey(
+        kind, amount, std::move(native), activeSpecials,
+        ownerReceipt.nativeKeyLineageCommitment,
+        ownerReceipt.denseTernaryOwner);
+}
+
+std::uint64_t GLIntProductionGLRBridge::ValidateFullChainCiphertext(
+    const NativeCiphertext& ciphertext, const char* operation) const {
+    const auto& context = m_adapter->GetContext();
+    if (ciphertext.level >= context.params.levels()) {
+        throw GLContextMismatchError(
+            std::string(operation) +
+            " ciphertext level is outside the full integer chain");
+    }
+    const auto expectedWords =
+        static_cast<std::size_t>(context.active_q_primes(ciphertext.level)) *
+        2 * context.params.coeffs_Rp();
+    if (ciphertext.key_id != kUntrustedIntegerKeyDomain ||
+        !IsSha256Text(ciphertext.key_lineage_commitment) ||
+        ciphertext.b.ring != GlrRing::Rp ||
+        ciphertext.a.ring != GlrRing::Rp ||
+        ciphertext.b.domain != GlrDomain::Slot ||
+        ciphertext.a.domain != GlrDomain::Slot || ciphertext.b.extended ||
+        ciphertext.a.extended || ciphertext.b.level != ciphertext.level ||
+        ciphertext.a.level != ciphertext.level ||
+        ciphertext.b.data.size() != expectedWords ||
+        ciphertext.a.data.size() != expectedWords) {
+        throw GLContextMismatchError(
+            std::string(operation) +
+            " requires an authentic full-chain integer Slot ciphertext");
+    }
+    return RequireIntegerScale(ciphertext.scale, 1579009);
+}
+
+GLIntProductionGLRBridge::IntegerSwitchResult
+GLIntProductionGLRBridge::ApplyFullChainIntegerSwitchToRp(
+    const GlrPoly& input,
+    const FullChainIntegerSwitchKey& evaluationKey) const {
+    const auto& context = m_adapter->GetContext();
+    if (input.ring != GlrRing::Rp || input.extended ||
+        input.level >= context.params.levels()) {
+        throw GLContextMismatchError(
+            "full-chain Rp SwitchInt received invalid input");
+    }
+    if (evaluationKey.m_native.ring == GlrRing::Rp) {
+        return ApplyFullChainIntegerSwitch(input, evaluationKey);
+    }
+    if (evaluationKey.m_native.ring != GlrRing::R) {
+        throw GLKeyContextMismatchError(
+            "full-chain Rp SwitchInt accepts only small-R or big-Rp keys");
+    }
+    const auto originalDomain = input.domain;
+    GlrPoly coefficient = input;
+    if (coefficient.domain == GlrDomain::Slot) {
+        glscheme::rns::glr_to_coeffs(context, coefficient);
+    }
+    GlrPoly b = GlrPoly::zero(context, GlrRing::Rp, input.level, false,
+                              GlrDomain::Coeff);
+    GlrPoly a = GlrPoly::zero(context, GlrRing::Rp, input.level, false,
+                              GlrDomain::Coeff);
+    for (std::uint32_t y = 0; y < context.n(); ++y) {
+        GlrPoly slice =
+            glscheme::rns::glr_extract_y_slice(context, coefficient, y);
+        auto switched =
+            ApplyFullChainIntegerSwitch(slice, evaluationKey);
+        glscheme::rns::glr_insert_y_slice(context, b, switched.b, y);
+        glscheme::rns::glr_insert_y_slice(context, a, switched.a, y);
+    }
+    if (originalDomain == GlrDomain::Slot) {
+        glscheme::rns::glr_to_slots(context, b);
+        glscheme::rns::glr_to_slots(context, a);
+    }
+    return {std::move(b), std::move(a)};
+}
+
+GLIntProductionGLRBridge::NativeCiphertext
+GLIntProductionGLRBridge::EvaluateFullChainIntegerAutomorphism(
+    const NativeCiphertext& ciphertext,
+    const FullChainIntegerSwitchKey& evaluationKey) const {
+    static_cast<void>(ValidateFullChainCiphertext(
+        ciphertext, "full-chain integer automorphism"));
+    if (ciphertext.key_lineage_commitment !=
+        evaluationKey.m_nativeKeyLineageCommitment) {
+        throw GLKeyContextMismatchError(
+            "full-chain integer automorphism key lineage mismatch");
+    }
+    const auto& context = m_adapter->GetContext();
+    glscheme::rns::GlrSlotAutomorphism automorphism;
+    switch (evaluationKey.m_kind) {
+        case FullChainSwitchKind::ConjugationFamilySwap:
+            automorphism = glscheme::rns::glr_slot_automorphism_for(
+                context, 0, 0, 0, false, true);
+            break;
+        case FullChainSwitchKind::RowRotation:
+            automorphism = glscheme::rns::glr_slot_automorphism_for(
+                context, evaluationKey.m_amount, 0, 0, false, false);
+            break;
+        case FullChainSwitchKind::InterMatrixRotation:
+            automorphism = glscheme::rns::glr_slot_automorphism_for(
+                context, 0, 0, evaluationKey.m_amount, false, false);
+            break;
+        case FullChainSwitchKind::Transpose:
+            automorphism = glscheme::rns::glr_slot_automorphism_for(
+                context, 0, 0, 0, true, false);
+            break;
+        case FullChainSwitchKind::ConjugateTranspose:
+            automorphism = glscheme::rns::glr_slot_automorphism_for(
+                context, 0, 0, 0, true, true);
+            break;
+        case FullChainSwitchKind::Square:
+        case FullChainSwitchKind::ProductConjugateTranspose:
+            throw GLKeyContextMismatchError(
+                "full-chain integer automorphism received a relinearization key");
+    }
+
+    NativeCiphertext output = ciphertext;
+    output.b = glscheme::rns::glr_apply_slot_automorphism(
+        context, ciphertext.b, automorphism);
+    output.a = glscheme::rns::glr_apply_slot_automorphism(
+        context, ciphertext.a, automorphism);
+    auto switched =
+        ApplyFullChainIntegerSwitchToRp(output.a, evaluationKey);
+    glscheme::rns::glr_add_inplace(context, output.b, switched.b);
+    output.a = std::move(switched.a);
+    return output;
+}
+
+GLIntProductionGLRBridge::NativeCiphertext
+GLIntProductionGLRBridge::RotateFullChainIntegerColumns(
+    const NativeCiphertext& ciphertext, std::int32_t amount) const {
+    static_cast<void>(ValidateFullChainCiphertext(
+        ciphertext, "full-chain integer column rotation"));
+    const auto& context = m_adapter->GetContext();
+    amount %= static_cast<std::int32_t>(context.n());
+    if (amount < 0) {
+        amount += static_cast<std::int32_t>(context.n());
+    }
+    const auto automorphism = glscheme::rns::glr_slot_automorphism_for(
+        context, 0, amount, 0, false, false);
+    NativeCiphertext output = ciphertext;
+    output.b = glscheme::rns::glr_apply_slot_automorphism(
+        context, ciphertext.b, automorphism);
+    output.a = glscheme::rns::glr_apply_slot_automorphism(
+        context, ciphertext.a, automorphism);
+    return output;
+}
+
+GLIntProductionGLRBridge::NativeCiphertext
+GLIntProductionGLRBridge::EvaluateFullChainIntegerHadamard(
+    const NativeCiphertext& lhs, const NativeCiphertext& rhs,
+    const FullChainIntegerSwitchKey& squareKey) const {
+    const auto lhsScale =
+        ValidateFullChainCiphertext(lhs, "full-chain integer Hadamard");
+    const auto rhsScale =
+        ValidateFullChainCiphertext(rhs, "full-chain integer Hadamard");
+    if (lhs.level != rhs.level ||
+        lhs.key_lineage_commitment != rhs.key_lineage_commitment ||
+        squareKey.m_kind != FullChainSwitchKind::Square ||
+        squareKey.m_nativeKeyLineageCommitment !=
+            lhs.key_lineage_commitment) {
+        throw GLKeyContextMismatchError(
+            "full-chain integer Hadamard operand/key mismatch");
+    }
+    const auto& context = m_adapter->GetContext();
+    GlrPoly d0 = lhs.b;
+    glscheme::rns::glr_mul_pointwise_inplace(context, d0, rhs.b);
+    GlrPoly d1 = lhs.b;
+    glscheme::rns::glr_mul_pointwise_inplace(context, d1, rhs.a);
+    GlrPoly cross = lhs.a;
+    glscheme::rns::glr_mul_pointwise_inplace(context, cross, rhs.b);
+    glscheme::rns::glr_add_inplace(context, d1, cross);
+    GlrPoly d2 = lhs.a;
+    glscheme::rns::glr_mul_pointwise_inplace(context, d2, rhs.a);
+    auto switched = ApplyFullChainIntegerSwitchToRp(d2, squareKey);
+    glscheme::rns::glr_add_inplace(context, d0, switched.b);
+    glscheme::rns::glr_add_inplace(context, d1, switched.a);
+
+    NativeCiphertext output;
+    output.b = std::move(d0);
+    output.a = std::move(d1);
+    output.scale = static_cast<double>(glscheme::rns::glr_mulmod(
+        lhsScale, rhsScale, 1579009));
+    output.level = lhs.level;
+    output.key_id = kUntrustedIntegerKeyDomain;
+    output.key_lineage_commitment = lhs.key_lineage_commitment;
+    return output;
+}
+
+GLIntProductionGLRBridge::NativeCiphertext
+GLIntProductionGLRBridge::EvaluateFullChainIntegerTrace(
+    const NativeCiphertext& lhs, const NativeCiphertext& rhs,
+    const FullChainIntegerSwitchKey& conjugatedRightKey,
+    const FullChainIntegerSwitchKey& productKey,
+    glscheme::rns::GlrGemmKind gemmKind) const {
+    const auto lhsScale =
+        ValidateFullChainCiphertext(lhs, "full-chain integer trace product");
+    const auto rhsScale =
+        ValidateFullChainCiphertext(rhs, "full-chain integer trace product");
+    if (lhs.level != rhs.level ||
+        lhs.key_lineage_commitment != rhs.key_lineage_commitment ||
+        conjugatedRightKey.m_kind !=
+            FullChainSwitchKind::ConjugateTranspose ||
+        productKey.m_kind !=
+            FullChainSwitchKind::ProductConjugateTranspose ||
+        conjugatedRightKey.m_nativeKeyLineageCommitment !=
+            lhs.key_lineage_commitment ||
+        productKey.m_nativeKeyLineageCommitment !=
+            lhs.key_lineage_commitment) {
+        throw GLKeyContextMismatchError(
+            "full-chain integer trace operand/key mismatch");
+    }
+    const auto& context = m_adapter->GetContext();
+    const auto& gemm = glscheme::rns::glr_gemm_backend(gemmKind);
+    GlrPoly outputB =
+        glscheme::rns::glr_circledast(context, lhs.b, rhs.b, gemm);
+    GlrPoly outputA =
+        glscheme::rns::glr_circledast(context, lhs.a, rhs.b, gemm);
+    {
+        GlrPoly d1 =
+            glscheme::rns::glr_circledast(context, lhs.b, rhs.a, gemm);
+        auto switched = ApplyFullChainIntegerSwitchToRp(
+            d1, conjugatedRightKey);
+        glscheme::rns::glr_add_inplace(context, outputB, switched.b);
+        glscheme::rns::glr_add_inplace(context, outputA, switched.a);
+    }
+    {
+        GlrPoly d3 =
+            glscheme::rns::glr_circledast(context, lhs.a, rhs.a, gemm);
+        auto switched =
+            ApplyFullChainIntegerSwitchToRp(d3, productKey);
+        glscheme::rns::glr_add_inplace(context, outputB, switched.b);
+        glscheme::rns::glr_add_inplace(context, outputA, switched.a);
+    }
+
+    auto scale = glscheme::rns::glr_mulmod(lhsScale, rhsScale, 1579009);
+    scale = glscheme::rns::glr_mulmod(scale, context.n(), 1579009);
+    NativeCiphertext output;
+    output.b = std::move(outputB);
+    output.a = std::move(outputA);
+    output.scale = static_cast<double>(scale);
+    output.level = lhs.level;
+    output.key_id = kUntrustedIntegerKeyDomain;
+    output.key_lineage_commitment = lhs.key_lineage_commitment;
+    return output;
+}
+
+GLIntProductionGLRBridge::Receipt
+GLIntProductionGLRBridge::InspectFullChainCiphertext(
+    const NativeCiphertext& ciphertext) const {
+    const auto scale = ValidateFullChainCiphertext(
+        ciphertext, "full-chain integer ciphertext inspection");
+    const auto& context = m_adapter->GetContext();
+    auto receipt = MakeReceipt(
+        "Q" + std::to_string(context.active_q_primes(ciphertext.level)) +
+        "-L" + std::to_string(ciphertext.level) +
+        "-dense-Eq5-m-plus-tE");
+    receipt.schema = "openfhe.gl_int.glr_full_chain.v1";
+    receipt.admissionRejection = kFullChainBootstrapRejection;
+    receipt.requiredEvaluationKey =
+        "operation-specific FullChainIntegerSwitchKey with identical lineage "
+        "and keyLevel <= ciphertext level";
+    receipt.plaintextScale = scale;
+    receipt.nativeLevel = ciphertext.level;
+    receipt.activeQPrimes =
+        context.active_q_primes(ciphertext.level);
+    receipt.nativeKeyLineageCommitment =
+        ciphertext.key_lineage_commitment;
+    receipt.exactModuloT = true;
+    receipt.denseEq5Layout = true;
+    receipt.tErrorInvariant = true;
+    receipt.ownerSecretLineageBound = true;
+    return receipt;
 }
 
 GLIntProductionGLRBridge::DenseIntegerBatch
@@ -2144,15 +2599,26 @@ GLIntProductionGLRBridge::ModSwitchFullChain(
 
 void GLIntProductionGLRBridge::RequireBootstrapDirectAdmission(
     const Receipt& receipt) const {
-    if (receipt.parameterFingerprint !=
-            glscheme::rns::glr_parameter_fingerprint(
-                m_adapter->GetContext().params) ||
-        receipt.nativeLevel != m_q2Level || receipt.activeQPrimes != 2 ||
+    const auto& context = m_adapter->GetContext();
+    const auto fingerprint =
+        glscheme::rns::glr_parameter_fingerprint(context.params);
+    const auto q2Receipt = receipt.nativeLevel == m_q2Level &&
+                           receipt.activeQPrimes == 2 &&
+                           !receipt.denseEq5Layout;
+    const auto fullChainReceipt =
+        receipt.schema == "openfhe.gl_int.glr_full_chain.v1" &&
+        receipt.denseEq5Layout && receipt.tErrorInvariant &&
+        receipt.nativeLevel < context.params.levels() &&
+        receipt.activeQPrimes ==
+            context.active_q_primes(receipt.nativeLevel);
+    if (receipt.parameterFingerprint != fingerprint ||
+        (!q2Receipt && !fullChainReceipt) ||
         receipt.bootstrapDirectAdmitted) {
         throw GLContextMismatchError(
             "malformed GL integer bridge receipt at bootstrap admission");
     }
-    throw GlrError(kBootstrapRejection);
+    throw GlrError(fullChainReceipt ? kFullChainBootstrapRejection
+                                    : kBootstrapRejection);
 }
 
 void GLIntProductionGLRBridge::RequireProductionSecurityAuthorization(
@@ -2164,7 +2630,9 @@ void GLIntProductionGLRBridge::RequireProductionSecurityAuthorization(
         throw GLContextMismatchError(
             "malformed GL integer bridge receipt at security admission");
     }
-    throw GlrError(kSecurityRejection);
+    throw GlrError(receipt.denseEq5Layout || receipt.denseTernaryOwner
+                       ? kFullChainSecurityRejection
+                       : kSecurityRejection);
 }
 
 }  // namespace lbcrypto

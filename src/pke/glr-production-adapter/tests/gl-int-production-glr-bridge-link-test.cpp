@@ -12,8 +12,14 @@ int main() {
                    capabilities.fullChainBGVModSwitch &&
                    capabilities.fullChainPublicTErrEncryption &&
                    capabilities.compactSeededPublicA &&
+                   capabilities.fullChainDenseTernaryOwnerKeygen &&
                    capabilities.fullChainSwitchIntSmall &&
                    capabilities.fullChainSwitchIntBig &&
+                   capabilities.compactSeededSwitchKeys &&
+                   capabilities.fullChainDenseHadamard &&
+                   capabilities.fullChainDenseTraceProduct &&
+                   capabilities.fullChainKeyedAutomorphisms &&
+                   capabilities.selectableGPUTraceGemm &&
                    !capabilities.productionSecurityAuthorized &&
                    !capabilities.bootstrapDirectAdmitted
                ? 0

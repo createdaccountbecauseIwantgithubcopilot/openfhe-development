@@ -19,7 +19,7 @@
 
 namespace lbcrypto {
 
-/** Exact, deliberately non-authorizing Q2 bridge into the canonical GLR ABI. */
+/** Exact integer GLR bridge; legacy Q2 imports remain quarantined. */
 class GLIntProductionGLRBridge final {
 public:
     using NativePlaintext = GLRProductionAdapter::Plaintext;
@@ -41,8 +41,14 @@ public:
         bool fullChainBGVModSwitch{true};
         bool fullChainPublicTErrEncryption{true};
         bool compactSeededPublicA{true};
+        bool fullChainDenseTernaryOwnerKeygen{true};
         bool fullChainSwitchIntSmall{true};
         bool fullChainSwitchIntBig{true};
+        bool compactSeededSwitchKeys{true};
+        bool fullChainDenseHadamard{true};
+        bool fullChainDenseTraceProduct{true};
+        bool fullChainKeyedAutomorphisms{true};
+        bool selectableGPUTraceGemm{true};
         bool productionSecurityAuthorized{false};
         bool bootstrapDirectAdmitted{false};
     };
@@ -54,10 +60,15 @@ public:
         std::string nativeKeyLineageCommitment;
         std::string representation;
         std::string admissionRejection;
+        std::string requiredEvaluationKey;
         std::uint64_t plaintextModulus{0};
+        std::uint64_t plaintextScale{0};
         std::uint32_t nativeLevel{0};
         std::uint32_t activeQPrimes{0};
         bool exactModuloT{false};
+        bool denseEq5Layout{false};
+        bool tErrorInvariant{false};
+        bool denseTernaryOwner{false};
         bool ownerSecretLineageBound{false};
         bool productionSecurityAuthorized{false};
         bool bootstrapDirectAdmitted{false};
@@ -173,9 +184,12 @@ public:
 
         std::uint32_t GetKeyLevel() const noexcept;
         std::size_t GetStoredBytes() const noexcept;
+        const std::string& GetParameterFingerprint() const noexcept;
+        const std::string& GetIntegerKeyTag() const noexcept;
         const std::string& GetNativeKeyLineageCommitment() const noexcept;
         bool UsesSeededPublicA() const noexcept;
         bool UsesTErrors() const noexcept;
+        bool HasDenseTernaryOwnerLineage() const noexcept;
         bool IsSecurityAuthorized() const noexcept;
 
     private:
@@ -184,13 +198,15 @@ public:
             glscheme::rns::GlrPoly b,
             glscheme::rns::GlrPublicASeed publicASeed,
             std::string parameterFingerprint, std::string integerKeyTag,
-            std::string nativeKeyLineageCommitment);
+            std::string nativeKeyLineageCommitment,
+            bool denseTernaryOwner);
 
         glscheme::rns::GlrPoly m_b;
         glscheme::rns::GlrPublicASeed m_publicASeed{};
         std::string m_parameterFingerprint;
         std::string m_integerKeyTag;
         std::string m_nativeKeyLineageCommitment;
+        bool m_denseTernaryOwner{false};
     };
 
     struct IntegerSwitchResult {
@@ -213,12 +229,17 @@ public:
         FullChainSwitchKind GetKind() const noexcept;
         std::int32_t GetAmount() const noexcept;
         std::uint32_t GetKeyLevel() const noexcept;
+        std::uint32_t GetDigitCount() const noexcept;
+        std::uint32_t GetSpecialPrimeCount() const noexcept;
+        glscheme::rns::GlrRing GetRequiredInputRing() const noexcept;
         std::size_t GetMaterializedBytes() const noexcept;
         std::size_t GetCompactStoredBytes() const noexcept;
+        const std::string& GetParameterFingerprint() const noexcept;
         const std::string& GetNativeKeyLineageCommitment() const noexcept;
         bool IsBigSwitch() const noexcept;
         bool UsesSeededPublicA() const noexcept;
         bool UsesTErrors() const noexcept;
+        bool HasDenseTernaryOwnerLineage() const noexcept;
         bool IsSecurityAuthorized() const noexcept;
 
     private:
@@ -226,12 +247,16 @@ public:
         FullChainIntegerSwitchKey(
             FullChainSwitchKind kind, std::int32_t amount,
             glscheme::rns::GlrSwitchKey native,
-            std::string nativeKeyLineageCommitment);
+            std::uint32_t activeSpecialPrimeCount,
+            std::string nativeKeyLineageCommitment,
+            bool denseTernaryOwner);
 
         FullChainSwitchKind m_kind{FullChainSwitchKind::Square};
         std::int32_t m_amount{0};
         glscheme::rns::GlrSwitchKey m_native;
+        std::uint32_t m_activeSpecialPrimeCount{0};
         std::string m_nativeKeyLineageCommitment;
+        bool m_denseTernaryOwner{false};
     };
 
     explicit GLIntProductionGLRBridge(
@@ -240,8 +265,11 @@ public:
     Capabilities GetCapabilities() const noexcept;
     std::uint32_t GetNativeQ2Level() const noexcept;
 
+    /** Legacy bounded h<=4 owner import retained only for Q2 compatibility. */
     OwnerBinding ImportOwnerSecret(
         const GLIntProductionSecretKey& secretKey) const;
+    OwnerBinding GenerateFullChainOwnerBinding(
+        std::uint64_t seed = 0) const;
     PlaintextImport ImportEncodedPlaintext(
         const GLIntProductionEncodedPlaintext& plaintext) const;
     GLIntProductionEncodedPlaintext ExportEncodedPlaintextModT(
@@ -287,6 +315,28 @@ public:
     IntegerSwitchResult ApplyFullChainIntegerSwitch(
         const glscheme::rns::GlrPoly& input,
         const FullChainIntegerSwitchKey& evaluationKey) const;
+    glscheme::rns::GlrCompactSwitchKey CompactFullChainIntegerSwitchKey(
+        const FullChainIntegerSwitchKey& evaluationKey) const;
+    FullChainIntegerSwitchKey RestoreFullChainIntegerSwitchKey(
+        FullChainSwitchKind kind, std::int32_t amount,
+        const glscheme::rns::GlrCompactSwitchKey& compact,
+        const Receipt& ownerReceipt) const;
+    NativeCiphertext EvaluateFullChainIntegerAutomorphism(
+        const NativeCiphertext& ciphertext,
+        const FullChainIntegerSwitchKey& evaluationKey) const;
+    NativeCiphertext RotateFullChainIntegerColumns(
+        const NativeCiphertext& ciphertext, std::int32_t amount) const;
+    NativeCiphertext EvaluateFullChainIntegerHadamard(
+        const NativeCiphertext& lhs, const NativeCiphertext& rhs,
+        const FullChainIntegerSwitchKey& squareKey) const;
+    NativeCiphertext EvaluateFullChainIntegerTrace(
+        const NativeCiphertext& lhs, const NativeCiphertext& rhs,
+        const FullChainIntegerSwitchKey& conjugatedRightKey,
+        const FullChainIntegerSwitchKey& productKey,
+        glscheme::rns::GlrGemmKind gemmKind =
+            glscheme::rns::GlrGemmKind::auto_dispatch) const;
+    Receipt InspectFullChainCiphertext(
+        const NativeCiphertext& ciphertext) const;
     NativeCiphertext ModSwitchFullChain(
         const NativeCiphertext& ciphertext) const;
 
@@ -343,6 +393,11 @@ private:
         std::size_t digit) const;
     glscheme::rns::GlrPoly BGVModDownSpecialPoly(
         const glscheme::rns::GlrPoly& input) const;
+    std::uint64_t ValidateFullChainCiphertext(
+        const NativeCiphertext& ciphertext, const char* operation) const;
+    IntegerSwitchResult ApplyFullChainIntegerSwitchToRp(
+        const glscheme::rns::GlrPoly& input,
+        const FullChainIntegerSwitchKey& evaluationKey) const;
     glscheme::rns::GlrPoly BGVModSwitchPoly(
         const glscheme::rns::GlrPoly& input) const;
 
