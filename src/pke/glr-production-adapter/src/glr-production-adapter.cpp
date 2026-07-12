@@ -791,6 +791,71 @@ void RequireOrdinaryRefreshAuthorization(
     }
 }
 
+void RequireCanonicalOrdinaryRefreshExecutionEvidence(
+    const GLRProductionAdapter::Context& context,
+    const GLRProductionAdapter::NativeRefreshEndpointResult& result,
+    const GLRProductionAdapter::NativeRefreshEndpointEvidence& evidence) {
+    const auto expected = MakeCanonicalOrdinaryRefreshPreflight(context);
+    const auto& endpoint = expected.endpoint;
+    const auto& census = expected.native;
+    const auto& pack = evidence.pack;
+    const std::uint64_t xTraceRotations =
+        census.centered_refreshes * census.x_trace_rotations_per_readout;
+    const std::uint64_t wTraceRotations =
+        census.centered_refreshes * census.w_trace_rotations_per_readout;
+    const std::uint64_t exponentNodes =
+        2ULL * context.n() * expected.requiredSparseHammingWeight *
+        census.centered_refreshes;
+
+    if (result.representation !=
+            glscheme::rns::GlrShipRefreshOnlyEndpointRepresentation::refreshed_xy ||
+        result.input_level != endpoint.input_level ||
+        result.output_level != endpoint.output_level ||
+        !evidence.cts_xinv_used ||
+        !evidence.public_scale_normalization_used ||
+        !evidence.primary_to_sparse_used || !evidence.packed_ship_used ||
+        !evidence.stc_xfwd_used || !evidence.provider_secret_free ||
+        evidence.normalization_multiplier != endpoint.normalization_multiplier ||
+        evidence.input_level != endpoint.input_level ||
+        evidence.cts_output_level != endpoint.cts_output_level ||
+        evidence.normalized_level != endpoint.normalized_level ||
+        evidence.packed_level != endpoint.packed_level ||
+        evidence.output_level != endpoint.output_level ||
+        evidence.rescale_stride != endpoint.rescale_stride ||
+        evidence.required_input_live_q_primes !=
+            endpoint.required_input_live_q_primes ||
+        evidence.normalization_rescale_count !=
+            endpoint.normalization_rescale_count ||
+        !evidence.strict_integer_normalization || evidence.scale_snapping_used ||
+        evidence.fold_level != endpoint.fold_level ||
+        evidence.transform_material_level != endpoint.transform_material_level ||
+        evidence.validated_key_level != endpoint.fold_level ||
+        evidence.transform_material_level_drop != 1U ||
+        !evidence.transform_material_alignment_safe ||
+        !evidence.canonical_production_authorized ||
+        pack.centered_refreshes != census.centered_refreshes ||
+        pack.coefficients_packed != census.coefficients_packed ||
+        pack.sparse_to_primary_switches != census.centered_refreshes ||
+        pack.exponent_ladder_nodes != exponentNodes ||
+        pack.gadget_applies != 2ULL * exponentNodes ||
+        pack.x_trace_rotations != xTraceRotations ||
+        pack.w_trace_rotations != wTraceRotations ||
+        pack.x_centering_monomial_multiplies !=
+            census.x_centering_monomial_multiplies ||
+        pack.w_dual_monomial_multiplies !=
+            census.w_dual_monomial_multiplies ||
+        pack.w_dual_accumulator_additions !=
+            census.w_dual_accumulator_additions ||
+        !pack.public_centering_used ||
+        !pack.homomorphic_readout_projection_used ||
+        !pack.provider_secret_free || !pack.exact_prime_w_dual_used ||
+        !pack.allocation_free_preflight_used) {
+        throw GlrError(
+            "GLRProductionAdapter: native ordinary-refresh evidence does not "
+            "bind the canonical stage ledger and full all-Y pack census");
+    }
+}
+
 }  // namespace
 
 GLRProductionAdapter::EvaluationKeys::EvaluationKeys(
@@ -896,6 +961,13 @@ void GLRProductionAdapter::ValidateOrdinaryRefreshAuthorization(
         MakeOrdinaryRefreshAuthorization(
             m_context, supportCommitment, securityReport,
             sparseHammingWeight, reducedExposureCorridor));
+}
+
+void GLRProductionAdapter::ValidateOrdinaryRefreshExecutionEvidence(
+    const NativeRefreshEndpointResult& result,
+    const NativeRefreshEndpointEvidence& evidence) const {
+    RequireCanonicalOrdinaryRefreshExecutionEvidence(
+        m_context, result, evidence);
 }
 
 GLRProductionAdapter::OrdinaryRefreshExecutionResult
@@ -1057,6 +1129,8 @@ GLRProductionAdapter::ExecuteOrdinaryRefresh(
         glscheme::rns::glr_ship_refresh_only_endpoint_prime(
             m_context, canonicalCiphertext, parameters, config,
             &out.nativeEvidence);
+    ValidateOrdinaryRefreshExecutionEvidence(
+        out.nativeResult, out.nativeEvidence);
     if (out.nativeResult.representation !=
             glscheme::rns::GlrShipRefreshOnlyEndpointRepresentation::
                 refreshed_xy ||

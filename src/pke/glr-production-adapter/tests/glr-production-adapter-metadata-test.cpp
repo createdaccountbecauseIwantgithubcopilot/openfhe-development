@@ -626,6 +626,99 @@ int main() {
             }),
             "forged streamed-DFT requirement did not fail closed");
 
+    // The execution seam must bind a successful native result to the exact
+    // full all-Y census, not merely to a high-level "packed SHIP" boolean.
+    Adapter::NativeRefreshEndpointResult canonicalNativeResult;
+    canonicalNativeResult.input_level = refresh.endpoint.input_level;
+    canonicalNativeResult.output_level = refresh.endpoint.output_level;
+    Adapter::NativeRefreshEndpointEvidence canonicalNativeEvidence;
+    canonicalNativeEvidence.cts_xinv_used = true;
+    canonicalNativeEvidence.public_scale_normalization_used = true;
+    canonicalNativeEvidence.primary_to_sparse_used = true;
+    canonicalNativeEvidence.packed_ship_used = true;
+    canonicalNativeEvidence.stc_xfwd_used = true;
+    canonicalNativeEvidence.provider_secret_free = true;
+    canonicalNativeEvidence.normalization_multiplier =
+        refresh.endpoint.normalization_multiplier;
+    canonicalNativeEvidence.input_level = refresh.endpoint.input_level;
+    canonicalNativeEvidence.cts_output_level =
+        refresh.endpoint.cts_output_level;
+    canonicalNativeEvidence.normalized_level =
+        refresh.endpoint.normalized_level;
+    canonicalNativeEvidence.packed_level = refresh.endpoint.packed_level;
+    canonicalNativeEvidence.output_level = refresh.endpoint.output_level;
+    canonicalNativeEvidence.rescale_stride = refresh.endpoint.rescale_stride;
+    canonicalNativeEvidence.required_input_live_q_primes =
+        refresh.endpoint.required_input_live_q_primes;
+    canonicalNativeEvidence.normalization_rescale_count =
+        refresh.endpoint.normalization_rescale_count;
+    canonicalNativeEvidence.strict_integer_normalization = true;
+    canonicalNativeEvidence.fold_level = refresh.endpoint.fold_level;
+    canonicalNativeEvidence.transform_material_level =
+        refresh.endpoint.transform_material_level;
+    canonicalNativeEvidence.validated_key_level = refresh.endpoint.fold_level;
+    canonicalNativeEvidence.transform_material_level_drop = 1;
+    canonicalNativeEvidence.transform_material_alignment_safe = true;
+    canonicalNativeEvidence.canonical_production_authorized = true;
+    auto& canonicalPack = canonicalNativeEvidence.pack;
+    canonicalPack.centered_refreshes = refresh.native.centered_refreshes;
+    canonicalPack.coefficients_packed = refresh.native.coefficients_packed;
+    canonicalPack.sparse_to_primary_switches =
+        refresh.native.centered_refreshes;
+    canonicalPack.exponent_ladder_nodes =
+        2ULL * context.n() * refresh.requiredSparseHammingWeight *
+        refresh.native.centered_refreshes;
+    canonicalPack.gadget_applies =
+        2ULL * canonicalPack.exponent_ladder_nodes;
+    canonicalPack.x_trace_rotations =
+        refresh.native.centered_refreshes *
+        refresh.native.x_trace_rotations_per_readout;
+    canonicalPack.w_trace_rotations =
+        refresh.native.centered_refreshes *
+        refresh.native.w_trace_rotations_per_readout;
+    canonicalPack.x_centering_monomial_multiplies =
+        refresh.native.x_centering_monomial_multiplies;
+    canonicalPack.w_dual_monomial_multiplies =
+        refresh.native.w_dual_monomial_multiplies;
+    canonicalPack.w_dual_accumulator_additions =
+        refresh.native.w_dual_accumulator_additions;
+    canonicalPack.public_centering_used = true;
+    canonicalPack.homomorphic_readout_projection_used = true;
+    canonicalPack.provider_secret_free = true;
+    canonicalPack.exact_prime_w_dual_used = true;
+    canonicalPack.allocation_free_preflight_used = true;
+    adapter.ValidateOrdinaryRefreshExecutionEvidence(
+        canonicalNativeResult, canonicalNativeEvidence);
+
+    const auto rejectedExecutionEvidence = [&](auto mutate) {
+        auto forged = canonicalNativeEvidence;
+        mutate(forged);
+        try {
+            adapter.ValidateOrdinaryRefreshExecutionEvidence(
+                canonicalNativeResult, forged);
+        }
+        catch (const glscheme::rns::GlrError&) {
+            return true;
+        }
+        return false;
+    };
+    Require(rejectedExecutionEvidence([](auto& forged) {
+                forged.cts_xinv_used = false;
+            }),
+            "stage-incomplete ordinary-refresh evidence did not fail closed");
+    Require(rejectedExecutionEvidence([](auto& forged) {
+                --forged.pack.centered_refreshes;
+            }),
+            "partial centered-refresh evidence did not fail closed");
+    Require(rejectedExecutionEvidence([](auto& forged) {
+                --forged.pack.coefficients_packed;
+            }),
+            "partial all-Y coefficient evidence did not fail closed");
+    Require(rejectedExecutionEvidence([](auto& forged) {
+                --forged.pack.x_trace_rotations;
+            }),
+            "partial trace evidence did not fail closed");
+
     // Production policy admission is typed evidence bound to the actual
     // support commitment and authenticated estimator report.  It deliberately
     // remains distinct from (and cannot be upgraded into) value execution.

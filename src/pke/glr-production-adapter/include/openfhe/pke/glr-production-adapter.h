@@ -325,6 +325,14 @@ public:
         std::uint32_t sparseHammingWeight = 40,
         bool reducedExposureCorridor = true) const;
 
+    // Allocation-free validation of the native endpoint's canonical stage
+    // ledger and full all-Y pack census.  Material-specific provider roots are
+    // checked separately by ExecuteOrdinaryRefresh; this validator never
+    // promotes policy/evidence metadata into an execution claim.
+    void ValidateOrdinaryRefreshExecutionEvidence(
+        const NativeRefreshEndpointResult& result,
+        const NativeRefreshEndpointEvidence& evidence) const;
+
     // Executes the genuine native canonical endpoint on caller-owned native
     // material.  It validates both external bindings, joins the compact
     // selector to the streamed gadget/KSK support, opens the externally bound
