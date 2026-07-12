@@ -413,6 +413,12 @@ public:
         glscheme::rns::kGlrDftPlaintextEntryCount;
     static constexpr std::size_t kForwardDftPlaintextEntryCount =
         glscheme::rns::kGlrDftPlaintextForwardEntryCount;
+    static constexpr bool kStructuredH40ProductionAuthorizationAvailable =
+        NativeDirectVectorProductionAuthorizationEvidence::
+            structured_h40_distribution_report_bound;
+    static_assert(!kStructuredH40ProductionAuthorizationAvailable,
+                  "free-support h40 evidence must not authorize the "
+                  "structured GL128 secret");
 
     // Evidence-only projection of the current resident-q0 GPU ABI.  `native`
     // retains every core counter/bit; the append-only named fields make the
@@ -514,10 +520,12 @@ public:
         std::string sparseSecretLineageCommitment;
     };
 
-    // OpenFHE-facing wrapper around GLScheme's dual-certificate L0/Q25
-    // primary-selector authorization.  The native authorization remains
-    // metadata-only; the all-Y member is an expected boundary shape and does
-    // not promote h40 into the still-disabled value evaluator.
+    // OpenFHE-facing wrapper around GLScheme's L0/Q25 primary-selector
+    // authorization shape.  Core schema v3 currently revokes every
+    // free-support h40 receipt because it is not a certificate for the
+    // implemented structured public-window secret.  The authorizer therefore
+    // throws before this wrapper can be returned; no adapter path promotes
+    // that proxy into production authorization or value execution.
     struct DirectVectorPrimaryAuthorization {
         NativeDirectVectorProductionAuthorizationEvidence native;
         DirectVectorAllYReturnPreflight allYReturn;
@@ -1023,6 +1031,8 @@ public:
     // Direct-coefficient bootstrap needs only the two forward StC records.
     // This seam emits and opens schema-v2 material without changing the
     // legacy four-record CtS/StC session API above.
+    NativeDftPlaintextGenerationConfig
+    GetCanonicalDirectDftGenerationConfig() const;
     NativeDftPlaintextGenerationResult GenerateForwardDftPlaintextEntries(
         double forwardScale, std::uint32_t forwardLevel,
         const NativeDftPlaintextEntrySink& sink) const;

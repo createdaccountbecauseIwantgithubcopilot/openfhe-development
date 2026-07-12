@@ -2346,6 +2346,11 @@ GLRProductionAdapter::OpenDftPlaintextSession(
         m_context, provider, binding);
 }
 
+GLRProductionAdapter::NativeDftPlaintextGenerationConfig
+GLRProductionAdapter::GetCanonicalDirectDftGenerationConfig() const {
+    return glscheme::rns::glr_gl128_dft_generation_config(m_context);
+}
+
 GLRProductionAdapter::NativeDftPlaintextGenerationResult
 GLRProductionAdapter::GenerateForwardDftPlaintextEntries(
     double forwardScale, std::uint32_t forwardLevel,

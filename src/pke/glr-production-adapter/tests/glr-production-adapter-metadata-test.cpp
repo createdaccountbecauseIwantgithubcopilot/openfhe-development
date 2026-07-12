@@ -699,19 +699,24 @@ int main() {
     const auto directKeyPlan =
         adapter.PlanCanonicalDirectBootstrapKeys();
     Require(directKeyPlan.schema ==
-                    "glscheme.gl128_direct_bootstrap_key_plan.v1" &&
+                    "glscheme.gl128_direct_bootstrap_key_plan.v2" &&
                 directKeyPlan.parameter_fingerprint ==
                     profileReceipt.parameter_fingerprint &&
                 directKeyPlan.requirements.size() == 5 &&
-                directKeyPlan.selector_level == 4 &&
-                directKeyPlan.first_relinearization_level == 6 &&
-                directKeyPlan.output_level == 18 &&
-                directKeyPlan.forward_return_level == 22 &&
-                directKeyPlan.requirements[0].key_level == 6 &&
-                directKeyPlan.requirements[1].key_level == 18 &&
+                directKeyPlan.selector_level == 0 &&
+                directKeyPlan.first_relinearization_level == 2 &&
+                directKeyPlan.output_level == 14 &&
+                directKeyPlan.forward_return_level == 18 &&
+                directKeyPlan.requirements[0].key_level == 2 &&
+                directKeyPlan.requirements[1].key_level == 14 &&
                 directKeyPlan.requirements[2].key_level == 24 &&
-                directKeyPlan.requirements[3].key_level == 18 &&
-                directKeyPlan.requirements[4].key_level == 18 &&
+                directKeyPlan.requirements[3].key_level == 14 &&
+                directKeyPlan.requirements[4].key_level == 14 &&
+                directKeyPlan.requirements[0].special_prime_count == 0 &&
+                directKeyPlan.requirements[1].special_prime_count == 0 &&
+                directKeyPlan.requirements[2].special_prime_count == 1 &&
+                directKeyPlan.requirements[3].special_prime_count == 0 &&
+                directKeyPlan.requirements[4].special_prime_count == 0 &&
                 directKeyPlan.exact_h40_corridor &&
                 directKeyPlan.seeded_public_a_compaction_planned &&
                 directKeyPlan.compact_persistent_bytes <
@@ -720,6 +725,20 @@ int main() {
                     directKeyPlan.full_materialized_bytes -
                         directKeyPlan.compact_persistent_bytes,
             "complete core GL128 direct-bootstrap key plan is malformed");
+    const auto directDftConfig =
+        adapter.GetCanonicalDirectDftGenerationConfig();
+    Require(directDftConfig.profile ==
+                    Adapter::NativeDftPlaintextGenerationConfig::Profile::
+                        forward_only_two_record_v2 &&
+                directDftConfig.forward_level == 13 &&
+                directDftConfig.inverse_level == 17 &&
+                directDftConfig.forward_scale ==
+                    glscheme::rns::kGl128BootstrapForwardDftScale &&
+                directDftConfig.inverse_scale ==
+                    glscheme::rns::kGl128BootstrapDftScale &&
+                Adapter::kForwardDftPlaintextEntryCount == 2 &&
+                Adapter::kLegacyDftPlaintextEntryCount == 4,
+            "directional direct-bootstrap DFT schedule drifted");
     const std::uint64_t expectedPublicKeyBytes =
         std::uint64_t{context.active_q_primes(0)} * 2 *
         context.params.coeffs_R() * 2 * sizeof(std::uint64_t);
@@ -755,9 +774,9 @@ int main() {
         adapter.PreflightDirectVectorPrimaryAllYReturn();
     adapter.ValidateDirectVectorPrimaryAllYReturnPreflight(directAllY);
     Require(directAllY.yRows == 128 &&
-                directAllY.selectorLevel == 4 &&
-                directAllY.activeSelectorQPrimes == 21 &&
-                directAllY.directOutputLevel == 18 &&
+                directAllY.selectorLevel == 0 &&
+                directAllY.activeSelectorQPrimes == 25 &&
+                directAllY.directOutputLevel == 14 &&
                 directAllY.directMultiplicativeDepth == 7 &&
                 directAllY.rescaleStride == 2 &&
                 directAllY.physicalQPrimeDropsPerRow == 14 &&
@@ -769,16 +788,16 @@ int main() {
                 directAllY.leafRescales == 10240ULL &&
                 directAllY.treeProductNodes == 9984ULL &&
                 directAllY.treeRelinearizations == 9984ULL &&
-                directAllY.treeRelinearizationKeyProviderLeases == 1536ULL &&
+                directAllY.treeRelinearizationKeyProviderLeases == 256ULL &&
                 directAllY.treeCarryLevelAlignments == 512ULL &&
                 directAllY.treeRescales == 9984ULL &&
                 directAllY.conjugationKeySwitches == 256ULL &&
                 directAllY.expectedMaxLiveYRows == 1 &&
                 directAllY.representationScaleFactor == 32768ULL &&
-                directAllY.packedInputLevel == 18 &&
-                directAllY.transformMaterialLevel == 17 &&
-                directAllY.transformKeyLevel == 18 &&
-                directAllY.outputLevel == 22 &&
+                directAllY.packedInputLevel == 14 &&
+                directAllY.transformMaterialLevel == 13 &&
+                directAllY.transformKeyLevel == 14 &&
+                directAllY.outputLevel == 18 &&
                 directAllY.forwardPhysicalQPrimeDrops == 4 &&
                 directAllY.expectedDftPlaintextVisits == 2 &&
                 directAllY.strictYOrderRequired &&
@@ -792,7 +811,7 @@ int main() {
                 !directAllY
                      .canonicalH40DecryptedValueNoiseAcceptanceRecorded,
             "direct-vector all-Y/full-return preflight lost its exact "
-            "L4/Q21 -> L18 -> L22 counter/level shape");
+            "L0/Q25 -> L14 -> L18 counter/level shape");
     {
         auto forged = directAllY;
         forged.outputLevel = 21;
@@ -841,6 +860,55 @@ int main() {
         "sha256:1111111111111111111111111111111111111111111111111111111111111111",
         "sha256:2222222222222222222222222222222222222222222222222222222222222222",
         "sha256:3333333333333333333333333333333333333333333333333333333333333333"};
+    static_assert(!Adapter::kStructuredH40ProductionAuthorizationAvailable);
+    static_assert(!Adapter::NativeDirectVectorProductionAuthorizationEvidence::
+                       structured_h40_distribution_report_bound);
+    std::string revokedH40AuthorizationError;
+    try {
+        (void)adapter.AuthorizeDirectVectorPrimaryCandidate(
+            directSupportCommitment, directSparseReport,
+            directDenseEvidence, directOwnerKeyLineage);
+    }
+    catch (const glscheme::rns::GlrError& error) {
+        revokedH40AuthorizationError = error.what();
+    }
+    Require(revokedH40AuthorizationError.find(
+                "structured public-window one-signed-monomial-per-window") !=
+                std::string::npos,
+            "free-support h40 proxy unexpectedly authorized the structured "
+            "GL128 secret");
+    Adapter::NativeDirectVectorProductionAuthorizationEvidence
+        revokedNativeH40Authorization;
+    Require(revokedNativeH40Authorization.schema ==
+                    glscheme::rns::
+                        kGlrShipDirectVectorGl128PrimaryAuthorizationSchema &&
+                !revokedNativeH40Authorization
+                     .production_candidate_metadata_authorized &&
+                !revokedNativeH40Authorization
+                     .structured_h40_distribution_report_bound &&
+                !revokedNativeH40Authorization.selector_storage_admitted &&
+                !revokedNativeH40Authorization.selector_material_generated &&
+                !revokedNativeH40Authorization.value_execution,
+            "default schema-v3 h40 receipt does not remain revoked");
+    std::string revokedH40StorageError;
+    try {
+        (void)glscheme::rns::
+            glr_authorize_ship_direct_vector_gl128_selector_storage(
+                revokedNativeH40Authorization);
+    }
+    catch (const glscheme::rns::GlrError& error) {
+        revokedH40StorageError = error.what();
+    }
+    Require(revokedH40StorageError.find(
+                "canonical production metadata authorization is absent") !=
+                std::string::npos,
+            "revoked h40 receipt unexpectedly admitted selector storage");
+
+    // Retain compile coverage for the historical wrapper shape, but keep it
+    // unreachable while core's immutable structured-distribution posture is
+    // false.  The static assertions above make accidental re-enablement a
+    // build failure rather than a silently activated metadata path.
+    if constexpr (Adapter::kStructuredH40ProductionAuthorizationAvailable) {
     const Adapter::DirectVectorPrimaryAuthorization directAuthorization =
         adapter.AuthorizeDirectVectorPrimaryCandidate(
             directSupportCommitment, directSparseReport,
@@ -859,26 +927,26 @@ int main() {
                 directNative.sparse_public_input_level == 24 &&
                 directNative.sparse_public_input_active_q_primes == 1 &&
                 directNative.primary_selector_ciphertexts &&
-                directNative.plan.selector_level == 4 &&
-                directNative.plan.active_q_primes == 21 &&
-                directNative.relinearization_first_frontier_level == 6 &&
-                directNative.conjugation_level == 18 &&
+                directNative.plan.selector_level == 0 &&
+                directNative.plan.active_q_primes == 25 &&
+                directNative.relinearization_first_frontier_level == 2 &&
+                directNative.conjugation_level == 14 &&
                 directNative.plan.multiplicative_depth == 7 &&
                 directNative.plan.physical_q_prime_drops == 14 &&
-                directNative.plan.output_level == 18 &&
+                directNative.plan.output_level == 14 &&
                 directNative.plan.unsigned_candidate_count == 320 &&
                 directNative.plan.signed_selector_count == 640 &&
                 directNative.plan.plaintext_ciphertext_products == 1280 &&
                 directNative.plan.tree_product_nodes == 78 &&
                 directNative.plan
                         .bytes_per_encoded_compact_selector_record ==
-                    11010274ULL &&
+                    6553826ULL &&
                 directNative.plan.exact_encoded_compact_selector_bytes ==
-                    7046575360ULL &&
+                    4194448640ULL &&
                 directNative.plan.compact_streamed_peak_selector_bytes ==
-                    33030176ULL &&
-                directNative.reserved_transform_material_level == 17 &&
-                directNative.reserved_xw_forward_return_output_level == 22 &&
+                    32768032ULL &&
+                directNative.reserved_transform_material_level == 13 &&
+                directNative.reserved_xw_forward_return_output_level == 18 &&
                 directNative.owner_key_seed_commitment ==
                     directOwnerKeyLineage.ownerKskSeedCommitment &&
                 directNative.primary_secret_lineage_commitment ==
@@ -899,7 +967,7 @@ int main() {
                      .productionH40DecryptedValueNoiseAcceptanceRecorded &&
                 directAuthorization.allYReturn.fullReturnBoundaryImplemented,
             "direct-vector dual-certificate authorization lost its exact "
-            "metadata-only L4/Q21 -> L18 binding");
+            "metadata-only L0/Q25 -> L14 binding");
     {
         auto forged = directAuthorization;
         forged.native.value_execution = true;
@@ -1022,8 +1090,8 @@ int main() {
                         .estimator_transcript_sha256 &&
                 nativeStorage.dense_security_transcript_sha256 ==
                     directNative.dense_primary_security.transcript_sha256 &&
-                nativeStorage.selector_level == 4 &&
-                nativeStorage.active_q_primes == 21 &&
+                nativeStorage.selector_level == 0 &&
+                nativeStorage.active_q_primes == 25 &&
                 nativeStorage.signed_selector_count == 640 &&
                 nativeStorage.selector_admission.kind ==
                     glscheme::rns::GlrShipDirectSelectorAdmissionKind::
@@ -1031,9 +1099,9 @@ int main() {
                 nativeStorage.selector_admission.full_selector_payload_bytes ==
                     directNative.plan.exact_resident_selector_bytes &&
                 nativeStorage.selector_admission.stored_selector_payload_bytes ==
-                    7046575360ULL &&
+                    4194448640ULL &&
                 nativeStorage.selector_admission.streamed_peak_selector_bytes ==
-                    33030176ULL &&
+                    32768032ULL &&
                 nativeStorage.production_metadata_authorization_bound &&
                 nativeStorage.compact_authenticated_streaming_admitted &&
                 !nativeStorage.generic_512_mib_cap_widened &&
@@ -1047,14 +1115,14 @@ int main() {
                 !selectorStorage.selectorManifestOrPayloadGenerated &&
                 !selectorStorage.selectorMaterialReady &&
                 !selectorStorage.valueExecution &&
-                selectorStorage.canonicalPlan.selector_level == 4 &&
-                selectorStorage.canonicalPlan.active_q_primes == 21 &&
+                selectorStorage.canonicalPlan.selector_level == 0 &&
+                selectorStorage.canonicalPlan.active_q_primes == 25 &&
                 selectorStorage.canonicalPlan
                         .exact_encoded_compact_selector_bytes ==
-                    7046575360ULL &&
+                    4194448640ULL &&
                 selectorStorage.canonicalPlan
                         .compact_streamed_peak_selector_bytes ==
-                    33030176ULL,
+                    32768032ULL,
             "selector-storage receipt lost its canonical plan/security-root/"
             "bounded-storage binding");
 
@@ -1147,12 +1215,12 @@ int main() {
                         .sparseSecretLineageCommitment ==
                     directOwnerKeyLineage.sparseSecretLineageCommitment &&
                 recordPreflight.totalRecordCount == 640 &&
-                recordPreflight.selectorLevel == 4 &&
-                recordPreflight.activeQPrimes == 21 &&
-                recordPreflight.encodedRecordBytes == 11010274ULL &&
+                recordPreflight.selectorLevel == 0 &&
+                recordPreflight.activeQPrimes == 25 &&
+                recordPreflight.encodedRecordBytes == 6553826ULL &&
                 recordPreflight.expectedReturnedRecordAndEncodingBytes ==
-                    22020354ULL &&
-                recordPreflight.authorizedStreamingPeakBytes == 33030176ULL &&
+                    13107458ULL &&
+                recordPreflight.authorizedStreamingPeakBytes == 32768032ULL &&
                 recordPreflight.productionAuthorizationBound &&
                 recordPreflight.storageAdmissionBound &&
                 recordPreflight.ownerKeyLineageBound &&
@@ -1195,6 +1263,7 @@ int main() {
                 forged.deterministicRandomAccessGeneratorAvailable = false;
             }),
             "random-access preflight hid native generator availability");
+    }
 
     // The n128/p257 h=2 rung is an explicitly insecure value smoke.  Bind its
     // exact native L4 -> L8 counter receipt plus owner-observed thresholds,
@@ -1662,6 +1731,21 @@ int main() {
     const Adapter::SecurityReport refreshSecurityReport =
         MakeGl128CorridorReport(context.params, 40,
                                 refreshSupportCommitment);
+    std::string revokedOrdinaryRefreshAuthorizationError;
+    try {
+        (void)adapter.AuthorizeOrdinaryRefreshProduction(
+            refreshSupportCommitment, refreshSecurityReport, 40, true);
+    }
+    catch (const glscheme::rns::GlrError& error) {
+        revokedOrdinaryRefreshAuthorizationError = error.what();
+    }
+    Require(revokedOrdinaryRefreshAuthorizationError.find(
+                "structured public-window one-signed-monomial-per-window") !=
+                std::string::npos,
+            "ordinary refresh resurrected the revoked free-support h40 "
+            "production certificate");
+
+    if constexpr (Adapter::kStructuredH40ProductionAuthorizationAvailable) {
     const Adapter::OrdinaryRefreshAuthorization refreshAuthorization =
         adapter.AuthorizeOrdinaryRefreshProduction(
             refreshSupportCommitment, refreshSecurityReport, 40, true);
@@ -1832,6 +1916,7 @@ int main() {
                 forged.productionExecutionExposed = true;
             }),
             "copied authorization evidence overstated execution readiness");
+    }
 
     // Planning is exact and allocation-free even for the production geometry.
     // It must deduplicate the Hermitian key shared by the explicit transform
