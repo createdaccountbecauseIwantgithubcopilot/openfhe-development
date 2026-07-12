@@ -1,0 +1,267 @@
+//==================================================================================
+// BSD 2-Clause License
+//
+// Copyright (c) 2014-2026, NJIT, Duality Technologies Inc. and other contributors
+//
+// All rights reserved.
+//==================================================================================
+
+#ifndef LBCRYPTO_PKE_SCHEME_GL_SHIP_H
+#define LBCRYPTO_PKE_SCHEME_GL_SHIP_H
+
+#include "scheme/gl/gl-schemelet.h"
+
+#include <complex>
+#include <cstddef>
+#include <cstdint>
+#include <map>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
+namespace lbcrypto {
+
+class GLShipError : public GLException {
+public:
+    using GLException::GLException;
+};
+
+class GLShipParameterError : public GLShipError {
+public:
+    using GLShipError::GLShipError;
+};
+
+class GLShipStateError : public GLShipError {
+public:
+    using GLShipError::GLShipError;
+};
+
+class GLShipEvaluationKeyError : public GLShipError {
+public:
+    using GLShipError::GLShipError;
+};
+
+class GLShipUnsupportedError : public GLShipError {
+public:
+    using GLShipError::GLShipError;
+};
+
+enum class GLShipSelection {
+    DIRECT_COLUMN,
+};
+
+enum class GLShipRepresentation {
+    POST_XINV_COEFFICIENT,
+    X_COEFFICIENT_SLOTS,
+};
+
+struct GLShipParameters {
+    std::size_t dimension{4};
+    double gamma{64.0};
+    std::size_t hammingWeight{2};
+    uint32_t reservedLevels{1};
+    GLShipSelection selection{GLShipSelection::DIRECT_COLUMN};
+
+    uint32_t RequiredMultiplicativeDepth() const;
+    void Validate(const GLGeometry& geometry, const GLParameters& glParameters) const;
+};
+
+struct GLShipMonomial {
+    uint32_t alpha{0};
+    int8_t sign{1};
+};
+
+using GLShipGaussianInteger = std::complex<int64_t>;
+
+/** Exact, clear algebra helpers used by both key generation/evaluation and pinned oracles. */
+class GLShipAlgebra final {
+public:
+    static std::vector<GLShipGaussianInteger> MultiplyMonomial(
+        const std::vector<GLShipGaussianInteger>& input, uint32_t alpha, int8_t sign);
+
+    static std::vector<GLShipGaussianInteger> DecryptionRelation(
+        const std::vector<GLShipGaussianInteger>& b,
+        const std::vector<GLShipGaussianInteger>& a,
+        const std::vector<GLShipMonomial>& support);
+
+    static std::vector<std::complex<double>> RootVector(
+        uint64_t q0, const std::vector<int64_t>& exponents);
+};
+
+class GLShipSchemelet;
+class GLShipTestAccess;
+
+/**
+ * Evaluator-visible material for the direct-column toy half-bootstrap.
+ *
+ * The flat selector bank contains fresh primary-key encryptions of joint
+ * support/sign indicator bits.  It stores no private key, clear support, clear
+ * sign, logical input, or decrypted shadow.
+ */
+class GLShipEvaluationKey final {
+public:
+    const GLShipParameters& GetParameters() const noexcept;
+    const CryptoContext<DCRTPoly>& GetCryptoContext() const noexcept;
+    const std::string& GetSparseKeyTag() const noexcept;
+    const std::string& GetPrimaryKeyTag() const noexcept;
+    uint64_t GetBottomModulus() const noexcept;
+    std::size_t GetSelectorCount() const noexcept;
+
+private:
+    friend class GLShipSchemelet;
+    friend class GLShipTestAccess;
+
+    GLShipEvaluationKey(GLShipParameters parameters, CryptoContext<DCRTPoly> context,
+                        std::string sparseKeyTag, std::string primaryKeyTag, uint64_t q0,
+                        EvalKey<DCRTPoly> bottomPrimaryToSparseKey,
+                        std::vector<Ciphertext<DCRTPoly>> selectors,
+                        std::vector<EvalKey<DCRTPoly>> relinearizationKeys,
+                        std::shared_ptr<std::map<uint32_t, EvalKey<DCRTPoly>>> conjugationKeys,
+                        std::shared_ptr<std::map<uint32_t, EvalKey<DCRTPoly>>> xForwardKeys);
+
+    GLShipParameters m_parameters;
+    CryptoContext<DCRTPoly> m_context;
+    std::string m_sparseKeyTag;
+    std::string m_primaryKeyTag;
+    uint64_t m_q0;
+    EvalKey<DCRTPoly> m_bottomPrimaryToSparseKey;
+    std::vector<Ciphertext<DCRTPoly>> m_selectors;
+    std::vector<EvalKey<DCRTPoly>> m_relinearizationKeys;
+    std::shared_ptr<std::map<uint32_t, EvalKey<DCRTPoly>>> m_conjugationKeys;
+    std::shared_ptr<std::map<uint32_t, EvalKey<DCRTPoly>>> m_xForwardKeys;
+};
+
+/** Client-only material.  The sparse secret never crosses into evaluator APIs. */
+class GLShipClientMaterial final {
+public:
+    GLShipClientMaterial(const GLShipClientMaterial&) = delete;
+    GLShipClientMaterial& operator=(const GLShipClientMaterial&) = delete;
+    GLShipClientMaterial(GLShipClientMaterial&&) noexcept = default;
+    GLShipClientMaterial& operator=(GLShipClientMaterial&&) noexcept = default;
+
+    const GLShipEvaluationKey& GetEvaluationKey() const noexcept;
+
+private:
+    friend class GLShipSchemelet;
+    friend class GLShipTestAccess;
+
+    GLShipClientMaterial(PrivateKey<DCRTPoly> sparseSecretKey,
+                         GLShipEvaluationKey evaluationKey);
+
+    PrivateKey<DCRTPoly> m_sparseSecretKey;
+    GLShipEvaluationKey m_evaluationKey;
+};
+
+/** One randomized, one-tower, post-XInv ciphertext under the sparse key. */
+class GLShipLowSliceCiphertext final {
+public:
+    GLShipRepresentation GetRepresentation() const noexcept;
+    std::size_t GetDimension() const noexcept;
+    uint64_t GetBottomModulus() const noexcept;
+    const CryptoContext<DCRTPoly>& GetCryptoContext() const noexcept;
+    const Ciphertext<DCRTPoly>& GetNativeCiphertext() const noexcept;
+    const std::string& GetKeyTag() const;
+
+private:
+    friend class GLShipSchemelet;
+    friend class GLShipTestAccess;
+
+    GLShipLowSliceCiphertext(std::size_t dimension, uint64_t q0,
+                             CryptoContext<DCRTPoly> context,
+                             Ciphertext<DCRTPoly> ciphertext);
+
+    std::size_t m_dimension;
+    uint64_t m_q0;
+    CryptoContext<DCRTPoly> m_context;
+    Ciphertext<DCRTPoly> m_ciphertext;
+    GLShipRepresentation m_representation;
+};
+
+/** High-modulus primary-key result whose slots contain refreshed X coefficients. */
+class GLShipHalfBootstrapResult final {
+public:
+    GLShipRepresentation GetRepresentation() const noexcept;
+    std::size_t GetDimension() const noexcept;
+    const CryptoContext<DCRTPoly>& GetCryptoContext() const noexcept;
+    const Ciphertext<DCRTPoly>& GetNativeCiphertext() const noexcept;
+    const std::string& GetKeyTag() const;
+
+private:
+    friend class GLShipSchemelet;
+
+    GLShipHalfBootstrapResult(std::size_t dimension, CryptoContext<DCRTPoly> context,
+                              Ciphertext<DCRTPoly> ciphertext);
+
+    std::size_t m_dimension;
+    CryptoContext<DCRTPoly> m_context;
+    Ciphertext<DCRTPoly> m_ciphertext;
+    GLShipRepresentation m_representation;
+};
+
+/**
+ * Bounded, exact-ring SHIP implementation for n=4/8 conformance only.
+ *
+ * The evaluator derives all root tables from the actual public A/B components
+ * of the randomized low-level ciphertext.  It never decrypts and never creates
+ * a transparent a=0 output.  RefreshOnly additionally normalizes every native
+ * GL row to q0/gamma, uses OpenFHE's q0*P-only sparse encapsulation switch,
+ * evaluates the half-bootstrap on all Y rows, and applies an explicit encrypted
+ * X-forward transform before constructing a canonical GLCiphertext.
+ */
+class GLShipSchemelet final {
+public:
+    GLShipSchemelet(const GLSchemelet& glSchemelet, GLShipParameters parameters);
+
+    const GLShipParameters& GetParameters() const noexcept;
+    const GLGeometry& GetGeometry() const noexcept;
+    const CryptoContext<DCRTPoly>& GetCryptoContext() const noexcept;
+
+    GLShipClientMaterial KeyGen(const KeyPair<DCRTPoly>& primaryKeyPair,
+                                const std::vector<GLShipMonomial>& support) const;
+
+    GLShipLowSliceCiphertext EncryptLowSlice(
+        const GLShipClientMaterial& clientMaterial,
+        const std::vector<std::complex<double>>& coefficients) const;
+
+    GLShipHalfBootstrapResult EvalHalfBootstrap(
+        const GLShipLowSliceCiphertext& input,
+        const GLShipEvaluationKey& evaluationKey) const;
+
+    /**
+     * Exact-ring n=4/8 ordinary refresh.
+     *
+     * Every independently computed Gaussian X-coefficient lane must have real
+     * and imaginary magnitude at most one.  This is an encrypted-message
+     * contract and cannot be observed or enforced by the evaluator; all public
+     * dimensions, levels, scales, key tags, and evaluation-key shapes are
+     * validated fail-closed.
+     */
+    GLCiphertext RefreshOnly(const GLCiphertext& input,
+                             const GLShipEvaluationKey& evaluationKey) const;
+
+private:
+    friend class GLShipTestAccess;
+
+    std::size_t SelectorIndex(std::size_t supportOrdinal, std::size_t alpha,
+                              int8_t sign) const;
+    void ValidatePrimaryKeyPair(const KeyPair<DCRTPoly>& primaryKeyPair) const;
+    void ValidateEvaluationKey(const GLShipEvaluationKey& evaluationKey) const;
+    void ValidateLowSlice(const GLShipLowSliceCiphertext& input,
+                          const GLShipEvaluationKey& evaluationKey) const;
+    GLShipLowSliceCiphertext NormalizeAndSwitchRow(
+        const Ciphertext<DCRTPoly>& input, const GLShipEvaluationKey& evaluationKey,
+        std::size_t row) const;
+    Ciphertext<DCRTPoly> EvalXForward(
+        const GLShipHalfBootstrapResult& input,
+        const GLShipEvaluationKey& evaluationKey) const;
+
+    GLShipParameters m_parameters;
+    GLGeometry m_geometry;
+    GLParameters m_glParameters;
+    CryptoContext<DCRTPoly> m_context;
+};
+
+}  // namespace lbcrypto
+
+#endif  // LBCRYPTO_PKE_SCHEME_GL_SHIP_H
