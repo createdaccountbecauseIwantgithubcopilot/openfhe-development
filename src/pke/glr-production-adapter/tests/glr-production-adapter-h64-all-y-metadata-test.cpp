@@ -91,6 +91,51 @@ int main() {
                 !plan.bootstrap_direct_admitted,
             "H64 hidden-selector plan lost its research L0/L2/L14 schedule");
 
+    const auto wPlan = adapter.PlanH64WActionResearch();
+    const auto wCapabilities =
+        adapter.GetH64WActionResearchCapabilities();
+    Require(wPlan.schema == glscheme::rns::kGlrH64WActionPlanSchema &&
+                wPlan.operations.current_oracle_cmux_external_products ==
+                    16760832ULL &&
+                wPlan.operations.total_external_products == 622592ULL &&
+                wPlan.material.logarithmic_compact_material_bytes ==
+                    26338175296ULL &&
+                wPlan.material.control_special_prime_count == 13 &&
+                wPlan.material.prefix_mask_special_prime_count == 13 &&
+                wPlan.material.action_key_special_prime_count == 13 &&
+                wPlan.material.sparse_fold_special_prime_count == 1 &&
+                wPlan.evidence.allocation_free_cryptographic_plan &&
+                !wPlan.evidence.encrypted_logarithmic_circuit_executed &&
+                !wPlan.evidence.exact_estimator_evidence_present &&
+                !wPlan.evidence.exact_noise_evidence_present &&
+                !wPlan.evidence.production_security_authorized &&
+                !wPlan.evidence.bootstrap_direct_admitted &&
+                !wPlan.production_security_authorized &&
+                !wPlan.bootstrap_direct_admitted,
+            "H64 logarithmic W-action plan overstates execution or security");
+    Require(wCapabilities.schema ==
+                    "openfhe.gl128_h64_w_action_research_capabilities.v1" &&
+                wCapabilities.nativePlanSchema ==
+                    glscheme::rns::kGlrH64WActionPlanSchema &&
+                wCapabilities.currentOracleExternalProducts == 16760832ULL &&
+                wCapabilities.logarithmicExternalProducts == 622592ULL &&
+                wCapabilities.logarithmicCompactMaterialBytes ==
+                    26338175296ULL &&
+                wCapabilities.compactBytesIncludingSparseFold ==
+                    26357049760ULL &&
+                wCapabilities.controlSpecialPrimeCount == 13 &&
+                wCapabilities.prefixMaskSpecialPrimeCount == 13 &&
+                wCapabilities.actionKeySpecialPrimeCount == 13 &&
+                wCapabilities.sparseFoldSpecialPrimeCount == 1 &&
+                wCapabilities.allocationFreeCryptographicPlan &&
+                !wCapabilities.capabilityQueryMaterializesMaterial &&
+                !wCapabilities.encryptedLogarithmicCircuitExecuted &&
+                !wCapabilities.exactEstimatorEvidencePresent &&
+                !wCapabilities.exactNoiseEvidencePresent &&
+                !wCapabilities.productionSecurityAuthorized &&
+                !wCapabilities.bootstrapDirectAdmitted,
+            "OpenFHE H64 W-action capability projection is malformed");
+
     const auto dft = adapter.GetCanonicalDirectDftGenerationConfig();
     Require(dft.profile ==
                     Adapter::NativeDftPlaintextGenerationConfig::Profile::

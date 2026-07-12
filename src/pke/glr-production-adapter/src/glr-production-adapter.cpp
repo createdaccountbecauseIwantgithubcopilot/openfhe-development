@@ -2685,6 +2685,49 @@ GLRProductionAdapter::PlanH64HiddenSelector() const {
     return glscheme::rns::glr_gl128_h64_hidden_selector_plan(m_context);
 }
 
+GLRProductionAdapter::NativeGL128H64WActionPlan
+GLRProductionAdapter::PlanH64WActionResearch() const {
+    return glscheme::rns::glr_gl128_h64_w_action_plan(m_context);
+}
+
+GLRProductionAdapter::NativeGL128H64WActionResearchCapabilities
+GLRProductionAdapter::GetH64WActionResearchCapabilities() const {
+    const auto plan = PlanH64WActionResearch();
+    if (plan.schema != glscheme::rns::kGlrH64WActionPlanSchema ||
+        !plan.evidence.allocation_free_cryptographic_plan ||
+        plan.evidence.encrypted_logarithmic_circuit_executed ||
+        plan.evidence.exact_estimator_evidence_present ||
+        plan.evidence.exact_noise_evidence_present ||
+        plan.evidence.production_security_authorized ||
+        plan.evidence.bootstrap_direct_admitted ||
+        plan.production_security_authorized ||
+        plan.bootstrap_direct_admitted ||
+        plan.material.production_sized_material_allocated) {
+        throw GlrError(
+            "GLRProductionAdapter: H64 W-action metadata is malformed or "
+            "overstates executable/security admission");
+    }
+    NativeGL128H64WActionResearchCapabilities capabilities;
+    capabilities.currentOracleExternalProducts =
+        plan.operations.current_oracle_cmux_external_products;
+    capabilities.logarithmicExternalProducts =
+        plan.operations.total_external_products;
+    capabilities.logarithmicCompactMaterialBytes =
+        plan.material.logarithmic_compact_material_bytes;
+    capabilities.compactBytesIncludingSparseFold =
+        plan.material.logarithmic_compact_bytes_including_sparse_fold;
+    capabilities.controlSpecialPrimeCount =
+        plan.material.control_special_prime_count;
+    capabilities.prefixMaskSpecialPrimeCount =
+        plan.material.prefix_mask_special_prime_count;
+    capabilities.actionKeySpecialPrimeCount =
+        plan.material.action_key_special_prime_count;
+    capabilities.sparseFoldSpecialPrimeCount =
+        plan.material.sparse_fold_special_prime_count;
+    capabilities.allocationFreeCryptographicPlan = true;
+    return capabilities;
+}
+
 GLRProductionAdapter::NativeGL128H64HiddenSelectorBinding
 GLRProductionAdapter::BindH64HiddenSelectorManifest(
     const NativeGL128H64HiddenSelectorManifest& manifest) const {

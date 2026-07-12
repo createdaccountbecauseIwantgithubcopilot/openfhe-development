@@ -48,6 +48,7 @@ public:
         bool fullChainDenseHadamard{true};
         bool fullChainDenseTraceProduct{true};
         bool fullChainKeyedAutomorphisms{true};
+        bool fullChainNegate{true};
         bool selectableGPUTraceGemm{true};
         bool strictFullChainReceiptValidation{true};
         bool productionSecurityAuthorized{false};
@@ -330,6 +331,8 @@ public:
     NativeCiphertext EvaluateFullChainIntegerHadamard(
         const NativeCiphertext& lhs, const NativeCiphertext& rhs,
         const FullChainIntegerSwitchKey& squareKey) const;
+    NativeCiphertext NegateFullChain(
+        const NativeCiphertext& ciphertext) const;
     NativeCiphertext EvaluateFullChainIntegerTrace(
         const NativeCiphertext& lhs, const NativeCiphertext& rhs,
         const FullChainIntegerSwitchKey& conjugatedRightKey,

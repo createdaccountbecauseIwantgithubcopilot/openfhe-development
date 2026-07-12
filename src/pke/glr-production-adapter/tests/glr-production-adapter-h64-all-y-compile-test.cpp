@@ -58,6 +58,14 @@ static_assert(std::is_same_v<
               Adapter::NativeGL128H64AllYPublicRootProviderResolver>);
 static_assert(std::is_same_v<
               decltype(std::declval<AdapterRef>()
+                           .PlanH64WActionResearch()),
+              Adapter::NativeGL128H64WActionPlan>);
+static_assert(std::is_same_v<
+              decltype(std::declval<AdapterRef>()
+                           .GetH64WActionResearchCapabilities()),
+              Adapter::NativeGL128H64WActionResearchCapabilities>);
+static_assert(std::is_same_v<
+              decltype(std::declval<AdapterRef>()
                            .EvaluateH64AllYStCResearch(
                                std::declval<CiphertextRef>(),
                                std::declval<SourceScheduleRef>(),

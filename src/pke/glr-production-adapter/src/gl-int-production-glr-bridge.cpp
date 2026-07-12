@@ -2469,6 +2469,15 @@ GLIntProductionGLRBridge::EvaluateFullChainIntegerHadamard(
 }
 
 GLIntProductionGLRBridge::NativeCiphertext
+GLIntProductionGLRBridge::NegateFullChain(
+    const NativeCiphertext& ciphertext) const {
+    static_cast<void>(ValidateFullChainCiphertext(
+        ciphertext, "full-chain integer negation"));
+    return glscheme::rns::glr_ct_neg(
+        m_adapter->GetContext(), ciphertext);
+}
+
+GLIntProductionGLRBridge::NativeCiphertext
 GLIntProductionGLRBridge::EvaluateFullChainIntegerTrace(
     const NativeCiphertext& lhs, const NativeCiphertext& rhs,
     const FullChainIntegerSwitchKey& conjugatedRightKey,

@@ -16,6 +16,60 @@ bool ThrowsContaining(Fn&& fn, const char* needle) {
     return false;
 }
 
+lbcrypto::GLIntProductionGLRBridge::NativeCiphertext
+MakeFinalLevelCiphertext(
+    const lbcrypto::GLRProductionAdapter& adapter) {
+    const auto& context = adapter.GetContext();
+    const std::uint32_t level = context.params.levels() - 1;
+    lbcrypto::GLIntProductionGLRBridge::NativeCiphertext ciphertext;
+    ciphertext.b = glscheme::rns::GlrPoly::zero(
+        context, glscheme::rns::GlrRing::Rp, level, false,
+        glscheme::rns::GlrDomain::Slot);
+    ciphertext.a = glscheme::rns::GlrPoly::zero(
+        context, glscheme::rns::GlrRing::Rp, level, false,
+        glscheme::rns::GlrDomain::Slot);
+    const auto q = context.params.q_chain.front().q;
+    ciphertext.b.data.front() = 17;
+    ciphertext.b.data[ciphertext.b.data.size() / 2] = q - 1;
+    ciphertext.a.data[ciphertext.a.data.size() / 3] = 29;
+    ciphertext.a.data.back() = q - 7;
+    ciphertext.scale = 17.0;
+    ciphertext.level = level;
+    ciphertext.key_id = "integer-q2-untrusted";
+    ciphertext.key_lineage_commitment =
+        "sha256:" + std::string(64, 'd');
+    return ciphertext;
+}
+
+bool ExactNegation(
+    const lbcrypto::GLRProductionAdapter& adapter,
+    const lbcrypto::GLIntProductionGLRBridge::NativeCiphertext& input,
+    const lbcrypto::GLIntProductionGLRBridge::NativeCiphertext& output) {
+    const auto q = adapter.GetContext().params.q_chain.front().q;
+    if (output.level != input.level || output.scale != input.scale ||
+        output.key_id != input.key_id ||
+        output.key_lineage_commitment != input.key_lineage_commitment ||
+        output.b.data.size() != input.b.data.size() ||
+        output.a.data.size() != input.a.data.size()) {
+        return false;
+    }
+    for (std::size_t index = 0; index < input.b.data.size(); ++index) {
+        const auto expected =
+            input.b.data[index] == 0 ? 0 : q - input.b.data[index];
+        if (output.b.data[index] != expected) {
+            return false;
+        }
+    }
+    for (std::size_t index = 0; index < input.a.data.size(); ++index) {
+        const auto expected =
+            input.a.data[index] == 0 ? 0 : q - input.a.data[index];
+        if (output.a.data[index] != expected) {
+            return false;
+        }
+    }
+    return true;
+}
+
 }  // namespace
 
 int main() {
@@ -61,6 +115,16 @@ int main() {
                 bridge.RequireProductionSecurityAuthorization(malformed);
             },
             "malformed GL integer bridge receipt");
+    const auto integerCiphertext = MakeFinalLevelCiphertext(adapter);
+    const auto negated = bridge.NegateFullChain(integerCiphertext);
+    const bool exactNegation =
+        ExactNegation(adapter, integerCiphertext, negated);
+    const bool malformedNegationRejected = ThrowsContaining(
+        [&] {
+            (void)bridge.NegateFullChain(
+                lbcrypto::GLIntProductionGLRBridge::NativeCiphertext{});
+        },
+        "authentic full-chain integer Slot ciphertext");
 
     return capabilities.exactQ2CoefficientBridge &&
                    capabilities.exactQ2SlotBridge &&
@@ -77,11 +141,13 @@ int main() {
                    capabilities.fullChainDenseHadamard &&
                    capabilities.fullChainDenseTraceProduct &&
                    capabilities.fullChainKeyedAutomorphisms &&
+                   capabilities.fullChainNegate &&
                    capabilities.selectableGPUTraceGemm &&
                    capabilities.strictFullChainReceiptValidation &&
                    !capabilities.productionSecurityAuthorized &&
                    !capabilities.bootstrapDirectAdmitted &&
-                   validReceiptRejected && malformedReceiptRejected
+                   validReceiptRejected && malformedReceiptRejected &&
+                   exactNegation && malformedNegationRejected
                ? 0
                : 1;
 }

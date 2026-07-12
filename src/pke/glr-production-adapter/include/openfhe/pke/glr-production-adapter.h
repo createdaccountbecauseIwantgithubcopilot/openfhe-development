@@ -15,6 +15,7 @@
 #include "glscheme/gl128_ciphertext_artifact.hpp"
 #include "glscheme/gl128_h64_bootstrap_research.hpp"
 #include "glscheme/gl128_h64_hidden_selector.hpp"
+#include "glscheme/gl128_h64_w_action_plan.hpp"
 #include "glscheme/glr_device_ks.hpp"
 #include "glscheme/rns_dft_plaintext_provider.hpp"
 #include "glscheme/rns_encode.hpp"
@@ -334,6 +335,14 @@ public:
         glscheme::rns::Gl128H64ResearchAllYStcEvidence;
     using NativeGL128H64ResearchAllYStcResult =
         glscheme::rns::Gl128H64ResearchAllYStcResult;
+    using NativeGL128H64WActionOperationCensus =
+        glscheme::rns::GlrH64WActionOperationCensus;
+    using NativeGL128H64WActionMaterialCensus =
+        glscheme::rns::GlrH64WActionMaterialCensus;
+    using NativeGL128H64WActionResearchEvidence =
+        glscheme::rns::GlrH64WActionResearchEvidence;
+    using NativeGL128H64WActionPlan =
+        glscheme::rns::GlrH64WActionPlan;
     using NativeGL128CiphertextArtifactSink =
         glscheme::rns::Gl128CiphertextArtifactSink;
     using NativeGL128CiphertextArtifactSource =
@@ -396,6 +405,31 @@ public:
         static constexpr bool production_authorization_admitted = false;
     };
 
+    // Allocation-free projection of the authenticated logarithmic W-action
+    // research plan.  The full native plan remains available separately;
+    // these fields are the deployment-facing census/admission summary.
+    struct NativeGL128H64WActionResearchCapabilities final {
+        std::string schema =
+            "openfhe.gl128_h64_w_action_research_capabilities.v1";
+        std::string nativePlanSchema =
+            glscheme::rns::kGlrH64WActionPlanSchema;
+        std::uint64_t currentOracleExternalProducts = 0;
+        std::uint64_t logarithmicExternalProducts = 0;
+        std::uint64_t logarithmicCompactMaterialBytes = 0;
+        std::uint64_t compactBytesIncludingSparseFold = 0;
+        std::uint32_t controlSpecialPrimeCount = 0;
+        std::uint32_t prefixMaskSpecialPrimeCount = 0;
+        std::uint32_t actionKeySpecialPrimeCount = 0;
+        std::uint32_t sparseFoldSpecialPrimeCount = 0;
+        bool allocationFreeCryptographicPlan = false;
+        bool capabilityQueryMaterializesMaterial = false;
+        bool encryptedLogarithmicCircuitExecuted = false;
+        bool exactEstimatorEvidencePresent = false;
+        bool exactNoiseEvidencePresent = false;
+        bool productionSecurityAuthorized = false;
+        bool bootstrapDirectAdmitted = false;
+    };
+
     static_assert(NativeGL128H64ResearchPosture::research_only);
     static_assert(NativeGL128H64ResearchPosture::full_all_y_stc_composed);
     static_assert(NativeGL128H64ResearchAllYStcEvidence::research_only);
@@ -407,6 +441,12 @@ public:
         !NativeGL128H64ResearchPosture::production_security_claim);
     static_assert(
         !NativeGL128H64ResearchPosture::production_authorization_admitted);
+    static_assert(!std::is_convertible_v<
+                  NativeGL128H64WActionPlan,
+                  NativeGL128DirectBootstrapAuthorizationBundle>);
+    static_assert(!std::is_constructible_v<
+                  NativeGL128DirectBootstrapAuthorizationBundle,
+                  NativeGL128H64WActionPlan>);
     static_assert(!std::is_convertible_v<
                   NativeGL128H64ResearchProfileReceipt,
                   NativeGL128DirectBootstrapAuthorizationBundle>);
@@ -1208,6 +1248,9 @@ public:
     // No H64 type converts to production authorization or BootstrapDirect.
     NativeGL128H64ResearchProfileReceipt GetH64ResearchProfile() const;
     NativeGL128H64HiddenSelectorPlan PlanH64HiddenSelector() const;
+    NativeGL128H64WActionPlan PlanH64WActionResearch() const;
+    NativeGL128H64WActionResearchCapabilities
+    GetH64WActionResearchCapabilities() const;
     NativeGL128H64HiddenSelectorBinding BindH64HiddenSelectorManifest(
         const NativeGL128H64HiddenSelectorManifest& manifest) const;
     NativeGL128H64HiddenSelectorGenerationResult
