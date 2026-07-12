@@ -17,6 +17,7 @@
 #include "glscheme/gl128_h64_hidden_selector.hpp"
 #include "glscheme/gl128_h64_p257_one_bit.hpp"
 #include "glscheme/gl128_h64_p257_one_bit_gpu.hpp"
+#include "glscheme/gl128_h64_p257_prefix_splice.hpp"
 #include "glscheme/gl128_h64_root_product_oracle.hpp"
 #include "glscheme/gl128_h64_structured_security_audit.hpp"
 #include "glscheme/gl128_h64_w_action_plan.hpp"
@@ -364,6 +365,12 @@ public:
         glscheme::rns::GlrH64P257OneBitGpuEvidence;
     using NativeGL128H64P257OneBitGpuResult =
         glscheme::rns::GlrH64P257OneBitGpuResult;
+    using NativeGL128H64P257PrefixSpliceMaterial =
+        glscheme::rns::GlrH64P257PrefixSpliceMaterial;
+    using NativeGL128H64P257PrefixSpliceEvidence =
+        glscheme::rns::GlrH64P257PrefixSpliceEvidence;
+    using NativeGL128H64P257PrefixSpliceResult =
+        glscheme::rns::GlrH64P257PrefixSpliceResult;
     using NativeGL128H64CheckedEstimatorTranscript =
         glscheme::rns::GlrH64CheckedEstimatorTranscript;
     using NativeGL128H64StructuredSecurityAudit =
@@ -455,6 +462,31 @@ public:
         bool bootstrapDirectAdmitted = false;
     };
 
+    struct NativeGL128H64P257PrefixSpliceCapabilities final {
+        std::string schema =
+            "openfhe.gl128_h64_p257_prefix_splice_capabilities.v1";
+        std::string nativeMaterialSchema =
+            "glscheme.gl128_h64_p257_prefix_splice_material.v1";
+        std::string nativeEvidenceSchema =
+            "glscheme.gl128_h64_p257_prefix_splice_evidence.v1";
+        std::uint64_t xwCoordinatesPerRequest = 32768;
+        std::uint32_t encryptedWBitsExecuted = 1;
+        std::uint32_t controlSpecialPrimeCount = 13;
+        std::uint32_t maskLevel = 0;
+        std::uint32_t outputLevel = 2;
+        std::uint64_t peakExpandedControlBytes = 159383552;
+        bool cpuValueExecutionExposed = true;
+        bool encryptedBinaryMaskReturned = true;
+        bool encryptedPrefixSpliceExecuted = true;
+        bool fixedWholeFormulaArmsSelected = false;
+        bool keyedWRotationsExecuted = false;
+        bool encryptedDenominatorExecuted = false;
+        bool completeEightBitWActionExecuted = false;
+        bool exactNoiseEvidencePresent = false;
+        bool productionSecurityAuthorized = false;
+        bool bootstrapDirectAdmitted = false;
+    };
+
     // Executable CPU anchor for one canonical encrypted W-index bit.  This
     // is deliberately a distinct capability from the metadata-only complete
     // logarithmic plan: it covers the full 32,768-coordinate grid and the
@@ -539,6 +571,9 @@ public:
                       bootstrap_direct_admitted);
     static_assert(NativeGL128H64P257OneBitGpuEvidence::research_only);
     static_assert(!NativeGL128H64P257OneBitGpuEvidence::gpu_h64_bootstrap_ready);
+    static_assert(NativeGL128H64P257PrefixSpliceEvidence::research_only);
+    static_assert(!NativeGL128H64P257PrefixSpliceEvidence::
+                      production_security_authorized);
     static_assert(!std::is_convertible_v<
                   NativeGL128H64P257OneBitResult,
                   NativeGL128BootstrapResult>);
@@ -1365,6 +1400,15 @@ public:
     NativeGL128H64P257OneBitGpuResult EvaluateH64P257OneBitGpu(
         const NativeGL128H64P257OneBitMaterial& material,
         const NativeGL128H64P257OneBitRequest& request) const;
+    NativeGL128H64P257PrefixSpliceCapabilities
+    GetH64P257PrefixSpliceCapabilities() const;
+    NativeGL128H64P257PrefixSpliceMaterial GenerateH64P257PrefixSpliceMaterial(
+        const SparseSecretKey& sparseKey,
+        const NativeGL128H64HiddenSelectorOwnerSeed& ownerSeed,
+        std::uint64_t seed) const;
+    NativeGL128H64P257PrefixSpliceResult EvaluateH64P257PrefixSpliceCpu(
+        const NativeGL128H64P257PrefixSpliceMaterial& material,
+        std::span<const NativeGL128H64P257OneBitRequest> requests) const;
     NativeGL128H64StructuredSecurityAudit
     AuditH64StructuredSecurity() const;
     NativeGL128H64StructuredSecurityCapabilities

@@ -2783,6 +2783,47 @@ GLRProductionAdapter::EvaluateH64P257OneBitGpu(
         m_context, material, request);
 }
 
+GLRProductionAdapter::NativeGL128H64P257PrefixSpliceCapabilities
+GLRProductionAdapter::GetH64P257PrefixSpliceCapabilities() const {
+    (void)glscheme::rns::glr_gl128_validate_context(m_context);
+    NativeGL128H64P257PrefixSpliceCapabilities capabilities;
+    if (!capabilities.cpuValueExecutionExposed ||
+        !capabilities.encryptedBinaryMaskReturned ||
+        !capabilities.encryptedPrefixSpliceExecuted ||
+        capabilities.fixedWholeFormulaArmsSelected ||
+        capabilities.keyedWRotationsExecuted ||
+        capabilities.encryptedDenominatorExecuted ||
+        capabilities.completeEightBitWActionExecuted ||
+        capabilities.exactNoiseEvidencePresent ||
+        capabilities.productionSecurityAuthorized ||
+        capabilities.bootstrapDirectAdmitted) {
+        throw GlrError(
+            "GLRProductionAdapter: canonical prefix-splice capability "
+            "overstates execution or security admission");
+    }
+    return capabilities;
+}
+
+GLRProductionAdapter::NativeGL128H64P257PrefixSpliceMaterial
+GLRProductionAdapter::GenerateH64P257PrefixSpliceMaterial(
+    const SparseSecretKey& sparseKey,
+    const NativeGL128H64HiddenSelectorOwnerSeed& ownerSeed,
+    std::uint64_t seed) const {
+    (void)glscheme::rns::glr_gl128_validate_context(m_context);
+    GlrRngOwner rng = MakeRng(seed);
+    return glscheme::rns::glr_generate_h64_p257_prefix_splice_material(
+        m_context, sparseKey, ownerSeed, *rng);
+}
+
+GLRProductionAdapter::NativeGL128H64P257PrefixSpliceResult
+GLRProductionAdapter::EvaluateH64P257PrefixSpliceCpu(
+    const NativeGL128H64P257PrefixSpliceMaterial& material,
+    std::span<const NativeGL128H64P257OneBitRequest> requests) const {
+    (void)glscheme::rns::glr_gl128_validate_context(m_context);
+    return glscheme::rns::glr_h64_p257_prefix_splice_cpu(
+        m_context, material, requests);
+}
+
 GLRProductionAdapter::NativeGL128H64StructuredSecurityAudit
 GLRProductionAdapter::AuditH64StructuredSecurity() const {
     const auto transcript =

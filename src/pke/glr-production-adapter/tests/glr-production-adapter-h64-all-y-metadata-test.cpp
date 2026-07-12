@@ -173,6 +173,30 @@ int main() {
                 executeOneBitGpu != nullptr,
             "OpenFHE canonical H64 one-bit execution seam is absent");
 
+    const auto prefix = adapter.GetH64P257PrefixSpliceCapabilities();
+    Require(prefix.schema ==
+                    "openfhe.gl128_h64_p257_prefix_splice_capabilities.v1" &&
+                prefix.xwCoordinatesPerRequest == 32768 &&
+                prefix.encryptedWBitsExecuted == 1 &&
+                prefix.controlSpecialPrimeCount == 13 &&
+                prefix.maskLevel == 0 && prefix.outputLevel == 2 &&
+                prefix.peakExpandedControlBytes == 159383552 &&
+                prefix.cpuValueExecutionExposed &&
+                prefix.encryptedBinaryMaskReturned &&
+                prefix.encryptedPrefixSpliceExecuted &&
+                !prefix.fixedWholeFormulaArmsSelected &&
+                !prefix.keyedWRotationsExecuted &&
+                !prefix.encryptedDenominatorExecuted &&
+                !prefix.completeEightBitWActionExecuted &&
+                !prefix.exactNoiseEvidencePresent &&
+                !prefix.productionSecurityAuthorized &&
+                !prefix.bootstrapDirectAdmitted,
+            "OpenFHE canonical H64 prefix-splice capability is malformed");
+    auto generatePrefix = &Adapter::GenerateH64P257PrefixSpliceMaterial;
+    auto executePrefix = &Adapter::EvaluateH64P257PrefixSpliceCpu;
+    Require(generatePrefix != nullptr && executePrefix != nullptr,
+            "OpenFHE canonical H64 prefix-splice execution seam is absent");
+
     const auto structuredAudit = adapter.AuditH64StructuredSecurity();
     const auto structuredCapabilities =
         adapter.GetH64StructuredSecurityCapabilities();
