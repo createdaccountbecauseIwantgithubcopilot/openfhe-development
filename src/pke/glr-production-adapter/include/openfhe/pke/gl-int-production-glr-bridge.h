@@ -14,6 +14,7 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
 
 namespace lbcrypto {
 
@@ -29,6 +30,11 @@ public:
         bool exactQ2SlotBridge{true};
         bool ownerDerivedNativeLineage{true};
         bool canonicalGL128ProfileBound{true};
+        bool integerTErrHybridKeySwitch{true};
+        bool keyedRowRotation{true};
+        bool keyedInterMatrixRotation{true};
+        bool keyedTranspose{true};
+        bool keyedConjugationFamilySwap{true};
         bool productionSecurityAuthorized{false};
         bool bootstrapDirectAdmitted{false};
     };
@@ -80,6 +86,53 @@ public:
         Receipt receipt;
     };
 
+    enum class IntegerAutomorphism : std::uint8_t {
+        RowRotation,
+        InterMatrixRotation,
+        Transpose,
+        ConjugationFamilySwap,
+    };
+
+    /**
+     * Restricted Q2P1 native hybrid key.  Its single Q2 gadget digit obeys
+     * b+a*s_dst=P1*s_source+t*e; evaluation uses exact Q2->Q2P1 ModUp and
+     * BGV t-corrected ModDown, never the CKKS divide-and-round path.
+     */
+    class IntegerAutomorphismKey final {
+    public:
+        IntegerAutomorphismKey(const IntegerAutomorphismKey&) = delete;
+        IntegerAutomorphismKey& operator=(const IntegerAutomorphismKey&) = delete;
+        IntegerAutomorphismKey(IntegerAutomorphismKey&&) noexcept = default;
+        IntegerAutomorphismKey& operator=(IntegerAutomorphismKey&&) noexcept = default;
+        ~IntegerAutomorphismKey() = default;
+
+        IntegerAutomorphism GetOperation() const noexcept;
+        std::int32_t GetAmount() const noexcept;
+        std::uint32_t GetKeyLevel() const noexcept;
+        std::uint32_t GetSpecialPrimeCount() const noexcept;
+        const std::string& GetNativeKeyLineageCommitment() const noexcept;
+        bool UsesTErrors() const noexcept;
+        bool IsSecurityAuthorized() const noexcept;
+
+    private:
+        friend class GLIntProductionGLRBridge;
+        IntegerAutomorphismKey(IntegerAutomorphism operation,
+                               std::int32_t amount,
+                               glscheme::rns::GlrRing ring,
+                               glscheme::rns::GlrPoly b,
+                               glscheme::rns::GlrPoly a,
+                               std::string parameterFingerprint,
+                               std::string nativeKeyLineageCommitment);
+
+        IntegerAutomorphism m_operation{IntegerAutomorphism::RowRotation};
+        std::int32_t m_amount{0};
+        glscheme::rns::GlrRing m_ring{glscheme::rns::GlrRing::R};
+        glscheme::rns::GlrPoly m_b;
+        glscheme::rns::GlrPoly m_a;
+        std::string m_parameterFingerprint;
+        std::string m_nativeKeyLineageCommitment;
+    };
+
     explicit GLIntProductionGLRBridge(
         const GLRProductionAdapter& adapter);
 
@@ -105,6 +158,13 @@ public:
         const NativeCiphertext& ciphertext,
         const OwnerBinding& owner) const;
 
+    IntegerAutomorphismKey GenerateIntegerAutomorphismKey(
+        const OwnerBinding& owner, IntegerAutomorphism operation,
+        std::int32_t amount = 0, std::uint64_t seed = 0) const;
+    NativeCiphertext EvaluateIntegerAutomorphism(
+        const NativeCiphertext& ciphertext,
+        const IntegerAutomorphismKey& evaluationKey) const;
+
     /** Always throws until an exact randomized Q7/L18 integer lift exists. */
     void RequireBootstrapDirectAdmission(const Receipt& receipt) const;
     /** Always throws for the sparse h<=4/Q2/support-revealing source path. */
@@ -115,6 +175,16 @@ private:
     void ValidateOwner(const std::string& keyTag,
                        const OwnerBinding& owner,
                        const char* operation) const;
+    glscheme::rns::GlrPoly RestrictToQ2P1(
+        const glscheme::rns::GlrPoly& full) const;
+    glscheme::rns::GlrPoly ModUpQ2P1(
+        const glscheme::rns::GlrPoly& input) const;
+    glscheme::rns::GlrPoly BGVModDownP1(
+        const glscheme::rns::GlrPoly& input) const;
+    std::pair<glscheme::rns::GlrPoly, glscheme::rns::GlrPoly>
+    ApplyIntegerSwitch(
+        const glscheme::rns::GlrPoly& input,
+        const IntegerAutomorphismKey& evaluationKey) const;
 
     const GLRProductionAdapter* m_adapter{nullptr};
     std::uint32_t m_q2Level{0};

@@ -10,8 +10,10 @@
 
 #include "utils/hashutil.h"
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -23,6 +25,25 @@ using glscheme::rns::GlrDomain;
 using glscheme::rns::GlrError;
 using glscheme::rns::GlrPoly;
 using glscheme::rns::GlrRing;
+
+struct GlrRngDeleter {
+    void operator()(glscheme::rns::GlrRng* rng) const noexcept {
+        if (rng != nullptr) {
+            glscheme::rns::glr_rng_destroy(rng);
+        }
+    }
+};
+
+using GlrRngOwner =
+    std::unique_ptr<glscheme::rns::GlrRng, GlrRngDeleter>;
+
+struct PolyWipe {
+    explicit PolyWipe(GlrPoly& poly) : value(poly) {}
+    ~PolyWipe() {
+        value.secure_clear();
+    }
+    GlrPoly& value;
+};
 
 constexpr const char* kBootstrapRejection =
     "BootstrapDirect rejected: integer Q2/L23 is not the required randomized "
@@ -97,6 +118,53 @@ GLIntProductionModResidue GaussianResidueAt(
             modulus.q))};
 }
 
+std::pair<std::uint64_t, std::uint64_t> GaussianAtFlat(
+    const glscheme::rns::GlrContext& context, const GlrPoly& poly,
+    std::uint32_t plane, const glscheme::rns::GlrModulus& modulus,
+    std::size_t flat) {
+    const auto plus = poly.lane_ptr(context, plane, 0)[flat];
+    const auto minus = poly.lane_ptr(context, plane, 1)[flat];
+    const auto sum = plus + minus >= modulus.q
+                         ? plus + minus - modulus.q
+                         : plus + minus;
+    const auto difference =
+        plus >= minus ? plus - minus : modulus.q - (minus - plus);
+    return {
+        glscheme::rns::glr_mulmod(sum, modulus.two_inv, modulus.q),
+        glscheme::rns::glr_mulmod(
+            difference,
+            glscheme::rns::glr_mulmod(modulus.two_inv, modulus.u_inv,
+                                      modulus.q),
+            modulus.q)};
+}
+
+std::uint64_t SignedMod(__int128 value, std::uint64_t modulus) noexcept {
+    const auto remainder = value % static_cast<__int128>(modulus);
+    return static_cast<std::uint64_t>(
+        remainder < 0 ? remainder + modulus : remainder);
+}
+
+void SetGaussianAtFlat(const glscheme::rns::GlrContext& context,
+                       GlrPoly* poly, std::uint32_t plane,
+                       const glscheme::rns::GlrModulus& modulus,
+                       std::size_t flat, __int128 real,
+                       __int128 imaginary) {
+    const auto re = SignedMod(real, modulus.q);
+    const auto im = SignedMod(imaginary, modulus.q);
+    const auto uim = glscheme::rns::glr_mulmod(modulus.u, im, modulus.q);
+    poly->lane_ptr(context, plane, 0)[flat] =
+        re + uim >= modulus.q ? re + uim - modulus.q : re + uim;
+    poly->lane_ptr(context, plane, 1)[flat] =
+        re >= uim ? re - uim : modulus.q - (uim - re);
+}
+
+std::int64_t CenterResidue(std::uint64_t value,
+                           std::uint64_t modulus) noexcept {
+    return value <= modulus / 2
+               ? static_cast<std::int64_t>(value)
+               : -static_cast<std::int64_t>(modulus - value);
+}
+
 std::int64_t ReduceModT(__int128 value, std::int64_t t) noexcept {
     const auto remainder = value % t;
     return static_cast<std::int64_t>(remainder < 0 ? remainder + t
@@ -149,6 +217,53 @@ GLIntProductionGLRBridge::OwnerBinding::GetReceipt() const noexcept {
     return m_receipt;
 }
 
+GLIntProductionGLRBridge::IntegerAutomorphismKey::IntegerAutomorphismKey(
+    IntegerAutomorphism operation, std::int32_t amount,
+    glscheme::rns::GlrRing ring, glscheme::rns::GlrPoly b,
+    glscheme::rns::GlrPoly a, std::string parameterFingerprint,
+    std::string nativeKeyLineageCommitment)
+    : m_operation(operation),
+      m_amount(amount),
+      m_ring(ring),
+      m_b(std::move(b)),
+      m_a(std::move(a)),
+      m_parameterFingerprint(std::move(parameterFingerprint)),
+      m_nativeKeyLineageCommitment(
+          std::move(nativeKeyLineageCommitment)) {}
+
+GLIntProductionGLRBridge::IntegerAutomorphism
+GLIntProductionGLRBridge::IntegerAutomorphismKey::GetOperation() const noexcept {
+    return m_operation;
+}
+
+std::int32_t
+GLIntProductionGLRBridge::IntegerAutomorphismKey::GetAmount() const noexcept {
+    return m_amount;
+}
+
+std::uint32_t
+GLIntProductionGLRBridge::IntegerAutomorphismKey::GetKeyLevel() const noexcept {
+    return m_b.level;
+}
+
+std::uint32_t
+GLIntProductionGLRBridge::IntegerAutomorphismKey::GetSpecialPrimeCount() const noexcept {
+    return m_b.special_prime_count;
+}
+
+const std::string& GLIntProductionGLRBridge::IntegerAutomorphismKey::
+    GetNativeKeyLineageCommitment() const noexcept {
+    return m_nativeKeyLineageCommitment;
+}
+
+bool GLIntProductionGLRBridge::IntegerAutomorphismKey::UsesTErrors() const noexcept {
+    return true;
+}
+
+bool GLIntProductionGLRBridge::IntegerAutomorphismKey::IsSecurityAuthorized() const noexcept {
+    return false;
+}
+
 GLIntProductionGLRBridge::GLIntProductionGLRBridge(
     const GLRProductionAdapter& adapter)
     : m_adapter(&adapter) {
@@ -178,6 +293,124 @@ GLIntProductionGLRBridge::GetCapabilities() const noexcept {
 
 std::uint32_t GLIntProductionGLRBridge::GetNativeQ2Level() const noexcept {
     return m_q2Level;
+}
+
+GlrPoly GLIntProductionGLRBridge::RestrictToQ2P1(
+    const GlrPoly& full) const {
+    const auto& context = m_adapter->GetContext();
+    if (full.domain != GlrDomain::Coeff || full.level != 0 ||
+        !full.extended ||
+        full.active_special_prime_count(context) !=
+            context.params.p_special.size()) {
+        throw GLContextMismatchError(
+            "integer hybrid KSK requires a full-QP coefficient source");
+    }
+    GlrPoly out = GlrPoly::zero(context, full.ring, m_q2Level, true,
+                                GlrDomain::Coeff, 1);
+    const auto coefficients = full.ring_coeffs(context);
+    for (std::uint32_t lane = 0; lane < 2; ++lane) {
+        for (std::uint32_t q = 0; q < 2; ++q) {
+            const auto* source = full.lane_ptr(context, q, lane);
+            std::copy(source, source + coefficients,
+                      out.lane_ptr(context, q, lane));
+        }
+        const auto* source = full.lane_ptr(
+            context, context.params.levels(), lane);
+        std::copy(source, source + coefficients,
+                  out.lane_ptr(context, 2, lane));
+    }
+    return out;
+}
+
+GlrPoly GLIntProductionGLRBridge::ModUpQ2P1(
+    const GlrPoly& input) const {
+    const auto& context = m_adapter->GetContext();
+    if (input.domain != GlrDomain::Coeff || input.level != m_q2Level ||
+        input.extended || input.prime_count(context) != 2) {
+        throw GLContextMismatchError(
+            "integer hybrid ModUp requires a Q2/L23 coefficient polynomial");
+    }
+    GlrPoly out = GlrPoly::zero(context, input.ring, m_q2Level, true,
+                                GlrDomain::Coeff, 1);
+    const auto coefficients = input.ring_coeffs(context);
+    for (std::uint32_t lane = 0; lane < 2; ++lane) {
+        for (std::uint32_t q = 0; q < 2; ++q) {
+            const auto* source = input.lane_ptr(context, q, lane);
+            std::copy(source, source + coefficients,
+                      out.lane_ptr(context, q, lane));
+        }
+    }
+    const auto& q0 = context.params.q_chain[0];
+    const auto& q1 = context.params.q_chain[1];
+    const auto& special = context.params.p_special[0];
+    for (std::size_t flat = 0; flat < coefficients; ++flat) {
+        const auto r0 = GaussianAtFlat(context, input, 0, q0, flat);
+        const auto r1 = GaussianAtFlat(context, input, 1, q1, flat);
+        SetGaussianAtFlat(
+            context, &out, 2, special, flat,
+            CenteredCrt(static_cast<std::uint32_t>(r0.first),
+                        static_cast<std::uint32_t>(r1.first), m_q0, m_q1),
+            CenteredCrt(static_cast<std::uint32_t>(r0.second),
+                        static_cast<std::uint32_t>(r1.second), m_q0, m_q1));
+    }
+    return out;
+}
+
+GlrPoly GLIntProductionGLRBridge::BGVModDownP1(
+    const GlrPoly& input) const {
+    const auto& context = m_adapter->GetContext();
+    if (input.domain != GlrDomain::Coeff || input.level != m_q2Level ||
+        !input.extended || input.active_special_prime_count(context) != 1 ||
+        input.prime_count(context) != 3) {
+        throw GLContextMismatchError(
+            "integer hybrid ModDown requires a Q2P1/L23 coefficient polynomial");
+    }
+    GlrPoly out = GlrPoly::zero(context, input.ring, m_q2Level, false,
+                                GlrDomain::Coeff);
+    const auto coefficients = input.ring_coeffs(context);
+    const auto& special = context.params.p_special[0];
+    constexpr std::uint64_t t = 1579009;
+    const auto tInverse =
+        glscheme::rns::glr_invmod(t % special.q, special.q);
+    const std::array<std::uint64_t, 2> inverseSpecial{
+        glscheme::rns::glr_invmod(
+            special.q % context.params.q_chain[0].q,
+            context.params.q_chain[0].q),
+        glscheme::rns::glr_invmod(
+            special.q % context.params.q_chain[1].q,
+            context.params.q_chain[1].q)};
+    for (std::size_t flat = 0; flat < coefficients; ++flat) {
+        const auto dropped = GaussianAtFlat(context, input, 2, special, flat);
+        const auto deltaFor = [&](std::uint64_t value) {
+            const auto product =
+                glscheme::rns::glr_mulmod(value, tInverse, special.q);
+            const auto residue = product == 0 ? 0 : special.q - product;
+            return CenterResidue(residue, special.q);
+        };
+        const auto deltaReal = deltaFor(dropped.first);
+        const auto deltaImaginary = deltaFor(dropped.second);
+        for (std::uint32_t qIndex = 0; qIndex < 2; ++qIndex) {
+            const auto& modulus = context.params.q_chain[qIndex];
+            const auto current =
+                GaussianAtFlat(context, input, qIndex, modulus, flat);
+            const auto reduce = [&](std::uint64_t value,
+                                    std::int64_t delta) {
+                const auto correction = glscheme::rns::glr_mulmod(
+                    t % modulus.q, SignedMod(delta, modulus.q), modulus.q);
+                const auto numerator =
+                    value + correction >= modulus.q
+                        ? value + correction - modulus.q
+                        : value + correction;
+                return glscheme::rns::glr_mulmod(
+                    numerator, inverseSpecial[qIndex], modulus.q);
+            };
+            SetGaussianAtFlat(
+                context, &out, qIndex, modulus, flat,
+                reduce(current.first, deltaReal),
+                reduce(current.second, deltaImaginary));
+        }
+    }
+    return out;
 }
 
 GLIntProductionGLRBridge::Receipt GLIntProductionGLRBridge::MakeReceipt(
@@ -557,6 +790,267 @@ GLIntProductionSlotCiphertext GLIntProductionGLRBridge::ExportSlotCiphertext(
         owner.GetReceipt().integerKeyTag,
         static_cast<std::uint64_t>(m_q0) * m_q1, plaintextScale,
         std::move(values));
+}
+
+GLIntProductionGLRBridge::IntegerAutomorphismKey
+GLIntProductionGLRBridge::GenerateIntegerAutomorphismKey(
+    const OwnerBinding& owner, IntegerAutomorphism operation,
+    std::int32_t amount, std::uint64_t seed) const {
+    ValidateOwner(owner.GetReceipt().integerKeyTag, owner,
+                  "integer automorphism key generation");
+    const auto& context = m_adapter->GetContext();
+    const auto normalize = [](std::int32_t value, std::int32_t modulus) {
+        auto out = value % modulus;
+        return out < 0 ? out + modulus : out;
+    };
+    GlrRing ring = GlrRing::R;
+    switch (operation) {
+        case IntegerAutomorphism::RowRotation:
+            amount = normalize(amount, static_cast<std::int32_t>(context.n()));
+            if (amount == 0) {
+                throw GLDimensionError(
+                    "integer row-rotation key requires a nonzero amount");
+            }
+            break;
+        case IntegerAutomorphism::InterMatrixRotation:
+            amount = normalize(amount,
+                               static_cast<std::int32_t>(context.phi()));
+            if (amount == 0) {
+                throw GLDimensionError(
+                    "integer matrix-rotation key requires a nonzero amount");
+            }
+            break;
+        case IntegerAutomorphism::Transpose:
+            if (amount != 0) {
+                throw GLDimensionError(
+                    "integer transpose key amount must be zero");
+            }
+            ring = GlrRing::Rp;
+            break;
+        case IntegerAutomorphism::ConjugationFamilySwap:
+            if (amount != 0) {
+                throw GLDimensionError(
+                    "integer family-swap key amount must be zero");
+            }
+            break;
+    }
+
+    GlrPoly restricted = RestrictToQ2P1(owner.GetNativeSecretKey().s);
+    PolyWipe restrictedWipe(restricted);
+    GlrPoly source;
+    PolyWipe sourceWipe(source);
+    if (operation == IntegerAutomorphism::Transpose) {
+        GlrPoly embedded =
+            glscheme::rns::glr_embed_r_into(context, restricted, GlrRing::Rp);
+        PolyWipe embeddedWipe(embedded);
+        glscheme::rns::GlrCoeffAutomorphism automorphism;
+        automorphism.swap_xy = true;
+        source = glscheme::rns::glr_apply_coeff_automorphism(
+            context, embedded, automorphism);
+    }
+    else {
+        glscheme::rns::GlrCoeffAutomorphism automorphism;
+        if (operation == IntegerAutomorphism::RowRotation) {
+            automorphism.x_alpha = static_cast<std::int64_t>(
+                glscheme::rns::glr_powmod(5, amount, 4ull * context.n()));
+        }
+        else if (operation == IntegerAutomorphism::InterMatrixRotation) {
+            automorphism.w_alpha = static_cast<std::int64_t>(
+                glscheme::rns::glr_powmod(context.params.gamma, amount,
+                                          context.p_()));
+        }
+        else {
+            automorphism.x_alpha = -1;
+            automorphism.w_alpha = -1;
+            automorphism.conjugate = true;
+        }
+        source = glscheme::rns::glr_apply_coeff_automorphism(
+            context, restricted, automorphism);
+    }
+    GlrPoly destination =
+        ring == GlrRing::R
+            ? restricted
+            : glscheme::rns::glr_embed_r_into(context, restricted, ring);
+    PolyWipe destinationWipe(destination);
+
+    std::vector<std::uint64_t> gadget(
+        context.params.levels() + context.params.p_special.size(), 0);
+    const auto special = context.params.p_special[0].q;
+    gadget[0] = special % context.params.q_chain[0].q;
+    gadget[1] = special % context.params.q_chain[1].q;
+    GlrPoly message = source;
+    PolyWipe messageWipe(message);
+    glscheme::rns::glr_residue_scalar_mul_inplace(context, message, gadget);
+    glscheme::rns::glr_to_slots(context, message);
+    glscheme::rns::glr_to_slots(context, destination);
+
+    GlrRngOwner rng(glscheme::rns::glr_rng_create(seed));
+    if (!rng) {
+        throw GlrError("integer automorphism KSK RNG creation failed");
+    }
+    GlrPoly a = GlrPoly::zero(context, ring, m_q2Level, true,
+                              GlrDomain::Coeff, 1);
+    glscheme::rns::glr_sample_uniform(context, a, *rng);
+    glscheme::rns::glr_to_slots(context, a);
+    GlrPoly product = a;
+    PolyWipe productWipe(product);
+    glscheme::rns::glr_mul_pointwise_inplace(context, product, destination);
+    GlrPoly b = message;
+    glscheme::rns::glr_sub_inplace(context, b, product);
+
+    GlrPoly error = GlrPoly::zero(context, ring, m_q2Level, true,
+                                  GlrDomain::Coeff, 1);
+    PolyWipe errorWipe(error);
+    if (ring == GlrRing::R) {
+        glscheme::rns::glr_sample_error_r(context, error, 3.2, *rng);
+    }
+    else {
+        for (std::uint32_t y = 0; y < context.n(); ++y) {
+            GlrPoly slice = GlrPoly::zero(context, GlrRing::R, m_q2Level,
+                                          true, GlrDomain::Coeff, 1);
+            PolyWipe sliceWipe(slice);
+            glscheme::rns::glr_sample_error_r(context, slice, 3.2, *rng);
+            glscheme::rns::glr_insert_y_slice(context, error, slice, y);
+        }
+    }
+    glscheme::rns::glr_scalar_mul_inplace(context, error, 1579009);
+    glscheme::rns::glr_to_slots(context, error);
+    glscheme::rns::glr_add_inplace(context, b, error);
+
+    return IntegerAutomorphismKey(
+        operation, amount, ring, std::move(b), std::move(a),
+        owner.GetReceipt().parameterFingerprint,
+        owner.GetReceipt().nativeKeyLineageCommitment);
+}
+
+std::pair<GlrPoly, GlrPoly>
+GLIntProductionGLRBridge::ApplyIntegerSwitch(
+    const GlrPoly& input,
+    const IntegerAutomorphismKey& evaluationKey) const {
+    const auto& context = m_adapter->GetContext();
+    if (input.ring != evaluationKey.m_ring || input.extended ||
+        input.level != m_q2Level || evaluationKey.m_b.ring != input.ring ||
+        evaluationKey.m_a.ring != input.ring ||
+        evaluationKey.m_b.domain != GlrDomain::Slot ||
+        evaluationKey.m_a.domain != GlrDomain::Slot ||
+        evaluationKey.m_b.level != m_q2Level ||
+        evaluationKey.m_a.level != m_q2Level ||
+        !evaluationKey.m_b.extended || !evaluationKey.m_a.extended ||
+        evaluationKey.m_b.active_special_prime_count(context) != 1 ||
+        evaluationKey.m_a.active_special_prime_count(context) != 1 ||
+        evaluationKey.m_b.data.size() !=
+            static_cast<std::size_t>(3) * 2 * input.ring_coeffs(context) ||
+        evaluationKey.m_a.data.size() !=
+            static_cast<std::size_t>(3) * 2 * input.ring_coeffs(context)) {
+        throw GLContextMismatchError(
+            "integer hybrid SwitchInt input/key shape mismatch");
+    }
+    const auto originalDomain = input.domain;
+    GlrPoly coefficient = input;
+    if (coefficient.domain == GlrDomain::Slot) {
+        glscheme::rns::glr_to_coeffs(context, coefficient);
+    }
+    GlrPoly lifted = ModUpQ2P1(coefficient);
+    glscheme::rns::glr_to_slots(context, lifted);
+    GlrPoly b = lifted;
+    glscheme::rns::glr_mul_pointwise_inplace(context, b,
+                                              evaluationKey.m_b);
+    GlrPoly a = std::move(lifted);
+    glscheme::rns::glr_mul_pointwise_inplace(context, a,
+                                              evaluationKey.m_a);
+    glscheme::rns::glr_to_coeffs(context, b);
+    glscheme::rns::glr_to_coeffs(context, a);
+    b = BGVModDownP1(b);
+    a = BGVModDownP1(a);
+    if (originalDomain == GlrDomain::Slot) {
+        glscheme::rns::glr_to_slots(context, b);
+        glscheme::rns::glr_to_slots(context, a);
+    }
+    return {std::move(b), std::move(a)};
+}
+
+GLIntProductionGLRBridge::NativeCiphertext
+GLIntProductionGLRBridge::EvaluateIntegerAutomorphism(
+    const NativeCiphertext& ciphertext,
+    const IntegerAutomorphismKey& evaluationKey) const {
+    const auto& context = m_adapter->GetContext();
+    const auto fingerprint =
+        glscheme::rns::glr_parameter_fingerprint(context.params);
+    const auto expectedWords = static_cast<std::size_t>(2) * 2 *
+                               context.params.coeffs_Rp();
+    if (ciphertext.key_id != kUntrustedIntegerKeyDomain ||
+        ciphertext.key_lineage_commitment !=
+            evaluationKey.m_nativeKeyLineageCommitment ||
+        evaluationKey.m_parameterFingerprint != fingerprint ||
+        ciphertext.level != m_q2Level ||
+        ciphertext.b.ring != GlrRing::Rp ||
+        ciphertext.a.ring != GlrRing::Rp ||
+        ciphertext.b.domain != GlrDomain::Slot ||
+        ciphertext.a.domain != GlrDomain::Slot || ciphertext.b.extended ||
+        ciphertext.a.extended || ciphertext.b.level != m_q2Level ||
+        ciphertext.a.level != m_q2Level ||
+        ciphertext.b.data.size() != expectedWords ||
+        ciphertext.a.data.size() != expectedWords) {
+        throw GLContextMismatchError(
+            "integer keyed automorphism requires an authentic untrusted Q2/L23 Slot ciphertext");
+    }
+    static_cast<void>(RequireIntegerScale(ciphertext.scale, 1579009));
+
+    glscheme::rns::GlrSlotAutomorphism automorphism;
+    switch (evaluationKey.m_operation) {
+        case IntegerAutomorphism::RowRotation:
+            automorphism = glscheme::rns::glr_slot_automorphism_for(
+                context, evaluationKey.m_amount, 0, 0, false, false);
+            break;
+        case IntegerAutomorphism::InterMatrixRotation:
+            automorphism = glscheme::rns::glr_slot_automorphism_for(
+                context, 0, 0, evaluationKey.m_amount, false, false);
+            break;
+        case IntegerAutomorphism::Transpose:
+            automorphism = glscheme::rns::glr_slot_automorphism_for(
+                context, 0, 0, 0, true, false);
+            break;
+        case IntegerAutomorphism::ConjugationFamilySwap:
+            automorphism = glscheme::rns::glr_slot_automorphism_for(
+                context, 0, 0, 0, false, true);
+            break;
+    }
+    NativeCiphertext transformed = ciphertext;
+    transformed.b = glscheme::rns::glr_apply_slot_automorphism(
+        context, ciphertext.b, automorphism);
+    transformed.a = glscheme::rns::glr_apply_slot_automorphism(
+        context, ciphertext.a, automorphism);
+
+    std::pair<GlrPoly, GlrPoly> switched;
+    if (evaluationKey.m_ring == GlrRing::Rp) {
+        switched = ApplyIntegerSwitch(transformed.a, evaluationKey);
+    }
+    else {
+        GlrPoly coefficient = transformed.a;
+        glscheme::rns::glr_to_coeffs(context, coefficient);
+        GlrPoly b = GlrPoly::zero(context, GlrRing::Rp, m_q2Level, false,
+                                  GlrDomain::Coeff);
+        GlrPoly a = GlrPoly::zero(context, GlrRing::Rp, m_q2Level, false,
+                                  GlrDomain::Coeff);
+        for (std::uint32_t y = 0; y < context.n(); ++y) {
+            GlrPoly slice =
+                glscheme::rns::glr_extract_y_slice(context, coefficient, y);
+            auto sliceSwitched = ApplyIntegerSwitch(slice, evaluationKey);
+            glscheme::rns::glr_insert_y_slice(context, b,
+                                               sliceSwitched.first, y);
+            glscheme::rns::glr_insert_y_slice(context, a,
+                                               sliceSwitched.second, y);
+        }
+        glscheme::rns::glr_to_slots(context, b);
+        glscheme::rns::glr_to_slots(context, a);
+        switched = {std::move(b), std::move(a)};
+    }
+    glscheme::rns::glr_add_inplace(context, transformed.b, switched.first);
+    transformed.a = std::move(switched.second);
+    transformed.key_id = kUntrustedIntegerKeyDomain;
+    transformed.key_lineage_commitment =
+        evaluationKey.m_nativeKeyLineageCommitment;
+    return transformed;
 }
 
 void GLIntProductionGLRBridge::RequireBootstrapDirectAdmission(
