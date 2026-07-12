@@ -49,11 +49,24 @@ public:
 
 enum class GLShipSelection {
     DIRECT_COLUMN,
+    HYBRID_MASKED_COLUMN,
 };
 
 enum class GLShipRepresentation {
     POST_XINV_COEFFICIENT,
     X_COEFFICIENT_SLOTS,
+};
+
+/**
+ * Public, non-wrapping coarse candidate window in block units for the hybrid
+ * masked-column selection.  A window restricts the encrypted coarse bank of
+ * one support ordinal to blockCount candidate blocks starting at blockBegin.
+ * Windows are a correctness surface only; no spacing-assumption security
+ * claim is made.
+ */
+struct GLShipCoarseWindow {
+    uint32_t blockBegin{0};
+    uint32_t blockCount{0};
 };
 
 struct GLShipParameters {
@@ -62,6 +75,12 @@ struct GLShipParameters {
     std::size_t hammingWeight{2};
     uint32_t reservedLevels{1};
     GLShipSelection selection{GLShipSelection::DIRECT_COLUMN};
+    // Hybrid masked-column selection only: theta, a power of two in [2, n]
+    // dividing n.  Must stay zero for direct-column selection.
+    std::size_t coarseBlockSize{0};
+    // Hybrid only: optional public per-ordinal coarse windows (empty = the
+    // full [0, n/theta) candidate range for every support ordinal).
+    std::vector<GLShipCoarseWindow> coarseWindows{};
 
     uint32_t RequiredMultiplicativeDepth() const;
     void Validate(const GLGeometry& geometry, const GLParameters& glParameters) const;
@@ -80,6 +99,15 @@ public:
     static std::vector<GLShipGaussianInteger> MultiplyMonomial(
         const std::vector<GLShipGaussianInteger>& input, uint32_t alpha, int8_t sign);
 
+    /**
+     * Exact coefficientwise multiplication by +i: (re, im) -> (-im, re).
+     * The evaluator derives the hybrid v-lane tables omega^{Re (i G)[k]} from
+     * it, and the clear hybrid conformance tests pin the per-digit lane
+     * invariant with it.
+     */
+    static std::vector<GLShipGaussianInteger> MultiplyGaussianI(
+        const std::vector<GLShipGaussianInteger>& input);
+
     static std::vector<GLShipGaussianInteger> DecryptionRelation(
         const std::vector<GLShipGaussianInteger>& b,
         const std::vector<GLShipGaussianInteger>& a,
@@ -93,11 +121,17 @@ class GLShipSchemelet;
 class GLShipTestAccess;
 
 /**
- * Evaluator-visible material for the direct-column toy half-bootstrap.
+ * Evaluator-visible material for the direct-column and hybrid masked-column
+ * toy half-bootstraps.
  *
  * The flat selector bank contains fresh primary-key encryptions of joint
- * support/sign indicator bits.  It stores no private key, clear support, clear
- * sign, logical input, or decrypted shadow.
+ * support/sign indicator bits.  For direct-column keys it is the 2*h*n joint
+ * bank; for hybrid keys it is the coarse (block, sign) bank over the public
+ * per-ordinal windows, and the fine bank additionally holds the three
+ * mask-fused encrypted digit pieces PH/PL/NG per binary digit of each
+ * alpha0_t.  It stores no private key, clear support, clear sign, clear digit
+ * bit, logical input, or decrypted shadow; bank shapes depend only on the
+ * public (n, theta, h, windows).
  */
 class GLShipEvaluationKey final {
 public:
@@ -107,6 +141,7 @@ public:
     const std::string& GetPrimaryKeyTag() const noexcept;
     uint64_t GetBottomModulus() const noexcept;
     std::size_t GetSelectorCount() const noexcept;
+    std::size_t GetFineSelectorCount() const noexcept;
 
 private:
     friend class GLShipSchemelet;
@@ -116,6 +151,7 @@ private:
                         std::string sparseKeyTag, std::string primaryKeyTag, uint64_t q0,
                         EvalKey<DCRTPoly> bottomPrimaryToSparseKey,
                         std::vector<Ciphertext<DCRTPoly>> selectors,
+                        std::vector<Ciphertext<DCRTPoly>> fineSelectors,
                         std::vector<EvalKey<DCRTPoly>> relinearizationKeys,
                         std::shared_ptr<std::map<uint32_t, EvalKey<DCRTPoly>>> conjugationKeys,
                         std::shared_ptr<std::map<uint32_t, EvalKey<DCRTPoly>>> xForwardKeys);
@@ -127,6 +163,7 @@ private:
     uint64_t m_q0;
     EvalKey<DCRTPoly> m_bottomPrimaryToSparseKey;
     std::vector<Ciphertext<DCRTPoly>> m_selectors;
+    std::vector<Ciphertext<DCRTPoly>> m_fineSelectors;
     std::vector<EvalKey<DCRTPoly>> m_relinearizationKeys;
     std::shared_ptr<std::map<uint32_t, EvalKey<DCRTPoly>>> m_conjugationKeys;
     std::shared_ptr<std::map<uint32_t, EvalKey<DCRTPoly>>> m_xForwardKeys;
@@ -245,6 +282,13 @@ private:
 
     std::size_t SelectorIndex(std::size_t supportOrdinal, std::size_t alpha,
                               int8_t sign) const;
+    std::size_t CoarseSelectorIndex(std::size_t supportOrdinal, std::size_t blockOffset,
+                                    int8_t sign) const;
+    std::size_t FineSelectorIndex(std::size_t supportOrdinal, uint32_t digit,
+                                  std::size_t piece) const;
+    Ciphertext<DCRTPoly> EvalHybridLeaf(const std::vector<GLShipGaussianInteger>& branchA,
+                                        std::size_t supportOrdinal,
+                                        const GLShipEvaluationKey& evaluationKey) const;
     void ValidatePrimaryKeyPair(const KeyPair<DCRTPoly>& primaryKeyPair) const;
     void ValidateEvaluationKey(const GLShipEvaluationKey& evaluationKey) const;
     void ValidateLowSlice(const GLShipLowSliceCiphertext& input,

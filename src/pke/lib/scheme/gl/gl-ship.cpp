@@ -36,6 +36,75 @@ uint32_t CeilLog2(std::size_t value) {
     return result;
 }
 
+// The hybrid coarse block size theta must be a power of two in [2, n] that
+// divides n.  For a power of two, CeilLog2 is the exact binary digit count
+// of the fine chain.
+bool IsHybridBlockSizeValid(std::size_t coarseBlockSize, std::size_t dimension) {
+    return coarseBlockSize >= 2 && coarseBlockSize <= dimension && dimension != 0 &&
+           dimension % coarseBlockSize == 0 &&
+           (coarseBlockSize & (coarseBlockSize - 1)) == 0;
+}
+
+// Selection-dependent evaluation depth before the reserved budget:
+//   direct: 1 (selection) + ceil(log2(h)) (tree) + 1 (XFwd)
+//   hybrid: 1 (coarse)   + log2(theta) (fine digits)
+//           + ceil(log2(h+1)) (tree over h leaves + the base plaintext node)
+//           + 1 (XFwd)
+uint32_t SelectionEvaluationDepth(const GLShipParameters& parameters) {
+    if (parameters.selection == GLShipSelection::HYBRID_MASKED_COLUMN) {
+        return 2 + CeilLog2(parameters.coarseBlockSize) +
+               CeilLog2(parameters.hammingWeight + 1);
+    }
+    return 2 + CeilLog2(parameters.hammingWeight);
+}
+
+// Per-ordinal coarse candidate window in block units (full range when the
+// public window list is empty).
+std::pair<uint32_t, uint32_t> CoarseWindowOf(const GLShipParameters& parameters,
+                                             std::size_t dimension,
+                                             std::size_t supportOrdinal) {
+    const auto blocks = static_cast<uint32_t>(dimension / parameters.coarseBlockSize);
+    if (parameters.coarseWindows.empty()) {
+        return {0, blocks};
+    }
+    const auto& window = parameters.coarseWindows[supportOrdinal];
+    return {window.blockBegin, window.blockCount};
+}
+
+std::size_t ExpectedCoarseSelectorCount(const GLShipParameters& parameters,
+                                        std::size_t dimension) {
+    if (parameters.selection != GLShipSelection::HYBRID_MASKED_COLUMN) {
+        return 2 * parameters.hammingWeight * dimension;
+    }
+    std::size_t total = 0;
+    for (std::size_t ordinal = 0; ordinal < parameters.hammingWeight; ++ordinal) {
+        total += 2 * CoarseWindowOf(parameters, dimension, ordinal).second;
+    }
+    return total;
+}
+
+std::size_t ExpectedFineSelectorCount(const GLShipParameters& parameters) {
+    if (parameters.selection != GLShipSelection::HYBRID_MASKED_COLUMN) {
+        return 0;
+    }
+    return 3 * parameters.hammingWeight *
+           static_cast<std::size_t>(CeilLog2(parameters.coarseBlockSize));
+}
+
+bool SameCoarseWindows(const std::vector<GLShipCoarseWindow>& lhs,
+                       const std::vector<GLShipCoarseWindow>& rhs) {
+    if (lhs.size() != rhs.size()) {
+        return false;
+    }
+    for (std::size_t index = 0; index < lhs.size(); ++index) {
+        if (lhs[index].blockBegin != rhs[index].blockBegin ||
+            lhs[index].blockCount != rhs[index].blockCount) {
+            return false;
+        }
+    }
+    return true;
+}
+
 uint64_t ToUint64(const NativeInteger& value) {
     return static_cast<uint64_t>(value.ConvertToInt());
 }
@@ -283,10 +352,19 @@ uint32_t GLShipParameters::RequiredMultiplicativeDepth() const {
     if (hammingWeight == 0) {
         return std::numeric_limits<uint32_t>::max();
     }
-    // One level selects the direct-column leaves, ceil(log2(h)) levels reduce
-    // their balanced product, and one final level realizes XFwd.  Reserved
-    // levels are live after the ordinary refresh returns.
-    const uint32_t evaluationDepth = 2 + CeilLog2(hammingWeight);
+    // Direct column: one level selects the leaves, ceil(log2(h)) levels
+    // reduce their balanced product, and one final level realizes XFwd.
+    // Hybrid masked column: one level accumulates the coarse lanes, each of
+    // the log2(theta) fine digits consumes one relinearized ct*ct level, the
+    // tree reduces h leaves plus the base plaintext node in ceil(log2(h+1))
+    // levels, and one final level realizes XFwd.  Reserved levels are live
+    // after the ordinary refresh returns.  A structurally invalid hybrid
+    // block size fails closed as unsatisfiable depth (Validate names it).
+    if (selection == GLShipSelection::HYBRID_MASKED_COLUMN &&
+        !IsHybridBlockSizeValid(coarseBlockSize, dimension)) {
+        return std::numeric_limits<uint32_t>::max();
+    }
+    const uint32_t evaluationDepth = SelectionEvaluationDepth(*this);
     if (reservedLevels > std::numeric_limits<uint32_t>::max() - evaluationDepth) {
         return std::numeric_limits<uint32_t>::max();
     }
@@ -295,6 +373,8 @@ uint32_t GLShipParameters::RequiredMultiplicativeDepth() const {
 
 void GLShipParameters::Validate(const GLGeometry& geometry,
                                 const GLParameters& glParameters) const {
+    // The dimension gate fires before any selection logic, so every selection
+    // mode keeps failing closed at n=4096 pending production parameters.
     if (dimension != geometry.GetDimension() || (dimension != 4 && dimension != 8)) {
         throw GLShipParameterError("GL SHIP conformance supports only matching n=4 or n=8");
     }
@@ -307,12 +387,38 @@ void GLShipParameters::Validate(const GLGeometry& geometry,
     if (reservedLevels == 0) {
         throw GLShipParameterError("GL SHIP requires at least one reserved post-bootstrap level");
     }
-    const uint32_t evaluationDepth = 2 + CeilLog2(hammingWeight);
+    if (selection != GLShipSelection::DIRECT_COLUMN &&
+        selection != GLShipSelection::HYBRID_MASKED_COLUMN) {
+        throw GLShipUnsupportedError(
+            "GL SHIP currently supports direct-column and hybrid masked-column selection only");
+    }
+    if (selection == GLShipSelection::DIRECT_COLUMN) {
+        if (coarseBlockSize != 0 || !coarseWindows.empty()) {
+            throw GLShipParameterError(
+                "GL SHIP direct-column selection takes no hybrid coarse parameters");
+        }
+    }
+    else {
+        if (!IsHybridBlockSizeValid(coarseBlockSize, dimension)) {
+            throw GLShipParameterError(
+                "GL SHIP hybrid coarse block size must be a power of two in [2, n] that divides n");
+        }
+        if (!coarseWindows.empty() && coarseWindows.size() != hammingWeight) {
+            throw GLShipParameterError(
+                "GL SHIP hybrid coarse windows must provide one window per support ordinal");
+        }
+        const auto blocks = dimension / coarseBlockSize;
+        for (const auto& window : coarseWindows) {
+            if (window.blockCount == 0 || window.blockBegin >= blocks ||
+                static_cast<std::size_t>(window.blockBegin) + window.blockCount > blocks) {
+                throw GLShipParameterError(
+                    "GL SHIP hybrid coarse window exceeds the candidate block range");
+            }
+        }
+    }
+    const uint32_t evaluationDepth = SelectionEvaluationDepth(*this);
     if (reservedLevels > std::numeric_limits<uint32_t>::max() - evaluationDepth) {
         throw GLShipParameterError("GL SHIP multiplicative-depth requirement overflows uint32_t");
-    }
-    if (selection != GLShipSelection::DIRECT_COLUMN) {
-        throw GLShipUnsupportedError("GL SHIP currently supports direct-column selection only");
     }
     if (!glParameters.RequestsExactNativeRing() ||
         glParameters.ringDimension != geometry.GetNativeRingDimension()) {
@@ -352,6 +458,16 @@ std::vector<GLShipGaussianInteger> GLShipAlgebra::MultiplyMonomial(
     return result;
 }
 
+std::vector<GLShipGaussianInteger> GLShipAlgebra::MultiplyGaussianI(
+    const std::vector<GLShipGaussianInteger>& input) {
+    std::vector<GLShipGaussianInteger> result;
+    result.reserve(input.size());
+    for (const auto& value : input) {
+        result.emplace_back(-value.imag(), value.real());
+    }
+    return result;
+}
+
 std::vector<GLShipGaussianInteger> GLShipAlgebra::DecryptionRelation(
     const std::vector<GLShipGaussianInteger>& b,
     const std::vector<GLShipGaussianInteger>& a,
@@ -387,6 +503,7 @@ GLShipEvaluationKey::GLShipEvaluationKey(
     std::string sparseKeyTag, std::string primaryKeyTag, uint64_t q0,
     EvalKey<DCRTPoly> bottomPrimaryToSparseKey,
     std::vector<Ciphertext<DCRTPoly>> selectors,
+    std::vector<Ciphertext<DCRTPoly>> fineSelectors,
     std::vector<EvalKey<DCRTPoly>> relinearizationKeys,
     std::shared_ptr<std::map<uint32_t, EvalKey<DCRTPoly>>> conjugationKeys,
     std::shared_ptr<std::map<uint32_t, EvalKey<DCRTPoly>>> xForwardKeys)
@@ -397,6 +514,7 @@ GLShipEvaluationKey::GLShipEvaluationKey(
       m_q0(q0),
       m_bottomPrimaryToSparseKey(std::move(bottomPrimaryToSparseKey)),
       m_selectors(std::move(selectors)),
+      m_fineSelectors(std::move(fineSelectors)),
       m_relinearizationKeys(std::move(relinearizationKeys)),
       m_conjugationKeys(std::move(conjugationKeys)),
       m_xForwardKeys(std::move(xForwardKeys)) {}
@@ -423,6 +541,10 @@ uint64_t GLShipEvaluationKey::GetBottomModulus() const noexcept {
 
 std::size_t GLShipEvaluationKey::GetSelectorCount() const noexcept {
     return m_selectors.size();
+}
+
+std::size_t GLShipEvaluationKey::GetFineSelectorCount() const noexcept {
+    return m_fineSelectors.size();
 }
 
 GLShipClientMaterial::GLShipClientMaterial(PrivateKey<DCRTPoly> sparseSecretKey,
@@ -549,6 +671,34 @@ std::size_t GLShipSchemelet::SelectorIndex(std::size_t supportOrdinal,
     return (supportOrdinal * m_geometry.GetDimension() + alpha) * 2 + signIndex;
 }
 
+std::size_t GLShipSchemelet::CoarseSelectorIndex(std::size_t supportOrdinal,
+                                                 std::size_t blockOffset, int8_t sign) const {
+    if (m_parameters.selection != GLShipSelection::HYBRID_MASKED_COLUMN ||
+        supportOrdinal >= m_parameters.hammingWeight || (sign != -1 && sign != 1)) {
+        throw GLShipParameterError("GL SHIP hybrid selection index is outside the coarse bank");
+    }
+    const auto n = m_geometry.GetDimension();
+    std::size_t base = 0;
+    for (std::size_t ordinal = 0; ordinal < supportOrdinal; ++ordinal) {
+        base += 2 * CoarseWindowOf(m_parameters, n, ordinal).second;
+    }
+    if (blockOffset >= CoarseWindowOf(m_parameters, n, supportOrdinal).second) {
+        throw GLShipParameterError("GL SHIP hybrid selection index is outside the coarse bank");
+    }
+    const std::size_t signIndex = sign == -1 ? 0 : 1;
+    return base + 2 * blockOffset + signIndex;
+}
+
+std::size_t GLShipSchemelet::FineSelectorIndex(std::size_t supportOrdinal, uint32_t digit,
+                                               std::size_t piece) const {
+    const auto digits = CeilLog2(m_parameters.coarseBlockSize);
+    if (m_parameters.selection != GLShipSelection::HYBRID_MASKED_COLUMN ||
+        supportOrdinal >= m_parameters.hammingWeight || digit >= digits || piece >= 3) {
+        throw GLShipParameterError("GL SHIP hybrid selection index is outside the coarse bank");
+    }
+    return (supportOrdinal * digits + digit) * 3 + piece;
+}
+
 void GLShipSchemelet::ValidatePrimaryKeyPair(
     const KeyPair<DCRTPoly>& primaryKeyPair) const {
     if (!primaryKeyPair.good() || !primaryKeyPair.publicKey || !primaryKeyPair.secretKey) {
@@ -577,6 +727,21 @@ GLShipClientMaterial GLShipSchemelet::KeyGen(
             (monomial.sign != -1 && monomial.sign != 1) ||
             !seen.insert(monomial.alpha).second) {
             throw GLShipParameterError("GL SHIP support contains an invalid or duplicate monomial");
+        }
+    }
+    if (m_parameters.selection == GLShipSelection::HYBRID_MASKED_COLUMN &&
+        !m_parameters.coarseWindows.empty()) {
+        // Client-side (key-generation) rule: the evaluator never learns the
+        // live block, so window containment can only be checked here.
+        for (std::size_t ordinal = 0; ordinal < support.size(); ++ordinal) {
+            const auto liveBlock = support[ordinal].alpha /
+                                   static_cast<uint32_t>(m_parameters.coarseBlockSize);
+            const auto& window = m_parameters.coarseWindows[ordinal];
+            if (liveBlock < window.blockBegin ||
+                liveBlock >= window.blockBegin + window.blockCount) {
+                throw GLShipParameterError(
+                    "GL SHIP hybrid coarse window cannot contain its support ordinal");
+            }
         }
     }
 
@@ -627,27 +792,84 @@ GLShipClientMaterial GLShipSchemelet::KeyGen(
     }
 
     const auto n = m_geometry.GetDimension();
+    // Every selector-class object (direct joint bits, hybrid coarse bits, and
+    // hybrid fine mask-fused digit pieces) is a fresh primary-key encryption
+    // in one uniform metadata class: level 0, noise-scale degree 1, n slots,
+    // full towers.
+    const auto encryptSelectorValues =
+        [&](const std::vector<std::complex<double>>& values) {
+            auto plaintext = m_context->MakeCKKSPackedPlaintext(
+                values, 1, 0, nullptr, static_cast<uint32_t>(n));
+            if (!plaintext) {
+                throw GLShipEvaluationKeyError("GL SHIP failed to encode a selector");
+            }
+            auto selector = m_context->Encrypt(primaryKeyPair.publicKey, plaintext);
+            if (!selector || selector->NumberCiphertextElements() != 2 ||
+                selector->GetKeyTag() != primaryKeyPair.publicKey->GetKeyTag()) {
+                throw GLShipEvaluationKeyError("GL SHIP failed to encrypt a selector");
+            }
+            return selector;
+        };
+
     std::vector<Ciphertext<DCRTPoly>> selectors;
-    selectors.reserve(2 * m_parameters.hammingWeight * n);
-    for (std::size_t ordinal = 0; ordinal < support.size(); ++ordinal) {
-        for (std::size_t alpha = 0; alpha < n; ++alpha) {
-            for (const int8_t sign : {int8_t(-1), int8_t(1)}) {
-                const double bit = support[ordinal].alpha == alpha &&
-                                           support[ordinal].sign == sign
-                                       ? 1.0
-                                       : 0.0;
-                std::vector<std::complex<double>> values(n, {bit, 0.0});
-                auto plaintext = m_context->MakeCKKSPackedPlaintext(
-                    values, 1, 0, nullptr, static_cast<uint32_t>(n));
-                if (!plaintext) {
-                    throw GLShipEvaluationKeyError("GL SHIP failed to encode a selector");
+    std::vector<Ciphertext<DCRTPoly>> fineSelectors;
+    if (m_parameters.selection == GLShipSelection::DIRECT_COLUMN) {
+        selectors.reserve(2 * m_parameters.hammingWeight * n);
+        for (std::size_t ordinal = 0; ordinal < support.size(); ++ordinal) {
+            for (std::size_t alpha = 0; alpha < n; ++alpha) {
+                for (const int8_t sign : {int8_t(-1), int8_t(1)}) {
+                    const double bit = support[ordinal].alpha == alpha &&
+                                               support[ordinal].sign == sign
+                                           ? 1.0
+                                           : 0.0;
+                    std::vector<std::complex<double>> values(n, {bit, 0.0});
+                    selectors.push_back(encryptSelectorValues(values));
                 }
-                auto selector = m_context->Encrypt(primaryKeyPair.publicKey, plaintext);
-                if (!selector || selector->NumberCiphertextElements() != 2 ||
-                    selector->GetKeyTag() != primaryKeyPair.publicKey->GetKeyTag()) {
-                    throw GLShipEvaluationKeyError("GL SHIP failed to encrypt a selector");
+            }
+        }
+    }
+    else {
+        const auto theta = m_parameters.coarseBlockSize;
+        const auto digits = CeilLog2(theta);
+        // Coarse (block, sign) one-hot bank over the public per-ordinal
+        // windows: ordinal ascending, block ascending, sign -1 then +1.
+        // Exactly one live candidate per ordinal at (alpha_t/theta, sigma_t);
+        // dead candidates are fresh encryptions of zero.
+        selectors.reserve(ExpectedCoarseSelectorCount(m_parameters, n));
+        for (std::size_t ordinal = 0; ordinal < support.size(); ++ordinal) {
+            const auto window = CoarseWindowOf(m_parameters, n, ordinal);
+            const auto liveBlock =
+                support[ordinal].alpha / static_cast<uint32_t>(theta);
+            for (uint32_t offset = 0; offset < window.second; ++offset) {
+                const uint32_t block = window.first + offset;
+                for (const int8_t sign : {int8_t(-1), int8_t(1)}) {
+                    const double bit =
+                        block == liveBlock && support[ordinal].sign == sign ? 1.0 : 0.0;
+                    std::vector<std::complex<double>> values(n, {bit, 0.0});
+                    selectors.push_back(encryptSelectorValues(values));
                 }
-                selectors.push_back(std::move(selector));
+            }
+        }
+        // Fine mask-fused digit bank: ordinal ascending, digit ascending
+        // (LSB first), pieces PH = Enc(a*mHigh), PL = Enc(a*mLow),
+        // NG = Enc(1-a).  Per digit the three pieces sum to the all-ones
+        // vector; both digit polarities are therefore present.
+        fineSelectors.reserve(ExpectedFineSelectorCount(m_parameters));
+        for (std::size_t ordinal = 0; ordinal < support.size(); ++ordinal) {
+            const auto alpha0 = support[ordinal].alpha % static_cast<uint32_t>(theta);
+            for (uint32_t digit = 0; digit < digits; ++digit) {
+                const double bit = static_cast<double>((alpha0 >> digit) & 1u);
+                const std::size_t delta = std::size_t{1} << digit;
+                std::vector<std::complex<double>> rotateHigh(n);
+                std::vector<std::complex<double>> rotateLow(n);
+                std::vector<std::complex<double>> identity(n, {1.0 - bit, 0.0});
+                for (std::size_t slot = 0; slot < n; ++slot) {
+                    rotateHigh[slot] = {slot >= delta ? bit : 0.0, 0.0};
+                    rotateLow[slot] = {slot < delta ? bit : 0.0, 0.0};
+                }
+                fineSelectors.push_back(encryptSelectorValues(rotateHigh));
+                fineSelectors.push_back(encryptSelectorValues(rotateLow));
+                fineSelectors.push_back(encryptSelectorValues(identity));
             }
         }
     }
@@ -656,8 +878,8 @@ GLShipClientMaterial GLShipSchemelet::KeyGen(
         m_parameters, m_context, sparseSecret->GetKeyTag(),
         primaryKeyPair.publicKey->GetKeyTag(), BottomModulus(m_context),
         std::move(bottomPrimaryToSparseKey), std::move(selectors),
-        std::move(relinearizationKeys), std::move(conjugationKeys),
-        std::move(xForwardKeys));
+        std::move(fineSelectors), std::move(relinearizationKeys),
+        std::move(conjugationKeys), std::move(xForwardKeys));
     ValidateEvaluationKey(evaluationKey);
     return GLShipClientMaterial(std::move(sparseSecret), std::move(evaluationKey));
 }
@@ -713,7 +935,10 @@ void GLShipSchemelet::ValidateEvaluationKey(
         evaluationKey.m_parameters.hammingWeight != m_parameters.hammingWeight ||
         evaluationKey.m_parameters.gamma != m_parameters.gamma ||
         evaluationKey.m_parameters.reservedLevels != m_parameters.reservedLevels ||
-        evaluationKey.m_parameters.selection != m_parameters.selection) {
+        evaluationKey.m_parameters.selection != m_parameters.selection ||
+        evaluationKey.m_parameters.coarseBlockSize != m_parameters.coarseBlockSize ||
+        !SameCoarseWindows(evaluationKey.m_parameters.coarseWindows,
+                           m_parameters.coarseWindows)) {
         throw GLShipEvaluationKeyError("GL SHIP evaluation-key parameters do not match");
     }
     if (evaluationKey.m_q0 != BottomModulus(m_context) ||
@@ -760,25 +985,54 @@ void GLShipSchemelet::ValidateEvaluationKey(
         throw GLShipEvaluationKeyError(
             "GL SHIP primary-to-sparse switch is not restricted to exactly q0*p0");
     }
-    const auto expectedSelectors = 2 * m_parameters.hammingWeight * m_geometry.GetDimension();
+    const bool hybrid =
+        m_parameters.selection == GLShipSelection::HYBRID_MASKED_COLUMN;
+    const auto expectedSelectors =
+        ExpectedCoarseSelectorCount(m_parameters, m_geometry.GetDimension());
     if (evaluationKey.m_selectors.size() != expectedSelectors) {
-        throw GLShipEvaluationKeyError("GL SHIP direct-column selector bank has the wrong size");
+        // A 2*h*n direct bank presented to a hybrid schemelet (or any
+        // window/theta mismatch that survives the fingerprint) fails here.
+        throw GLShipEvaluationKeyError(
+            hybrid ? "GL SHIP hybrid coarse selector bank has the wrong size"
+                   : "GL SHIP direct-column selector bank has the wrong size");
     }
     const auto fullTowerCount =
         ckksParameters->GetElementParams()->GetParams().size();
     const auto selectorScalingFactor = ckksParameters->GetScalingFactorReal(0);
+    const auto selectorMetadataIsValid = [&](const Ciphertext<DCRTPoly>& selector) {
+        return selector && selector->GetCryptoContext().get() == m_context.get() &&
+               selector->GetKeyTag() == evaluationKey.m_primaryKeyTag &&
+               selector->NumberCiphertextElements() == 2 && selector->GetLevel() == 0 &&
+               selector->GetEncodingType() == CKKS_PACKED_ENCODING &&
+               selector->GetSlots() == m_geometry.GetDimension() &&
+               selector->GetNoiseScaleDeg() == 1 &&
+               selector->GetScalingFactor() == selectorScalingFactor &&
+               selector->GetScalingFactorInt() == NativeInteger(1) &&
+               TowerCount(selector) == fullTowerCount &&
+               selector->GetElements()[1].GetNumOfElements() == fullTowerCount;
+    };
     for (const auto& selector : evaluationKey.m_selectors) {
-        if (!selector || selector->GetCryptoContext().get() != m_context.get() ||
-            selector->GetKeyTag() != evaluationKey.m_primaryKeyTag ||
-            selector->NumberCiphertextElements() != 2 || selector->GetLevel() != 0 ||
-            selector->GetEncodingType() != CKKS_PACKED_ENCODING ||
-            selector->GetSlots() != m_geometry.GetDimension() ||
-            selector->GetNoiseScaleDeg() != 1 ||
-            selector->GetScalingFactor() != selectorScalingFactor ||
-            selector->GetScalingFactorInt() != NativeInteger(1) ||
-            TowerCount(selector) != fullTowerCount ||
-            selector->GetElements()[1].GetNumOfElements() != fullTowerCount) {
+        if (!selectorMetadataIsValid(selector)) {
             throw GLShipEvaluationKeyError("GL SHIP selector metadata is invalid");
+        }
+    }
+    if (!hybrid) {
+        if (!evaluationKey.m_fineSelectors.empty()) {
+            throw GLShipEvaluationKeyError(
+                "GL SHIP direct-column key must not carry hybrid fine mux material");
+        }
+    }
+    else {
+        if (evaluationKey.m_fineSelectors.size() !=
+            ExpectedFineSelectorCount(m_parameters)) {
+            throw GLShipEvaluationKeyError(
+                "GL SHIP hybrid fine mux-key bank is missing a digit or polarity");
+        }
+        for (const auto& fineSelector : evaluationKey.m_fineSelectors) {
+            if (!selectorMetadataIsValid(fineSelector)) {
+                throw GLShipEvaluationKeyError(
+                    "GL SHIP hybrid fine mux-key metadata is invalid");
+            }
         }
     }
     if (evaluationKey.m_relinearizationKeys.empty()) {
@@ -881,6 +1135,155 @@ void GLShipSchemelet::ValidateLowSlice(
 // Everything until GL_SHIP_EVALUATOR_END is evaluator-side code.  Static
 // trust-boundary audits forbid private-key access and decryption in this span.
 // GL_SHIP_EVALUATOR_BEGIN
+
+/**
+ * One hybrid masked-column leaf (GL_bootstrap Alg. 3 lines 10-11).
+ *
+ * Coarse stage: the (block, sign) one-hot bank of this support ordinal is
+ * accumulated against the two input-specific public lane tables
+ * u = omega^{Re G} and v = omega^{Re iG}, G = sigma A^{(b)} X^{theta j1},
+ * in one level.  Fine stage: for each binary digit of alpha0 (LSB first) the
+ * three mask-fused encrypted pieces PH/PL/NG drive a full mux over the
+ * slot-rotated frontiers with the exact X^n = i wrap law
+ *   U' = PH*Rot(U) + PL*Rot(V) + NG*U
+ *   V' = PH*Rot(V) + PL*conj(Rot(U)) + NG*V
+ * at one relinearized ct*ct level per digit; the final digit updates only U.
+ * The op sequence never branches on secret data: identical circuits for all
+ * key contents.  Frontiers and the returned leaf are derived intermediates
+ * (JIT premux) -- they are consumed by the caller's product tree and never
+ * serialized or cached.
+ */
+Ciphertext<DCRTPoly> GLShipSchemelet::EvalHybridLeaf(
+    const std::vector<GLShipGaussianInteger>& branchA, std::size_t supportOrdinal,
+    const GLShipEvaluationKey& evaluationKey) const {
+    const auto n = m_geometry.GetDimension();
+    const auto theta = m_parameters.coarseBlockSize;
+    const auto digits = CeilLog2(theta);
+    const auto window = CoarseWindowOf(m_parameters, n, supportOrdinal);
+
+    // Coarse masked-column accumulation over both factor lanes.  The lane
+    // tables are produced just in time from the public branch component and
+    // discarded with this scope.
+    Ciphertext<DCRTPoly> laneU;
+    Ciphertext<DCRTPoly> laneV;
+    for (uint32_t offset = 0; offset < window.second; ++offset) {
+        const uint32_t block = window.first + offset;
+        for (const int8_t sign : {int8_t(-1), int8_t(1)}) {
+            const auto shifted = GLShipAlgebra::MultiplyMonomial(
+                branchA, static_cast<uint32_t>(theta) * block, sign);
+            const auto shiftedTimesI = GLShipAlgebra::MultiplyGaussianI(shifted);
+            std::vector<std::complex<double>> uTable(n);
+            std::vector<std::complex<double>> vTable(n);
+            for (std::size_t coefficient = 0; coefficient < n; ++coefficient) {
+                uTable[coefficient] =
+                    RootOfUnity(evaluationKey.m_q0, shifted[coefficient].real());
+                vTable[coefficient] =
+                    RootOfUnity(evaluationKey.m_q0, shiftedTimesI[coefficient].real());
+            }
+            auto uPlaintext = m_context->MakeCKKSPackedPlaintext(
+                uTable, 1, 0, nullptr, static_cast<uint32_t>(n));
+            auto vPlaintext = m_context->MakeCKKSPackedPlaintext(
+                vTable, 1, 0, nullptr, static_cast<uint32_t>(n));
+            if (!uPlaintext || !vPlaintext) {
+                throw GLShipStateError("GL SHIP failed to encode a hybrid coarse lane table");
+            }
+            const auto selectorIndex = CoarseSelectorIndex(supportOrdinal, offset, sign);
+            auto uTerm = m_context->EvalMult(
+                evaluationKey.m_selectors[selectorIndex], uPlaintext);
+            auto vTerm = m_context->EvalMult(
+                evaluationKey.m_selectors[selectorIndex], vPlaintext);
+            if (!uTerm || !vTerm) {
+                throw GLShipStateError("GL SHIP hybrid coarse selector product failed");
+            }
+            if (laneU) {
+                m_context->EvalAddInPlace(laneU, uTerm);
+                m_context->EvalAddInPlace(laneV, vTerm);
+            }
+            else {
+                laneU = std::move(uTerm);
+                laneV = std::move(vTerm);
+            }
+        }
+    }
+    if (!laneU || !laneV) {
+        throw GLShipStateError(
+            "GL SHIP hybrid coarse accumulation did not finish at level one");
+    }
+    ModReduceOneLevel(m_context, laneU, "GL SHIP hybrid coarse lane");
+    ModReduceOneLevel(m_context, laneV, "GL SHIP hybrid coarse lane");
+    if (laneU->GetLevel() != 1 || laneV->GetLevel() != 1) {
+        throw GLShipStateError(
+            "GL SHIP hybrid coarse accumulation did not finish at level one");
+    }
+
+    // Fine binary digit chain, LSB first, one level per digit.
+    const uint32_t conjugationIndex =
+        static_cast<uint32_t>(m_context->GetCyclotomicOrder() - 1);
+    for (uint32_t digit = 0; digit < digits; ++digit) {
+        const std::size_t delta = std::size_t{1} << digit;
+        const uint32_t frontierLevel = 1 + digit;
+        const bool finalDigit = digit + 1 == digits;
+
+        // Rot_{-delta} = Rot_{n-delta} through the owned X-forward family
+        // (5^n == 1 mod 4n, so left rotation by n-delta is the inverse).
+        auto rotatedU = m_context->GetScheme()->EvalAtIndex(
+            laneU, static_cast<uint32_t>(n - delta), *evaluationKey.m_xForwardKeys);
+        auto rotatedV = m_context->GetScheme()->EvalAtIndex(
+            laneV, static_cast<uint32_t>(n - delta), *evaluationKey.m_xForwardKeys);
+        if (!rotatedU || !rotatedV) {
+            throw GLShipStateError("GL SHIP hybrid fine rotation failed");
+        }
+        Ciphertext<DCRTPoly> conjugatedRotatedU;
+        if (!finalDigit) {
+            conjugatedRotatedU = m_context->EvalAutomorphism(
+                rotatedU, conjugationIndex, *evaluationKey.m_conjugationKeys);
+            if (!conjugatedRotatedU) {
+                throw GLShipStateError("GL SHIP hybrid fine conjugation failed");
+            }
+        }
+
+        // Fresh level-0 digit keys ride the same tower-drop alignment the
+        // tree odd-carry already relies on.
+        auto rotateHigh =
+            evaluationKey.m_fineSelectors[FineSelectorIndex(supportOrdinal, digit, 0)]->Clone();
+        auto rotateLow =
+            evaluationKey.m_fineSelectors[FineSelectorIndex(supportOrdinal, digit, 1)]->Clone();
+        auto identityPiece =
+            evaluationKey.m_fineSelectors[FineSelectorIndex(supportOrdinal, digit, 2)]->Clone();
+        DropCiphertextToLevel(rotateHigh, frontierLevel);
+        DropCiphertextToLevel(rotateLow, frontierLevel);
+        DropCiphertextToLevel(identityPiece, frontierLevel);
+
+        const auto muxTerm = [&](const Ciphertext<DCRTPoly>& piece,
+                                 const Ciphertext<DCRTPoly>& operand) {
+            auto product = m_context->GetScheme()->EvalMultAndRelinearize(
+                piece, operand, evaluationKey.m_relinearizationKeys);
+            if (!product || product->NumberCiphertextElements() != 2) {
+                throw GLShipStateError("GL SHIP hybrid fine mux product failed");
+            }
+            return product;
+        };
+
+        auto nextU = muxTerm(rotateHigh, rotatedU);
+        m_context->EvalAddInPlace(nextU, muxTerm(rotateLow, rotatedV));
+        m_context->EvalAddInPlace(nextU, muxTerm(identityPiece, laneU));
+        ModReduceOneLevel(m_context, nextU, "GL SHIP hybrid fine digit");
+        if (!finalDigit) {
+            auto nextV = muxTerm(rotateHigh, rotatedV);
+            m_context->EvalAddInPlace(nextV, muxTerm(rotateLow, conjugatedRotatedU));
+            m_context->EvalAddInPlace(nextV, muxTerm(identityPiece, laneV));
+            ModReduceOneLevel(m_context, nextV, "GL SHIP hybrid fine digit");
+            laneV = std::move(nextV);
+        }
+        laneU = std::move(nextU);
+    }
+    if (!laneU || laneU->NumberCiphertextElements() != 2 ||
+        laneU->GetLevel() != 1 + digits) {
+        throw GLShipStateError("GL SHIP hybrid leaf did not finish at its digit-chain level");
+    }
+    return laneU;
+}
+
 GLShipHalfBootstrapResult GLShipSchemelet::EvalHalfBootstrap(
     const GLShipLowSliceCiphertext& input,
     const GLShipEvaluationKey& evaluationKey) const {
@@ -898,58 +1301,119 @@ GLShipHalfBootstrapResult GLShipSchemelet::EvalHalfBootstrap(
     const auto pi = std::acos(-1.0);
     const std::complex<double> shipScale(0.0, -m_parameters.gamma / (4.0 * pi));
 
+    const bool hybrid =
+        m_parameters.selection == GLShipSelection::HYBRID_MASKED_COLUMN;
     std::vector<Ciphertext<DCRTPoly>> branchReturns;
     branchReturns.reserve(2);
     for (std::size_t branch = 0; branch < 2; ++branch) {
         std::vector<Ciphertext<DCRTPoly>> leaves;
         leaves.reserve(m_parameters.hammingWeight);
-        for (std::size_t ordinal = 0; ordinal < m_parameters.hammingWeight; ++ordinal) {
-            Ciphertext<DCRTPoly> accumulated;
-            for (std::size_t alpha = 0; alpha < n; ++alpha) {
-                for (const int8_t sign : {int8_t(-1), int8_t(1)}) {
-                    const auto shifted = GLShipAlgebra::MultiplyMonomial(
-                        branchA[branch], static_cast<uint32_t>(alpha), sign);
-                    std::vector<std::complex<double>> factors(n);
-                    for (std::size_t coefficient = 0; coefficient < n; ++coefficient) {
-                        const int64_t exponent = shifted[coefficient].real();
-                        factors[coefficient] = RootOfUnity(evaluationKey.m_q0, exponent);
-                        if (ordinal == 0) {
-                            const int64_t baseExponent = branchB[branch][coefficient].real();
-                            factors[coefficient] *=
-                                shipScale * RootOfUnity(evaluationKey.m_q0, baseExponent);
+        if (!hybrid) {
+            for (std::size_t ordinal = 0; ordinal < m_parameters.hammingWeight; ++ordinal) {
+                Ciphertext<DCRTPoly> accumulated;
+                for (std::size_t alpha = 0; alpha < n; ++alpha) {
+                    for (const int8_t sign : {int8_t(-1), int8_t(1)}) {
+                        const auto shifted = GLShipAlgebra::MultiplyMonomial(
+                            branchA[branch], static_cast<uint32_t>(alpha), sign);
+                        std::vector<std::complex<double>> factors(n);
+                        for (std::size_t coefficient = 0; coefficient < n; ++coefficient) {
+                            const int64_t exponent = shifted[coefficient].real();
+                            factors[coefficient] = RootOfUnity(evaluationKey.m_q0, exponent);
+                            if (ordinal == 0) {
+                                const int64_t baseExponent = branchB[branch][coefficient].real();
+                                factors[coefficient] *=
+                                    shipScale * RootOfUnity(evaluationKey.m_q0, baseExponent);
+                            }
+                        }
+                        auto plaintext = m_context->MakeCKKSPackedPlaintext(
+                            factors, 1, 0, nullptr, static_cast<uint32_t>(n));
+                        if (!plaintext) {
+                            throw GLShipStateError("GL SHIP failed to encode a root-factor table");
+                        }
+                        const auto selectorIndex = SelectorIndex(ordinal, alpha, sign);
+                        auto term = m_context->EvalMult(
+                            evaluationKey.m_selectors[selectorIndex], plaintext);
+                        if (!term) {
+                            throw GLShipStateError("GL SHIP selector/plaintext product failed");
+                        }
+                        if (accumulated) {
+                            m_context->EvalAddInPlace(accumulated, term);
+                        }
+                        else {
+                            accumulated = std::move(term);
                         }
                     }
-                    auto plaintext = m_context->MakeCKKSPackedPlaintext(
-                        factors, 1, 0, nullptr, static_cast<uint32_t>(n));
-                    if (!plaintext) {
-                        throw GLShipStateError("GL SHIP failed to encode a root-factor table");
-                    }
-                    const auto selectorIndex = SelectorIndex(ordinal, alpha, sign);
-                    auto term = m_context->EvalMult(
-                        evaluationKey.m_selectors[selectorIndex], plaintext);
-                    if (!term) {
-                        throw GLShipStateError("GL SHIP selector/plaintext product failed");
-                    }
-                    if (accumulated) {
-                        m_context->EvalAddInPlace(accumulated, term);
-                    }
-                    else {
-                        accumulated = std::move(term);
-                    }
                 }
+                if (!accumulated) {
+                    throw GLShipStateError("GL SHIP produced an empty direct-column leaf");
+                }
+                auto leaf = accumulated;
+                ModReduceOneLevel(m_context, leaf, "GL SHIP direct-column leaf");
+                if (!leaf || leaf->NumberCiphertextElements() != 2) {
+                    throw GLShipStateError("GL SHIP direct-column leaf rescale failed");
+                }
+                if (leaf->GetLevel() != 1) {
+                    throw GLShipStateError("GL SHIP direct-column leaf did not finish at level one");
+                }
+                leaves.push_back(std::move(leaf));
             }
-            if (!accumulated) {
-                throw GLShipStateError("GL SHIP produced an empty direct-column leaf");
+        }
+        else {
+            // Hybrid leaves cannot fuse the base: a slot-indexed base factor
+            // baked into the coarse tables would migrate under the secret
+            // fine rotation with no public correction.  The base therefore
+            // enters the balanced tree as its own plaintext node 0 (SHIP
+            // Algorithm 1's pt_0), and the tree reduces h+1 nodes.
+            for (std::size_t ordinal = 0; ordinal < m_parameters.hammingWeight; ++ordinal) {
+                leaves.push_back(EvalHybridLeaf(branchA[branch], ordinal, evaluationKey));
             }
-            auto leaf = accumulated;
-            ModReduceOneLevel(m_context, leaf, "GL SHIP direct-column leaf");
-            if (!leaf || leaf->NumberCiphertextElements() != 2) {
-                throw GLShipStateError("GL SHIP direct-column leaf rescale failed");
+            const uint32_t leafLevel = 1 + CeilLog2(m_parameters.coarseBlockSize);
+            std::vector<std::complex<double>> baseFactors(n);
+            for (std::size_t coefficient = 0; coefficient < n; ++coefficient) {
+                const int64_t baseExponent = branchB[branch][coefficient].real();
+                baseFactors[coefficient] =
+                    shipScale * RootOfUnity(evaluationKey.m_q0, baseExponent);
             }
-            if (leaf->GetLevel() != 1) {
-                throw GLShipStateError("GL SHIP direct-column leaf did not finish at level one");
+            auto basePlaintext = m_context->MakeCKKSPackedPlaintext(
+                baseFactors, 1, leafLevel, nullptr, static_cast<uint32_t>(n));
+            if (!basePlaintext) {
+                throw GLShipStateError("GL SHIP failed to encode the hybrid base table");
             }
-            leaves.push_back(std::move(leaf));
+            // First tree round with the base as node 0: pair (0,1) is the
+            // plaintext-ciphertext product, the remaining pairs are ordinary
+            // relinearized products, and an odd tail node is carried.
+            auto baseProduct = m_context->EvalMult(leaves.front(), basePlaintext);
+            if (!baseProduct) {
+                throw GLShipStateError("GL SHIP hybrid base product failed");
+            }
+            ModReduceOneLevel(m_context, baseProduct, "GL SHIP hybrid base product");
+            if (!baseProduct || baseProduct->NumberCiphertextElements() != 2) {
+                throw GLShipStateError("GL SHIP hybrid base product rescale failed");
+            }
+            const uint32_t roundLevel = baseProduct->GetLevel();
+            std::vector<Ciphertext<DCRTPoly>> nodes;
+            nodes.reserve(leaves.size() / 2 + 1);
+            nodes.push_back(std::move(baseProduct));
+            std::size_t index = 1;
+            for (; index + 1 < leaves.size(); index += 2) {
+                auto product = m_context->GetScheme()->EvalMultAndRelinearize(
+                    leaves[index], leaves[index + 1],
+                    evaluationKey.m_relinearizationKeys);
+                if (!product || product->NumberCiphertextElements() != 2) {
+                    throw GLShipStateError("GL SHIP balanced product/relinearization failed");
+                }
+                ModReduceOneLevel(m_context, product, "GL SHIP balanced product");
+                if (!product || product->NumberCiphertextElements() != 2) {
+                    throw GLShipStateError("GL SHIP balanced product rescale failed");
+                }
+                nodes.push_back(std::move(product));
+            }
+            if (index < leaves.size()) {
+                auto carry = leaves[index]->Clone();
+                DropCiphertextToLevel(carry, roundLevel);
+                nodes.push_back(std::move(carry));
+            }
+            leaves = std::move(nodes);
         }
 
         while (leaves.size() > 1) {
@@ -985,7 +1449,9 @@ GLShipHalfBootstrapResult GLShipSchemelet::EvalHalfBootstrap(
 
         auto phase = leaves.front();
         const uint32_t expectedPhaseLevel =
-            1 + CeilLog2(m_parameters.hammingWeight);
+            hybrid ? 1 + CeilLog2(m_parameters.coarseBlockSize) +
+                         CeilLog2(m_parameters.hammingWeight + 1)
+                   : 1 + CeilLog2(m_parameters.hammingWeight);
         const auto fullTowerCount =
             GetCKKSParameters(m_context)->GetElementParams()->GetParams().size();
         if (phase->GetLevel() != expectedPhaseLevel ||
