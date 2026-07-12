@@ -141,11 +141,12 @@ EntryKey EntryKeyOf(const GadgetEntry& entry) {
 
 GLIntProductionSlotCiphertext::GLIntProductionSlotCiphertext(
     GLIntWBatchedParameters parameters, std::string keyTag,
-    uint64_t compositeModulus,
+    uint64_t compositeModulus, uint64_t plaintextScale,
     std::vector<GLIntProductionSlotCiphertextValue> values)
     : m_parameters(std::move(parameters)),
       m_keyTag(std::move(keyTag)),
       m_compositeModulus(compositeModulus),
+      m_plaintextScale(plaintextScale),
       m_values(std::move(values)) {
     Validate();
 }
@@ -164,6 +165,10 @@ uint64_t GLIntProductionSlotCiphertext::GetCompositeModulus() const noexcept {
     return m_compositeModulus;
 }
 
+uint64_t GLIntProductionSlotCiphertext::GetPlaintextScale() const noexcept {
+    return m_plaintextScale;
+}
+
 const std::vector<GLIntProductionSlotCiphertextValue>&
 GLIntProductionSlotCiphertext::GetValues() const noexcept {
     return m_values;
@@ -171,7 +176,9 @@ GLIntProductionSlotCiphertext::GetValues() const noexcept {
 
 void GLIntProductionSlotCiphertext::Validate() const {
     RequireProductionParameters(m_parameters);
-    if (m_keyTag.empty() || m_compositeModulus <= m_parameters.plaintextModulus ||
+    if (m_keyTag.empty() || m_plaintextScale == 0 ||
+        m_plaintextScale >= m_parameters.plaintextModulus ||
+        m_compositeModulus <= m_parameters.plaintextModulus ||
         m_compositeModulus >
             static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) ||
         m_values.size() > kGLIntProductionMaxLogicalValues) {
@@ -433,7 +440,7 @@ GLIntProductionSlotCiphertext GLIntProductionMatMulCore::Encrypt(
                           a});
     }
     return GLIntProductionSlotCiphertext(
-        m_parameters, secretKey.GetKeyTag(), m_compositeModulus,
+        m_parameters, secretKey.GetKeyTag(), m_compositeModulus, 1,
         std::move(values));
 }
 
@@ -448,6 +455,10 @@ GLIntProductionSparsePlaintext GLIntProductionMatMulCore::Decrypt(
     }
     std::vector<GLIntProductionSlotValue> output;
     output.reserve(ciphertext.GetValues().size());
+    const auto plaintextModulus = m_parameters.plaintextModulus;
+    const auto inverseScale = PowMod(ciphertext.GetPlaintextScale(),
+                                     plaintextModulus - 2,
+                                     plaintextModulus);
     for (const auto& value : ciphertext.GetValues()) {
         const auto secret = EvaluateSecret(secretKey, value.branch,
                                            value.matrix, value.row);
@@ -458,9 +469,10 @@ GLIntProductionSparsePlaintext GLIntProductionMatMulCore::Decrypt(
             residue <= m_compositeModulus / 2
                 ? static_cast<int64_t>(residue)
                 : -static_cast<int64_t>(m_compositeModulus - residue);
-        output.push_back({value.branch, value.matrix, value.row, value.column,
-                          static_cast<int64_t>(Canonical(
-                              centered, m_parameters.plaintextModulus))});
+        output.push_back(
+            {value.branch, value.matrix, value.row, value.column,
+             static_cast<int64_t>(MulMod(Canonical(centered, plaintextModulus),
+                                         inverseScale, plaintextModulus))});
     }
     return GLIntProductionSparsePlaintext(m_parameters, std::move(output));
 }
@@ -469,6 +481,10 @@ GLIntProductionSlotCiphertext GLIntProductionMatMulCore::Add(
     const GLIntProductionSlotCiphertext& lhs,
     const GLIntProductionSlotCiphertext& rhs) const {
     ValidateOperands(lhs, rhs, "production Slot Add");
+    if (lhs.GetPlaintextScale() != rhs.GetPlaintextScale()) {
+        throw GLCiphertextError(
+            "production Slot Add requires equal plaintext scales");
+    }
     std::map<SlotKey, GLIntProductionSlotCiphertextValue> values;
     for (const auto& value : lhs.GetValues()) {
         values.emplace(KeyOf(value), value);
@@ -493,7 +509,8 @@ GLIntProductionSlotCiphertext GLIntProductionMatMulCore::Add(
         }
     }
     return GLIntProductionSlotCiphertext(
-        m_parameters, lhs.GetKeyTag(), m_compositeModulus, std::move(output));
+        m_parameters, lhs.GetKeyTag(), m_compositeModulus,
+        lhs.GetPlaintextScale(), std::move(output));
 }
 
 GLIntProductionSlotCiphertext GLIntProductionMatMulCore::Subtract(
@@ -512,6 +529,7 @@ GLIntProductionSlotCiphertext GLIntProductionMatMulCore::Negate(
     }
     return GLIntProductionSlotCiphertext(
         m_parameters, ciphertext.GetKeyTag(), m_compositeModulus,
+        ciphertext.GetPlaintextScale(),
         std::move(output));
 }
 
@@ -730,7 +748,12 @@ GLIntProductionSlotCiphertext GLIntProductionMatMulCore::MatrixMultiply(
                                  m_compositeModulus)});
     }
     return GLIntProductionSlotCiphertext(
-        m_parameters, lhs.GetKeyTag(), m_compositeModulus, std::move(output));
+        m_parameters, lhs.GetKeyTag(), m_compositeModulus,
+        MulMod(m_parameters.dimension,
+               MulMod(lhs.GetPlaintextScale(), rhs.GetPlaintextScale(),
+                      m_parameters.plaintextModulus),
+               m_parameters.plaintextModulus),
+        std::move(output));
 }
 
 GLIntProductionSlotCiphertext GLIntProductionMatMulCore::Hadamard(
@@ -768,7 +791,10 @@ GLIntProductionSlotCiphertext GLIntProductionMatMulCore::Hadamard(
                           AddMod(d1, switched.second, m_compositeModulus)});
     }
     return GLIntProductionSlotCiphertext(
-        m_parameters, lhs.GetKeyTag(), m_compositeModulus, std::move(output));
+        m_parameters, lhs.GetKeyTag(), m_compositeModulus,
+        MulMod(lhs.GetPlaintextScale(), rhs.GetPlaintextScale(),
+               m_parameters.plaintextModulus),
+        std::move(output));
 }
 
 }  // namespace lbcrypto

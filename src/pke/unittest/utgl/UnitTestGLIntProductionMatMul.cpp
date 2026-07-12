@@ -16,6 +16,7 @@ namespace {
 TEST(GLIntProductionMatMul, GadgetTErrCrossLaneAndHadamard) {
     const GLIntProductionRLWECore rlwe;
     const GLIntProductionMatMulCore evaluator;
+    const GLIntProductionCore codec;
     const auto primary = rlwe.KeyGen(1, 0x4d41544d554c4b45ULL);
 
     const auto capabilities = evaluator.GetCapabilities();
@@ -26,8 +27,8 @@ TEST(GLIntProductionMatMul, GadgetTErrCrossLaneAndHadamard) {
     EXPECT_TRUE(capabilities.switchIntBig);
     EXPECT_TRUE(capabilities.encryptedCrossLaneMatrixMultiply);
     EXPECT_TRUE(capabilities.encryptedHadamard);
-    EXPECT_TRUE(capabilities.ordinaryProductNormalization);
-    EXPECT_FALSE(capabilities.paperTraceNormalization);
+    EXPECT_FALSE(capabilities.ordinaryProductNormalization);
+    EXPECT_TRUE(capabilities.paperTraceNormalization);
     EXPECT_FALSE(capabilities.auxiliaryModulusKeySwitch);
     EXPECT_FALSE(capabilities.noiseScalingModSwitch);
     EXPECT_FALSE(capabilities.coefficientDomainBridge);
@@ -66,10 +67,14 @@ TEST(GLIntProductionMatMul, GadgetTErrCrossLaneAndHadamard) {
 
     const auto encryptedProduct = evaluator.MatrixMultiply(
         encryptedLeft, encryptedRight, matrixKeys);
+    EXPECT_EQ(encryptedProduct.GetPlaintextScale(), 128u);
     const auto product = evaluator.Decrypt(primary, encryptedProduct);
+    const auto expectedProduct = codec.MatrixMultiplyTrace(left, right);
     ASSERT_EQ(product.GetValues().size(), 2u);
-    EXPECT_EQ(product.At(GLIntBranch::Plus, 9, 1, 3), 60);
-    EXPECT_EQ(product.At(GLIntBranch::Minus, 9, 2, 6), 77);
+    EXPECT_EQ(product.At(GLIntBranch::Plus, 9, 1, 3),
+              expectedProduct.At(GLIntBranch::Plus, 9, 1, 3));
+    EXPECT_EQ(product.At(GLIntBranch::Minus, 9, 2, 6),
+              expectedProduct.At(GLIntBranch::Minus, 9, 2, 6));
     EXPECT_EQ(product.At(GLIntBranch::Plus, 9, 1, 6), 0);
 
     const GLIntProductionSparsePlaintext hadamardLeft(

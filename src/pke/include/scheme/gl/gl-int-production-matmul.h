@@ -42,6 +42,7 @@ public:
     const GLIntWBatchedParameters& GetParameters() const noexcept;
     const std::string& GetKeyTag() const noexcept;
     uint64_t GetCompositeModulus() const noexcept;
+    uint64_t GetPlaintextScale() const noexcept;
     const std::vector<GLIntProductionSlotCiphertextValue>& GetValues() const noexcept;
     void Validate() const;
 
@@ -50,12 +51,13 @@ private:
 
     GLIntProductionSlotCiphertext(
         GLIntWBatchedParameters parameters, std::string keyTag,
-        uint64_t compositeModulus,
+        uint64_t compositeModulus, uint64_t plaintextScale,
         std::vector<GLIntProductionSlotCiphertextValue> values);
 
     GLIntWBatchedParameters m_parameters;
     std::string m_keyTag;
     uint64_t m_compositeModulus{0};
+    uint64_t m_plaintextScale{1};
     std::vector<GLIntProductionSlotCiphertextValue> m_values;
 };
 
@@ -113,8 +115,8 @@ struct GLIntProductionMatMulCapabilities {
     bool switchIntBig{true};
     bool encryptedCrossLaneMatrixMultiply{true};
     bool encryptedHadamard{true};
-    bool ordinaryProductNormalization{true};
-    bool paperTraceNormalization{false};
+    bool ordinaryProductNormalization{false};
+    bool paperTraceNormalization{true};
     bool auxiliaryModulusKeySwitch{false};
     bool noiseScalingModSwitch{false};
     bool coefficientDomainBridge{false};
@@ -132,17 +134,19 @@ struct GLIntProductionMatMulCapabilities {
  * b_i+a_i*s_dst=2^i*s_src+t*e_i.
  *
  * MatrixMultiply implements the complete four-component §4.3 cross-lane
- * tensor and two SwitchInt_big applications, returning the ordinary products
- * U_plus*V_minus^T and U_minus*V_plus^T.  This is the same unnormalized
- * Slot-domain convention as GLScheme's native glr_circledast; it does not
- * claim the paper trace's n^-1 normalization.  Hadamard uses the
- * three-component tensor plus SwitchInt_small.
+ * tensor and two SwitchInt_big applications.  Its raw relation is the
+ * ordinary cross-lane product; the ciphertext carries the exact BGV
+ * plaintext scale n*scale_lhs*scale_rhs modulo t, so logical decryption is
+ * the paper's n^-1 trace product.  This avoids multiplying ciphertext noise
+ * by a large centered representative of n^-1.  Hadamard uses the
+ * three-component tensor plus SwitchInt_small and the product of input
+ * plaintext scales.
  *
  * Sparse support leaks, only a two-prime prefix is present, and these gadget
  * keys switch directly at Q rather than using the paper's auxiliary modulus
  * followed by noise-scaling ModSwitch.  Security, the coefficient-domain
- * bridge, paper normalization, and noise-scaling modulus switching therefore
- * remain explicitly false.
+ * bridge and noise-scaling modulus switching therefore remain explicitly
+ * false.
  */
 class GLIntProductionMatMulCore final {
 public:
