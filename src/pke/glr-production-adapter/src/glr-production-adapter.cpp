@@ -68,6 +68,13 @@ std::uint64_t CheckedAdd(std::uint64_t lhs, std::uint64_t rhs,
     return lhs + rhs;
 }
 
+bool IsCanonicalSha256Root(const std::string& value) {
+    return value.size() == 71U && value.rfind("sha256:", 0) == 0 &&
+           std::all_of(value.begin() + 7, value.end(), [](char c) {
+               return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+           });
+}
+
 std::uint64_t RingCoefficients(const GLRProductionAdapter::Context& context,
                                GlrRing ring) {
     switch (ring) {
@@ -436,7 +443,29 @@ bool NativeRefreshAllYPreflightEquals(
                rhs.pair_major_branch_tiles_per_centered_refresh &&
            lhs.total_pair_major_branch_tile_invocations ==
                rhs.total_pair_major_branch_tile_invocations &&
+           lhs.streamed_unsigned_candidate_count ==
+               rhs.streamed_unsigned_candidate_count &&
+           lhs.streamed_signed_pair_count ==
+               rhs.streamed_signed_pair_count &&
+           lhs.streamed_signed_pairs_per_window ==
+               rhs.streamed_signed_pairs_per_window &&
+           lhs.streamed_exponent_leaf_batch_invocations ==
+               rhs.streamed_exponent_leaf_batch_invocations &&
+           lhs.streamed_exponent_leaf_tables_batched ==
+               rhs.streamed_exponent_leaf_tables_batched &&
+           lhs.streamed_exponent_leaf_pair_visits ==
+               rhs.streamed_exponent_leaf_pair_visits &&
+           lhs.streamed_exponent_leaf_scalar_equivalent_pair_visits ==
+               rhs.streamed_exponent_leaf_scalar_equivalent_pair_visits &&
+           lhs.streamed_exponent_leaf_max_batch_size ==
+               rhs.streamed_exponent_leaf_max_batch_size &&
+           lhs.streamed_exponent_leaf_peak_accumulators ==
+               rhs.streamed_exponent_leaf_peak_accumulators &&
+           lhs.streamed_exponent_leaf_peak_scratch_polys ==
+               rhs.streamed_exponent_leaf_peak_scratch_polys &&
            lhs.exact_all_y_coverage == rhs.exact_all_y_coverage &&
+           lhs.full_streamed_physical_schedule_pinned ==
+               rhs.full_streamed_physical_schedule_pinned &&
            lhs.context_ciphertext_or_key_allocation_required ==
                rhs.context_ciphertext_or_key_allocation_required &&
            lhs.material_schedule_metadata_admitted ==
@@ -473,7 +502,28 @@ MakeNativeRefreshAllYReceipt(
         native.pair_major_branch_tiles_per_centered_refresh;
     out.total_pair_major_branch_tile_invocations =
         native.total_pair_major_branch_tile_invocations;
+    out.streamed_unsigned_candidate_count =
+        native.streamed_unsigned_candidate_count;
+    out.streamed_signed_pair_count = native.streamed_signed_pair_count;
+    out.streamed_signed_pairs_per_window =
+        native.streamed_signed_pairs_per_window;
+    out.streamed_exponent_leaf_batch_invocations =
+        native.streamed_exponent_leaf_batch_invocations;
+    out.streamed_exponent_leaf_tables_batched =
+        native.streamed_exponent_leaf_tables_batched;
+    out.streamed_exponent_leaf_pair_visits =
+        native.streamed_exponent_leaf_pair_visits;
+    out.streamed_exponent_leaf_scalar_equivalent_pair_visits =
+        native.streamed_exponent_leaf_scalar_equivalent_pair_visits;
+    out.streamed_exponent_leaf_max_batch_size =
+        native.streamed_exponent_leaf_max_batch_size;
+    out.streamed_exponent_leaf_peak_accumulators =
+        native.streamed_exponent_leaf_peak_accumulators;
+    out.streamed_exponent_leaf_peak_scratch_polys =
+        native.streamed_exponent_leaf_peak_scratch_polys;
     out.exact_all_y_coverage = native.exact_all_y_coverage;
+    out.full_streamed_physical_schedule_pinned =
+        native.full_streamed_physical_schedule_pinned;
     out.context_ciphertext_or_key_allocation_required =
         native.context_ciphertext_or_key_allocation_required;
     out.material_schedule_metadata_admitted =
@@ -884,6 +934,17 @@ void RequireCanonicalOrdinaryRefreshExecutionEvidence(
     const std::uint64_t exponentNodes =
         2ULL * context.n() * expected.requiredSparseHammingWeight *
         census.centered_refreshes;
+    const bool xCenteringUnderflow =
+        pack.x_centering_monomial_multiplies <
+        pack.checkpoint_replay_x_centering_monomial_multiplies;
+    const bool wDualUnderflow =
+        pack.w_dual_monomial_multiplies <
+        pack.checkpoint_replay_w_dual_monomial_multiplies;
+    const bool wDualAddUnderflow =
+        pack.w_dual_accumulator_additions <
+        pack.checkpoint_replay_w_dual_accumulator_additions;
+    const std::string parameterFingerprint =
+        glscheme::rns::glr_parameter_fingerprint(context.params);
 
     if (result.representation !=
             glscheme::rns::GlrShipRefreshOnlyEndpointRepresentation::refreshed_xy ||
@@ -911,19 +972,47 @@ void RequireCanonicalOrdinaryRefreshExecutionEvidence(
         evidence.transform_material_level_drop != 1U ||
         !evidence.transform_material_alignment_safe ||
         !evidence.canonical_production_authorized ||
+        evidence.pack_parameter_fingerprint != parameterFingerprint ||
+        !IsCanonicalSha256Root(
+            evidence.pack_input_ciphertext_commitment_sha256) ||
+        !IsCanonicalSha256Root(
+            evidence.pack_execution_material_commitment_sha256) ||
+        !IsCanonicalSha256Root(
+            evidence.pack_checkpoint_chain_commitment_sha256) ||
+        !evidence.pack_complete_coordinate_cover ||
+        !evidence.ciphertext_value_execution_performed ||
+        evidence.value_noise_acceptance_recorded ||
         pack.centered_refreshes != census.centered_refreshes ||
         pack.coefficients_packed != census.coefficients_packed ||
         pack.sparse_to_primary_switches != census.centered_refreshes ||
         pack.exponent_ladder_nodes != exponentNodes ||
         pack.gadget_applies != 2ULL * exponentNodes ||
+        !pack.streamed_exponent_leaf_batch_used ||
+        pack.streamed_exponent_leaf_batch_invocations != 41943040ULL ||
+        pack.streamed_exponent_leaf_tables_batched != exponentNodes ||
+        pack.streamed_exponent_leaf_pair_visits != 671088640ULL ||
+        pack.streamed_exponent_leaf_scalar_equivalent_pair_visits !=
+            5368709120ULL ||
+        pack.streamed_exponent_leaf_max_batch_size != 8U ||
+        pack.streamed_exponent_leaf_peak_accumulators != 8U ||
+        pack.streamed_exponent_leaf_peak_scratch_polys != 1U ||
         pack.x_trace_rotations != xTraceRotations ||
         pack.w_trace_rotations != wTraceRotations ||
-        pack.x_centering_monomial_multiplies !=
-            census.x_centering_monomial_multiplies ||
-        pack.w_dual_monomial_multiplies !=
-            census.w_dual_monomial_multiplies ||
-        pack.w_dual_accumulator_additions !=
-            census.w_dual_accumulator_additions ||
+        xCenteringUnderflow || wDualUnderflow || wDualAddUnderflow ||
+        (!xCenteringUnderflow &&
+         pack.x_centering_monomial_multiplies -
+                 pack.checkpoint_replay_x_centering_monomial_multiplies !=
+             census.x_centering_monomial_multiplies) ||
+        (!wDualUnderflow &&
+         pack.w_dual_monomial_multiplies -
+                 pack.checkpoint_replay_w_dual_monomial_multiplies !=
+             census.w_dual_monomial_multiplies) ||
+        (!wDualAddUnderflow &&
+         pack.w_dual_accumulator_additions -
+                 pack.checkpoint_replay_w_dual_accumulator_additions !=
+             census.w_dual_accumulator_additions) ||
+        pack.checkpoint_chunks_merged == 0 ||
+        !pack.checkpoint_commitment_validated_merge_used ||
         !pack.public_centering_used ||
         !pack.homomorphic_readout_projection_used ||
         !pack.provider_secret_free || !pack.exact_prime_w_dual_used ||
@@ -944,7 +1033,19 @@ void RequireOrdinaryRefreshEvidenceMatchesAllYReceipt(
         receipt.pair_major_row_tiles_per_centered_refresh != 16U ||
         receipt.pair_major_branch_tiles_per_centered_refresh != 32ULL ||
         receipt.total_pair_major_branch_tile_invocations != 1048576ULL ||
+        receipt.streamed_unsigned_candidate_count != 320U ||
+        receipt.streamed_signed_pair_count != 640U ||
+        receipt.streamed_signed_pairs_per_window != 16U ||
+        receipt.streamed_exponent_leaf_batch_invocations != 41943040ULL ||
+        receipt.streamed_exponent_leaf_tables_batched != 335544320ULL ||
+        receipt.streamed_exponent_leaf_pair_visits != 671088640ULL ||
+        receipt.streamed_exponent_leaf_scalar_equivalent_pair_visits !=
+            5368709120ULL ||
+        receipt.streamed_exponent_leaf_max_batch_size != 8U ||
+        receipt.streamed_exponent_leaf_peak_accumulators != 8U ||
+        receipt.streamed_exponent_leaf_peak_scratch_polys != 1U ||
         !receipt.exact_all_y_coverage ||
+        !receipt.full_streamed_physical_schedule_pinned ||
         receipt.context_ciphertext_or_key_allocation_required ||
         !receipt.material_schedule_metadata_admitted ||
         receipt.ciphertext_value_execution_performed ||
@@ -954,7 +1055,22 @@ void RequireOrdinaryRefreshEvidenceMatchesAllYReceipt(
         evidence.pack.exponent_ladder_nodes !=
             receipt.scalar_equivalent_exponent_ladder_nodes ||
         evidence.pack.gadget_applies !=
-            receipt.scalar_equivalent_gadget_key_applications) {
+            receipt.scalar_equivalent_gadget_key_applications ||
+        !evidence.pack.streamed_exponent_leaf_batch_used ||
+        evidence.pack.streamed_exponent_leaf_batch_invocations !=
+            receipt.streamed_exponent_leaf_batch_invocations ||
+        evidence.pack.streamed_exponent_leaf_tables_batched !=
+            receipt.streamed_exponent_leaf_tables_batched ||
+        evidence.pack.streamed_exponent_leaf_pair_visits !=
+            receipt.streamed_exponent_leaf_pair_visits ||
+        evidence.pack.streamed_exponent_leaf_scalar_equivalent_pair_visits !=
+            receipt.streamed_exponent_leaf_scalar_equivalent_pair_visits ||
+        evidence.pack.streamed_exponent_leaf_max_batch_size !=
+            receipt.streamed_exponent_leaf_max_batch_size ||
+        evidence.pack.streamed_exponent_leaf_peak_accumulators !=
+            receipt.streamed_exponent_leaf_peak_accumulators ||
+        evidence.pack.streamed_exponent_leaf_peak_scratch_polys !=
+            receipt.streamed_exponent_leaf_peak_scratch_polys) {
         throw GlrError(
             "GLRProductionAdapter: native ordinary-refresh evidence is not "
             "bound to the canonical all-Y production preflight receipt");

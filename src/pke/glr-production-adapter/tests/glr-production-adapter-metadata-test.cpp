@@ -662,6 +662,17 @@ int main() {
     canonicalNativeEvidence.transform_material_level_drop = 1;
     canonicalNativeEvidence.transform_material_alignment_safe = true;
     canonicalNativeEvidence.canonical_production_authorized = true;
+    canonicalNativeEvidence.pack_parameter_fingerprint =
+        glscheme::rns::glr_parameter_fingerprint(context.params);
+    canonicalNativeEvidence.pack_input_ciphertext_commitment_sha256 =
+        "sha256:0000000000000000000000000000000000000000000000000000000000000000";
+    canonicalNativeEvidence.pack_execution_material_commitment_sha256 =
+        "sha256:1111111111111111111111111111111111111111111111111111111111111111";
+    canonicalNativeEvidence.pack_checkpoint_chain_commitment_sha256 =
+        "sha256:2222222222222222222222222222222222222222222222222222222222222222";
+    canonicalNativeEvidence.pack_complete_coordinate_cover = true;
+    canonicalNativeEvidence.ciphertext_value_execution_performed = true;
+    canonicalNativeEvidence.value_noise_acceptance_recorded = false;
     auto& canonicalPack = canonicalNativeEvidence.pack;
     canonicalPack.centered_refreshes = refresh.native.centered_refreshes;
     canonicalPack.coefficients_packed = refresh.native.coefficients_packed;
@@ -684,6 +695,17 @@ int main() {
         refresh.native.w_dual_monomial_multiplies;
     canonicalPack.w_dual_accumulator_additions =
         refresh.native.w_dual_accumulator_additions;
+    canonicalPack.streamed_exponent_leaf_batch_used = true;
+    canonicalPack.streamed_exponent_leaf_batch_invocations = 41943040ULL;
+    canonicalPack.streamed_exponent_leaf_tables_batched = 335544320ULL;
+    canonicalPack.streamed_exponent_leaf_pair_visits = 671088640ULL;
+    canonicalPack.streamed_exponent_leaf_scalar_equivalent_pair_visits =
+        5368709120ULL;
+    canonicalPack.streamed_exponent_leaf_max_batch_size = 8;
+    canonicalPack.streamed_exponent_leaf_peak_accumulators = 8;
+    canonicalPack.streamed_exponent_leaf_peak_scratch_polys = 1;
+    canonicalPack.checkpoint_chunks_merged = 1;
+    canonicalPack.checkpoint_commitment_validated_merge_used = true;
     canonicalPack.public_centering_used = true;
     canonicalPack.homomorphic_readout_projection_used = true;
     canonicalPack.provider_secret_free = true;
@@ -691,6 +713,13 @@ int main() {
     canonicalPack.allocation_free_preflight_used = true;
     adapter.ValidateOrdinaryRefreshExecutionEvidence(
         canonicalNativeResult, canonicalNativeEvidence);
+    auto replayedCheckpointEvidence = canonicalNativeEvidence;
+    ++replayedCheckpointEvidence.pack.x_centering_monomial_multiplies;
+    ++replayedCheckpointEvidence.pack
+          .checkpoint_replay_x_centering_monomial_multiplies;
+    replayedCheckpointEvidence.pack.checkpoint_chunks_merged = 2;
+    adapter.ValidateOrdinaryRefreshExecutionEvidence(
+        canonicalNativeResult, replayedCheckpointEvidence);
 
     const auto rejectedExecutionEvidence = [&](auto mutate) {
         auto forged = canonicalNativeEvidence;
@@ -720,6 +749,33 @@ int main() {
                 --forged.pack.x_trace_rotations;
             }),
             "partial trace evidence did not fail closed");
+    Require(rejectedExecutionEvidence([](auto& forged) {
+                --forged.pack.streamed_exponent_leaf_pair_visits;
+            }),
+            "partial physical pair-visit evidence did not fail closed");
+    Require(rejectedExecutionEvidence([](auto& forged) {
+                forged.pack.checkpoint_commitment_validated_merge_used =
+                    false;
+            }),
+            "unvalidated checkpoint merge evidence did not fail closed");
+    Require(rejectedExecutionEvidence([](auto& forged) {
+                forged.pack
+                    .checkpoint_replay_x_centering_monomial_multiplies =
+                    forged.pack.x_centering_monomial_multiplies + 1;
+            }),
+            "underflowing checkpoint replay evidence did not fail closed");
+    Require(rejectedExecutionEvidence([](auto& forged) {
+                forged.pack_complete_coordinate_cover = false;
+            }),
+            "partial coordinate-cover evidence did not fail closed");
+    Require(rejectedExecutionEvidence([](auto& forged) {
+                forged.pack_checkpoint_chain_commitment_sha256 = "sha256:0";
+            }),
+            "malformed checkpoint lineage root did not fail closed");
+    Require(rejectedExecutionEvidence([](auto& forged) {
+                forged.value_noise_acceptance_recorded = true;
+            }),
+            "forged value/noise acceptance evidence did not fail closed");
 
     // Production policy admission is typed evidence bound to the actual
     // support commitment and authenticated estimator report.  It deliberately
@@ -774,7 +830,23 @@ int main() {
                     335544320ULL &&
                 allYReceipt.scalar_equivalent_gadget_key_applications ==
                     671088640ULL &&
+                allYReceipt.streamed_unsigned_candidate_count == 320 &&
+                allYReceipt.streamed_signed_pair_count == 640 &&
+                allYReceipt.streamed_signed_pairs_per_window == 16 &&
+                allYReceipt.streamed_exponent_leaf_batch_invocations ==
+                    41943040ULL &&
+                allYReceipt.streamed_exponent_leaf_tables_batched ==
+                    335544320ULL &&
+                allYReceipt.streamed_exponent_leaf_pair_visits ==
+                    671088640ULL &&
+                allYReceipt
+                        .streamed_exponent_leaf_scalar_equivalent_pair_visits ==
+                    5368709120ULL &&
+                allYReceipt.streamed_exponent_leaf_max_batch_size == 8 &&
+                allYReceipt.streamed_exponent_leaf_peak_accumulators == 8 &&
+                allYReceipt.streamed_exponent_leaf_peak_scratch_polys == 1 &&
                 allYReceipt.exact_all_y_coverage &&
+                allYReceipt.full_streamed_physical_schedule_pinned &&
                 !allYReceipt.context_ciphertext_or_key_allocation_required &&
                 allYReceipt.material_schedule_metadata_admitted &&
                 !allYReceipt.ciphertext_value_execution_performed &&
@@ -856,6 +928,11 @@ int main() {
                       .total_pair_major_branch_tile_invocations;
             }),
             "forged all-Y production receipt did not fail closed");
+    Require(rejectedAuthorizationForgery([](auto& forged) {
+                --forged.nativeAllYProductionPreflight
+                      .streamed_exponent_leaf_pair_visits;
+            }),
+            "forged physical all-Y receipt did not fail closed");
     Require(rejectedAuthorizationForgery([](auto& forged) {
                 forged.estimatorTranscriptSha256.bytes[0] ^= 1;
             }),

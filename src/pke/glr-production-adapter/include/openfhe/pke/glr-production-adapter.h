@@ -96,7 +96,19 @@ public:
         std::uint64_t scalar_equivalent_gadget_key_applications = 0;
         std::uint64_t pair_major_branch_tiles_per_centered_refresh = 0;
         std::uint64_t total_pair_major_branch_tile_invocations = 0;
+        std::uint32_t streamed_unsigned_candidate_count = 0;
+        std::uint32_t streamed_signed_pair_count = 0;
+        std::uint32_t streamed_signed_pairs_per_window = 0;
+        std::uint64_t streamed_exponent_leaf_batch_invocations = 0;
+        std::uint64_t streamed_exponent_leaf_tables_batched = 0;
+        std::uint64_t streamed_exponent_leaf_pair_visits = 0;
+        std::uint64_t
+            streamed_exponent_leaf_scalar_equivalent_pair_visits = 0;
+        std::uint32_t streamed_exponent_leaf_max_batch_size = 0;
+        std::uint32_t streamed_exponent_leaf_peak_accumulators = 0;
+        std::uint32_t streamed_exponent_leaf_peak_scratch_polys = 0;
         bool exact_all_y_coverage = false;
+        bool full_streamed_physical_schedule_pinned = false;
         bool context_ciphertext_or_key_allocation_required = true;
         bool material_schedule_metadata_admitted = false;
         bool ciphertext_value_execution_performed = false;
