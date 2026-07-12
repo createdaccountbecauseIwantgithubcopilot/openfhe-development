@@ -19,16 +19,20 @@
 // fixed-size W-batched census validates production-sized Section-4 geometry;
 // a separate n=4,p=3,t=97 codec and sliced BGV aggregate exercise genuine
 // p>1 plaintext plus linear ciphertext semantics under W-constant s(X),
-// without claiming fused W-dependent transport, security, serialization,
-// matrix multiplication, or integer bootstrapping.
+// without claiming fused W-dependent transport, security, evaluation-key
+// serialization, matrix multiplication, or integer bootstrapping.  Its eight
+// ciphertext value bundle has a canonical OpenFHE binary envelope.
 
 #include "gtest/gtest.h"
 
 #include "scheme/gl/gl-int.h"
+#include "utils/hashutil.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <random>
+#include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -392,6 +396,56 @@ std::vector<int64_t> CanonicalSlots(const Plaintext& row, std::size_t count) {
     return out;
 }
 
+constexpr std::size_t kWBatchedManifestRootBytes = 64;
+constexpr std::size_t kWBatchedKeyTagLengthOffset = 120;
+constexpr std::size_t kWBatchedRecordsOffsetAfterKeyTag = 148;
+constexpr std::size_t kWBatchedSliceRecordBytes = 10 * sizeof(uint32_t) +
+                                                   2 * sizeof(uint64_t) + 64;
+constexpr std::size_t kWBatchedSerializedSliceCount = 8;
+
+uint32_t ReadWBatchedArtifactU32(const GLIntWBatchedSerializedCiphertext& artifact,
+                                 std::size_t offset) {
+    if (offset > artifact.bytes.size() ||
+        sizeof(uint32_t) > artifact.bytes.size() - offset) {
+        throw std::out_of_range("test W-batched artifact U32 offset is invalid");
+    }
+    uint32_t value = 0;
+    for (uint32_t shift = 0; shift < 32; shift += 8) {
+        value |= static_cast<uint32_t>(artifact.bytes[offset++]) << shift;
+    }
+    return value;
+}
+
+void RehashWBatchedArtifact(GLIntWBatchedSerializedCiphertext* artifact) {
+    if (!artifact || artifact->bytes.size() < kWBatchedManifestRootBytes) {
+        throw std::invalid_argument("test W-batched artifact is too short to rehash");
+    }
+    const auto keyTagLength = ReadWBatchedArtifactU32(
+        *artifact, kWBatchedKeyTagLengthOffset);
+    const auto manifestLength = kWBatchedRecordsOffsetAfterKeyTag + keyTagLength +
+                                kWBatchedSerializedSliceCount * kWBatchedSliceRecordBytes;
+    if (manifestLength > artifact->bytes.size() - kWBatchedManifestRootBytes) {
+        throw std::invalid_argument("test W-batched semantic manifest length is invalid");
+    }
+    const std::string manifest(reinterpret_cast<const char*>(artifact->bytes.data()),
+                               manifestLength);
+    artifact->manifestRootSha256 = HashUtil::HashString(manifest);
+    std::copy(artifact->manifestRootSha256.begin(),
+              artifact->manifestRootSha256.end(),
+              artifact->bytes.end() - kWBatchedManifestRootBytes);
+}
+
+void SetWBatchedArtifactU32(GLIntWBatchedSerializedCiphertext* artifact,
+                            std::size_t offset, uint32_t value) {
+    if (!artifact || offset > artifact->bytes.size() ||
+        sizeof(uint32_t) > artifact->bytes.size() - offset) {
+        throw std::out_of_range("test W-batched artifact U32 offset is invalid");
+    }
+    for (uint32_t shift = 0; shift < 32; shift += 8) {
+        artifact->bytes[offset++] = static_cast<uint8_t>((value >> shift) & 0xff);
+    }
+}
+
 // ===========================================================================
 // Parameter surface
 // ===========================================================================
@@ -689,7 +743,7 @@ TEST(GLInt, WBatchedSlicedBGVEncryptDecryptAndContract) {
     EXPECT_FALSE(scheme.SupportsNativeFusedWTransport());
     EXPECT_FALSE(scheme.SupportsCiphertextMatMul());
     EXPECT_FALSE(scheme.IsSecurityAuthorized());
-    EXPECT_FALSE(scheme.SupportsSerialization());
+    EXPECT_TRUE(scheme.SupportsSerialization());
     EXPECT_FALSE(scheme.SupportsBootstrap());
 
     const GLIntWBatchedPlaintext input(parameters, WBatchedPlusValues(), WBatchedMinusValues());
@@ -731,7 +785,226 @@ TEST(GLInt, WBatchedSlicedBGVEncryptDecryptAndContract) {
     }
     EXPECT_FALSE(census.nativeFusedWTransportImplemented);
     EXPECT_FALSE(census.securityAuthorized);
+    EXPECT_TRUE(census.aggregateSerializationImplemented);
+    EXPECT_TRUE(census.operations[static_cast<std::size_t>(
+                    GLIntOperation::SerializeAggregate)]
+                    .boundedConformancePathImplemented);
+    EXPECT_FALSE(census.operations[static_cast<std::size_t>(
+                     GLIntOperation::SerializeAggregate)]
+                     .productionValuePathImplemented);
     EXPECT_FALSE(census.integerBootstrapImplemented);
+}
+
+TEST(GLInt, WBatchedSlicedBGVSerializationRoundTripAndOperationParity) {
+    const auto parameters = GLIntWBatchedParameters::ConformanceN4P3T97();
+    const GLIntWBatchedSlicedSchemelet scheme(parameters);
+    const auto keys = scheme.KeyGen();
+    scheme.EvalMultKeyGen(keys.secretKey);
+    const GLIntWBatchedPlaintext input(parameters, WBatchedPlusValues(),
+                                       WBatchedMinusValues());
+    const auto encoded    = scheme.GetCodec().Encode(input);
+    const auto ciphertext = scheme.Encrypt(keys.publicKey, encoded);
+
+    const auto serialized      = scheme.Serialize(ciphertext);
+    const auto serializedAgain = scheme.Serialize(ciphertext);
+    ASSERT_GT(serialized.bytes.size(), kWBatchedManifestRootBytes);
+    EXPECT_LT(serialized.bytes.size(), 1024u * 1024u);
+    EXPECT_EQ(serialized.manifestRootSha256.size(), kWBatchedManifestRootBytes);
+    EXPECT_EQ(serialized.bytes, serializedAgain.bytes);
+    EXPECT_EQ(serialized.manifestRootSha256, serializedAgain.manifestRootSha256);
+    EXPECT_EQ(std::string(serialized.bytes.end() - kWBatchedManifestRootBytes,
+                          serialized.bytes.end()),
+              serialized.manifestRootSha256);
+
+    const auto restored = scheme.Deserialize(serialized);
+    ASSERT_EQ(restored.GetSlices().size(), ciphertext.GetSlices().size());
+    EXPECT_EQ(restored.GetKeyTag(), ciphertext.GetKeyTag());
+    EXPECT_EQ(scheme.Decrypt(keys.secretKey, restored).GetCoefficients(),
+              encoded.GetCoefficients());
+    for (std::size_t index = 0; index < restored.GetSlices().size(); ++index) {
+        const auto& expected = ciphertext.GetSlices()[index];
+        const auto& actual   = restored.GetSlices()[index];
+        ASSERT_TRUE(actual != nullptr);
+        EXPECT_EQ(actual->GetCryptoContext().get(), scheme.GetCryptoContext().get());
+        EXPECT_EQ(actual->GetLevel(), expected->GetLevel());
+        EXPECT_EQ(actual->GetNoiseScaleDeg(), expected->GetNoiseScaleDeg());
+        EXPECT_EQ(actual->GetElements().size(), expected->GetElements().size());
+        EXPECT_EQ(actual->GetElements().front().GetNumOfElements(),
+                  expected->GetElements().front().GetNumOfElements());
+        EXPECT_EQ(actual->GetEncodingType(), expected->GetEncodingType());
+    }
+    const auto canonicalAgain = scheme.Serialize(restored);
+    // Cereal pointer IDs inside the OpenFHE payload may change after load;
+    // the canonical semantic manifest remains deterministic across the
+    // round trip even when those implementation bytes do not.
+    EXPECT_EQ(canonicalAgain.manifestRootSha256, serialized.manifestRootSha256);
+
+    auto variantSlices = ciphertext.GetSlices();
+    for (auto& slice : variantSlices) {
+        slice = slice->Clone();
+    }
+    GLIntWBatchedSlicedCiphertext metadataVariant(
+        parameters, scheme.GetCodec().GetRoots(), scheme.GetCryptoContext(),
+        std::move(variantSlices));
+    const auto originalScaling =
+        metadataVariant.GetSlices().front()->GetScalingFactorInt().ConvertToInt();
+    const NativeInteger changedScaling(originalScaling == 1 ? 2 : 1);
+    for (const auto& slice : metadataVariant.GetSlices()) {
+        slice->SetScalingFactorInt(changedScaling);
+    }
+    const auto metadataVariantArtifact = scheme.Serialize(metadataVariant);
+    EXPECT_NE(metadataVariantArtifact.manifestRootSha256,
+              serialized.manifestRootSha256);
+    const auto restoredMetadataVariant = scheme.Deserialize(metadataVariantArtifact);
+    EXPECT_EQ(restoredMetadataVariant.GetSlices().front()
+                  ->GetScalingFactorInt()
+                  .ConvertToInt(),
+              changedScaling.ConvertToInt());
+
+    const auto directAdd   = scheme.Add(ciphertext, ciphertext);
+    const auto restoredAdd = scheme.Add(restored, restored);
+    EXPECT_EQ(scheme.Decrypt(keys.secretKey, restoredAdd).GetCoefficients(),
+              scheme.Decrypt(keys.secretKey, directAdd).GetCoefficients());
+    const auto directRotate   = scheme.RotateInterMatrix(ciphertext, 1);
+    const auto restoredRotate = scheme.RotateInterMatrix(restored, 1);
+    EXPECT_EQ(scheme.Decrypt(keys.secretKey, restoredRotate).GetCoefficients(),
+              scheme.Decrypt(keys.secretKey, directRotate).GetCoefficients());
+
+    const auto square = [](const std::vector<int64_t>& values) {
+        std::vector<int64_t> output(values.size());
+        for (std::size_t index = 0; index < values.size(); ++index) {
+            output[index] = Canonical(values[index] * values[index], kWBatchedModulus);
+        }
+        return output;
+    };
+    const GLIntWBatchedPlaintext expectedProduct(
+        parameters, square(input.GetValues(GLIntBranch::Plus)),
+        square(input.GetValues(GLIntBranch::Minus)));
+    const auto product = scheme.EvalHadamard(restored, restored);
+    EXPECT_EQ(scheme.Decrypt(keys.secretKey, product).GetCoefficients(),
+              scheme.GetCodec().Encode(expectedProduct).GetCoefficients());
+    ASSERT_EQ(product.GetSlices().front()->GetLevel(), 1u);
+    ASSERT_EQ(product.GetSlices().front()->GetNoiseScaleDeg(), 1u);
+
+    const auto serializedProduct = scheme.Serialize(product);
+    const auto restoredProduct   = scheme.Deserialize(serializedProduct);
+    EXPECT_EQ(restoredProduct.GetSlices().front()->GetLevel(), 1u);
+    EXPECT_EQ(restoredProduct.GetSlices().front()->GetNoiseScaleDeg(), 1u);
+    EXPECT_EQ(scheme.Decrypt(keys.secretKey, restoredProduct).GetCoefficients(),
+              scheme.GetCodec().Encode(expectedProduct).GetCoefficients());
+}
+
+TEST(GLInt, WBatchedSlicedBGVSerializationRejectsMalformedAndMixedBindings) {
+    const auto parameters = GLIntWBatchedParameters::ConformanceN4P3T97();
+    const GLIntWBatchedSlicedSchemelet scheme(parameters);
+    const auto keys = scheme.KeyGen();
+    const GLIntWBatchedPlaintext input(parameters, WBatchedPlusValues(),
+                                       WBatchedMinusValues());
+    const auto encoded    = scheme.GetCodec().Encode(input);
+    const auto ciphertext = scheme.Encrypt(keys.publicKey, encoded);
+    const auto artifact   = scheme.Serialize(ciphertext);
+    const auto keyTagSize = ciphertext.GetKeyTag().size();
+
+    auto badManifest = artifact;
+    badManifest.bytes.front() ^= 1;
+    EXPECT_THROW((void)scheme.Deserialize(badManifest), GLCiphertextError);
+
+    auto truncated = artifact;
+    truncated.bytes.pop_back();
+    EXPECT_THROW((void)scheme.Deserialize(truncated), GLCiphertextError);
+
+    auto badExternalRoot = artifact;
+    badExternalRoot.manifestRootSha256.assign(kWBatchedManifestRootBytes, '0');
+    EXPECT_THROW((void)scheme.Deserialize(badExternalRoot), GLCiphertextError);
+
+    // Recompute the outer manifest after each mutation below: these cases
+    // must fail semantic envelope/payload checks, not merely the outer hash.
+    auto badMagic = artifact;
+    badMagic.bytes.front() ^= 1;
+    RehashWBatchedArtifact(&badMagic);
+    EXPECT_THROW((void)scheme.Deserialize(badMagic), GLCiphertextError);
+
+    auto badPayload = artifact;
+    badPayload.bytes[badPayload.bytes.size() - kWBatchedManifestRootBytes - 1] ^= 1;
+    RehashWBatchedArtifact(&badPayload);
+    EXPECT_THROW((void)scheme.Deserialize(badPayload), GLCiphertextError);
+
+    auto malformedTowers = scheme.Encrypt(keys.publicKey, encoded);
+    malformedTowers.GetSlices().front()->GetElements()[1].DropLastElement();
+    EXPECT_THROW((void)scheme.Serialize(malformedTowers), GLCiphertextError);
+
+    // Fixed envelope offsets through the length-prefixed key tag:
+    // magic/version/parameters/roots/context-hash = 120 bytes.
+    constexpr std::size_t keyTagOffset = 124;
+    ASSERT_GT(keyTagSize, 0u);
+    ASSERT_GT(artifact.bytes.size(), keyTagOffset + keyTagSize);
+    auto badKeyTag = artifact;
+    badKeyTag.bytes[keyTagOffset] ^= 1;
+    RehashWBatchedArtifact(&badKeyTag);
+    EXPECT_THROW((void)scheme.Deserialize(badKeyTag), GLKeyMismatchError);
+
+    constexpr std::size_t sliceCountOffsetAfterKeyTag = 124;
+    auto badShape = artifact;
+    SetWBatchedArtifactU32(&badShape, sliceCountOffsetAfterKeyTag + keyTagSize, 7);
+    RehashWBatchedArtifact(&badShape);
+    EXPECT_THROW((void)scheme.Deserialize(badShape), GLDimensionError);
+
+    // Uniform metadata begins after slice count; each canonical slice record
+    // is seven U32s plus one 64-byte SHA-256.  Altering both the uniform and
+    // record levels gets through pass 1 but must disagree with real OpenFHE
+    // ciphertext metadata in pass 2.
+    constexpr std::size_t uniformLevelOffsetAfterKeyTag = 128;
+    constexpr std::size_t recordsOffsetAfterKeyTag      = 148;
+    constexpr std::size_t recordBytes                   = kWBatchedSliceRecordBytes;
+    constexpr std::size_t recordLevelOffset             = 2 * sizeof(uint32_t);
+    auto badLevel = artifact;
+    SetWBatchedArtifactU32(&badLevel, uniformLevelOffsetAfterKeyTag + keyTagSize, 1);
+    for (std::size_t index = 0; index < 8; ++index) {
+        SetWBatchedArtifactU32(&badLevel,
+                               recordsOffsetAfterKeyTag + keyTagSize + index * recordBytes +
+                                   recordLevelOffset,
+                               1);
+    }
+    RehashWBatchedArtifact(&badLevel);
+    EXPECT_THROW((void)scheme.Deserialize(badLevel), GLCiphertextError);
+
+    auto badOrder = artifact;
+    SetWBatchedArtifactU32(&badOrder,
+                           recordsOffsetAfterKeyTag + keyTagSize + sizeof(uint32_t), 1);
+    RehashWBatchedArtifact(&badOrder);
+    EXPECT_THROW((void)scheme.Deserialize(badOrder), GLCiphertextError);
+
+    // A syntactically valid context digest cannot be substituted even when
+    // the attacker updates the outer manifest.
+    constexpr std::size_t contextHashOffset = 56;
+    auto badContextHash = artifact;
+    badContextHash.bytes[contextHashOffset] =
+        badContextHash.bytes[contextHashOffset] == '0' ? '1' : '0';
+    RehashWBatchedArtifact(&badContextHash);
+    EXPECT_THROW((void)scheme.Deserialize(badContextHash), GLContextMismatchError);
+
+    const GLIntWBatchedSlicedSchemelet alternateRoots(
+        parameters, GLIntWBatchedCodecRoots{85, 61});
+    const auto alternateKeys = alternateRoots.KeyGen();
+    const auto alternateCiphertext = alternateRoots.Encrypt(
+        alternateKeys.publicKey, alternateRoots.GetCodec().Encode(input));
+    EXPECT_THROW((void)scheme.Deserialize(alternateRoots.Serialize(alternateCiphertext)),
+                 GLContextMismatchError);
+
+    const auto depthTwoParameters = GLIntWBatchedParameters::ConformanceN4P3T97(2);
+    const GLIntWBatchedSlicedSchemelet depthTwo(depthTwoParameters);
+    const auto depthTwoKeys = depthTwo.KeyGen();
+    const GLIntWBatchedPlaintext depthTwoInput(
+        depthTwoParameters, WBatchedPlusValues(), WBatchedMinusValues());
+    const auto depthTwoCiphertext = depthTwo.Encrypt(
+        depthTwoKeys.publicKey, depthTwo.GetCodec().Encode(depthTwoInput));
+    EXPECT_THROW((void)scheme.Deserialize(depthTwo.Serialize(depthTwoCiphertext)),
+                 GLContextMismatchError);
+
+    const auto secondKeys = scheme.KeyGen();
+    const auto secondCiphertext = scheme.Encrypt(secondKeys.publicKey, encoded);
+    const auto restoredSecond = scheme.Deserialize(scheme.Serialize(secondCiphertext));
+    EXPECT_THROW((void)scheme.Add(ciphertext, restoredSecond), GLKeyMismatchError);
 }
 
 TEST(GLInt, WBatchedSlicedBGVLinearOperationsExact) {

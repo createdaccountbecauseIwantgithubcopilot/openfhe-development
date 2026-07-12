@@ -132,9 +132,10 @@ struct GLIntWBatchedParameters {
  * The derived dimensions are the exact Section-4 counts.  Only the bounded
  * n=4,p=3,t=97 receipt reports a plaintext codec and bounded sliced linear
  * ciphertext path; no receipt is evidence of native fused W-dependent RLWE
- * transport, a security-authorized BGV chain, GL aggregate/key serialization,
- * matrix multiplication, or integer bootstrapping.  `operations` records the
- * p=1 reference surface and remaining p>1 production gaps.
+ * transport, a security-authorized BGV chain, evaluation-key serialization,
+ * matrix multiplication, or integer bootstrapping.  The bounded receipt does
+ * cover its eight-ciphertext value aggregate.  `operations` records the p=1
+ * reference surface and remaining p>1 production gaps.
  */
 struct GLIntWBatchedCensus {
     GLIntWBatchedParameters parameters;
@@ -327,6 +328,19 @@ private:
 };
 
 /**
+ * Canonical binary envelope for one bounded sliced ciphertext aggregate.
+ * `bytes` ends in a lowercase SHA-256 root over its stable semantic manifest;
+ * the same round-trip-stable root is exposed for artifact/checkpoint binding.
+ * A separate digest inside the envelope binds the exact OpenFHE payload.
+ * These unkeyed digests detect corruption; they are not an authenticity MAC.
+ * Deserialization is for trusted checkpoint bytes, not hostile Cereal input.
+ */
+struct GLIntWBatchedSerializedCiphertext {
+    std::vector<uint8_t> bytes;
+    std::string manifestRootSha256;
+};
+
+/**
  * Smallest honest encrypted Section-4 conformance tranche.
  *
  * The message is the genuine n=4,p=3,t=97 coefficient tensor, sliced into
@@ -339,8 +353,9 @@ private:
  * and relinearizes the X/Gaussian slices while the aggregate performs the Y
  * convolution modulo Y^n-I and W convolution modulo Phi_p(W).  Native fused
  * single-RLWE W transport under a W-dependent secret, ordinary GL matrix
- * multiplication, security authorization, serialization, and bootstrapping
- * are explicitly pending.
+ * multiplication, security authorization, evaluation-key serialization, and
+ * bootstrapping are explicitly pending.  The eight-ciphertext value bundle
+ * itself has a canonical, context-bound OpenFHE binary envelope.
  */
 class GLIntWBatchedSlicedSchemelet final {
 public:
@@ -391,6 +406,10 @@ public:
     GLIntWBatchedSlicedCiphertext EvalHadamard(
         const GLIntWBatchedSlicedCiphertext& lhs,
         const GLIntWBatchedSlicedCiphertext& rhs) const;
+    GLIntWBatchedSerializedCiphertext Serialize(
+        const GLIntWBatchedSlicedCiphertext& ciphertext) const;
+    GLIntWBatchedSlicedCiphertext Deserialize(
+        const GLIntWBatchedSerializedCiphertext& artifact) const;
 
 private:
     void ValidateEncoded(const GLIntWBatchedEncodedPlaintext& plaintext,

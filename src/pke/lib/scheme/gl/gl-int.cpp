@@ -21,9 +21,18 @@
 
 #include "scheme/gl/gl-int.h"
 
+#include "ciphertext-ser.h"
+#include "cryptocontext-ser.h"
+#include "scheme/bgvrns/bgvrns-ser.h"
+#include "utils/hashutil.h"
+
 #include <algorithm>
+#include <cmath>
+#include <cstring>
 #include <limits>
+#include <new>
 #include <sstream>
+#include <string_view>
 #include <utility>
 
 namespace lbcrypto {
@@ -188,6 +197,264 @@ int64_t CenteredModT(int64_t canonical, uint64_t modulus) {
     const auto half = static_cast<int64_t>((modulus - 1) / 2);
     return canonical > half ? canonical - static_cast<int64_t>(modulus) : canonical;
 }
+
+inline constexpr std::string_view kWBatchedCiphertextMagic = "GLIWSCT1";
+inline constexpr uint32_t kWBatchedCiphertextVersion       = 1;
+inline constexpr std::size_t kSha256HexLength              = 64;
+inline constexpr std::size_t kMaxWBatchedArtifactBytes     = 1024 * 1024;
+inline constexpr std::size_t kMaxWBatchedPayloadBytes      = 1008 * 1024;
+inline constexpr std::size_t kMaxWBatchedKeyTagBytes       = 4096;
+
+std::string Sha256Hex(std::string_view bytes) {
+    return HashUtil::HashString(std::string(bytes.data(), bytes.size()));
+}
+
+std::string Sha256Hex(const std::vector<uint8_t>& bytes, std::size_t begin,
+                      std::size_t length) {
+    if (begin > bytes.size() || length > bytes.size() - begin) {
+        throw GLCiphertextError("GL integer W-batched SHA-256 range is outside the artifact");
+    }
+    return Sha256Hex(std::string_view(
+        reinterpret_cast<const char*>(bytes.data() + begin), length));
+}
+
+bool IsCanonicalSha256Hex(std::string_view value) {
+    if (value.size() != kSha256HexLength) {
+        return false;
+    }
+    for (const auto c : value) {
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+template <typename T>
+std::string SerializeOpenFHEBinary(const T& value) {
+    std::ostringstream stream(std::ios::out | std::ios::binary);
+    Serial::Serialize(value, stream, SerType::BINARY);
+    return stream.str();
+}
+
+class WBatchedCanonicalWriter final {
+public:
+    void Fixed(std::string_view value) {
+        m_bytes.insert(m_bytes.end(), value.begin(), value.end());
+    }
+
+    void U32(uint32_t value) {
+        for (uint32_t shift = 0; shift < 32; shift += 8) {
+            m_bytes.push_back(static_cast<uint8_t>((value >> shift) & 0xff));
+        }
+    }
+
+    void U64(uint64_t value) {
+        for (uint32_t shift = 0; shift < 64; shift += 8) {
+            m_bytes.push_back(static_cast<uint8_t>((value >> shift) & 0xff));
+        }
+    }
+
+    void String(std::string_view value) {
+        if (value.size() > std::numeric_limits<uint32_t>::max()) {
+            throw GLCiphertextError("GL integer W-batched artifact string is too large");
+        }
+        U32(static_cast<uint32_t>(value.size()));
+        Fixed(value);
+    }
+
+    const std::vector<uint8_t>& Bytes() const noexcept {
+        return m_bytes;
+    }
+
+    std::vector<uint8_t> Take() {
+        return std::move(m_bytes);
+    }
+
+private:
+    std::vector<uint8_t> m_bytes;
+};
+
+std::string StableWBatchedSliceSha256(const Ciphertext<DCRTPoly>& slice) {
+    if (!slice) {
+        throw GLCiphertextError("cannot digest a null GL integer W-batched slice");
+    }
+    WBatchedCanonicalWriter writer;
+    writer.U32(static_cast<uint32_t>(slice->GetElements().size()));
+    for (const auto& component : slice->GetElements()) {
+        writer.U32(static_cast<uint32_t>(component.GetFormat()));
+        writer.U32(component.GetRingDimension());
+        writer.U32(component.GetCyclotomicOrder());
+        writer.U32(static_cast<uint32_t>(component.GetAllElements().size()));
+        for (const auto& tower : component.GetAllElements()) {
+            writer.U32(static_cast<uint32_t>(tower.GetFormat()));
+            writer.U32(tower.GetRingDimension());
+            writer.U32(tower.GetCyclotomicOrder());
+            writer.U64(tower.GetModulus().ConvertToInt());
+            writer.U64(tower.GetRootOfUnity().ConvertToInt());
+            const auto& values = tower.GetValues();
+            writer.U32(static_cast<uint32_t>(values.GetLength()));
+            for (std::size_t index = 0; index < values.GetLength(); ++index) {
+                writer.U64(values[index].ConvertToInt());
+            }
+        }
+    }
+    return Sha256Hex(writer.Bytes(), 0, writer.Bytes().size());
+}
+
+uint64_t StableDoubleBits(double value) noexcept {
+    static_assert(sizeof(double) == sizeof(uint64_t),
+                  "the W-batched manifest requires an IEEE-754 binary64 double");
+    uint64_t bits = 0;
+    std::memcpy(&bits, &value, sizeof(bits));
+    return bits;
+}
+
+double DoubleFromStableBits(uint64_t bits) noexcept {
+    double value = 0;
+    std::memcpy(&value, &bits, sizeof(value));
+    return value;
+}
+
+void ValidateWBatchedSliceRingStructure(const Ciphertext<DCRTPoly>& slice,
+                                        const CryptoContext<DCRTPoly>& context,
+                                        std::size_t index) {
+    if (!slice || !context || slice->GetElements().size() != 2) {
+        throw GLCiphertextError(
+            RowMessage("GL integer W-batched slice has an invalid component shape", index));
+    }
+    const auto elementParameters = context->GetCryptoParameters()->GetElementParams();
+    if (!elementParameters || elementParameters->GetParams().empty()) {
+        throw GLContextMismatchError(
+            "GL integer W-batched context has no DCRT modulus chain");
+    }
+    const auto& chain = elementParameters->GetParams();
+    const auto towers = slice->GetElements().front().GetNumOfElements();
+    if (towers == 0 || slice->GetLevel() >= chain.size() ||
+        towers != chain.size() - slice->GetLevel()) {
+        throw GLCiphertextError(
+            RowMessage("GL integer W-batched slice level/tower shape is invalid", index));
+    }
+    auto expectedDCRTParameters =
+        std::make_shared<DCRTPoly::Params>(*elementParameters);
+    for (std::size_t drop = towers; drop < chain.size(); ++drop) {
+        expectedDCRTParameters->PopLastParam();
+    }
+    const auto componentMatches = [&](const DCRTPoly& component) {
+        if (component.GetFormat() != Format::EVALUATION ||
+            component.GetNumOfElements() != towers ||
+            component.GetRingDimension() != context->GetRingDimension() ||
+            component.GetCyclotomicOrder() != context->GetCyclotomicOrder() ||
+            !component.GetParams() ||
+            *component.GetParams() != *expectedDCRTParameters) {
+            return false;
+        }
+        for (std::size_t towerIndex = 0; towerIndex < towers; ++towerIndex) {
+            const auto& tower    = component.GetElementAtIndex(towerIndex);
+            const auto& expected = chain[towerIndex];
+            if (tower.GetFormat() != Format::EVALUATION ||
+                tower.GetRingDimension() != expected->GetRingDimension() ||
+                tower.GetCyclotomicOrder() != expected->GetCyclotomicOrder() ||
+                tower.GetModulus() != expected->GetModulus() ||
+                tower.GetRootOfUnity() != expected->GetRootOfUnity() ||
+                !tower.GetParams() || *tower.GetParams() != *expected) {
+                return false;
+            }
+        }
+        return true;
+    };
+    if (!std::all_of(slice->GetElements().begin(), slice->GetElements().end(),
+                     componentMatches)) {
+        throw GLCiphertextError(
+            RowMessage("GL integer W-batched slice DCRT basis mismatches its context", index));
+    }
+}
+
+class WBatchedCanonicalReader final {
+public:
+    WBatchedCanonicalReader(const std::vector<uint8_t>& bytes, std::size_t limit)
+        : m_bytes(bytes), m_limit(limit) {
+        if (limit > bytes.size()) {
+            throw GLCiphertextError("GL integer W-batched artifact reader limit is invalid");
+        }
+    }
+
+    uint32_t U32(const char* field) {
+        Require(4, field);
+        uint32_t value = 0;
+        for (uint32_t shift = 0; shift < 32; shift += 8) {
+            value |= static_cast<uint32_t>(m_bytes[m_offset++]) << shift;
+        }
+        return value;
+    }
+
+    uint64_t U64(const char* field) {
+        Require(8, field);
+        uint64_t value = 0;
+        for (uint32_t shift = 0; shift < 64; shift += 8) {
+            value |= static_cast<uint64_t>(m_bytes[m_offset++]) << shift;
+        }
+        return value;
+    }
+
+    std::string Fixed(std::size_t length, const char* field) {
+        Require(length, field);
+        std::string value(reinterpret_cast<const char*>(m_bytes.data() + m_offset), length);
+        m_offset += length;
+        return value;
+    }
+
+    std::string String(std::size_t maxLength, const char* field) {
+        const auto length = static_cast<std::size_t>(U32(field));
+        if (length > maxLength) {
+            throw GLCiphertextError(std::string("GL integer W-batched artifact ") + field +
+                                    " exceeds its bounded length");
+        }
+        return Fixed(length, field);
+    }
+
+    std::size_t Payload(std::size_t length, const char* field) {
+        Require(length, field);
+        const auto begin = m_offset;
+        m_offset += length;
+        return begin;
+    }
+
+    bool Done() const noexcept {
+        return m_offset == m_limit;
+    }
+
+    std::size_t Offset() const noexcept {
+        return m_offset;
+    }
+
+private:
+    void Require(std::size_t length, const char* field) const {
+        if (m_offset > m_limit || length > m_limit - m_offset) {
+            throw GLCiphertextError(std::string("GL integer W-batched artifact truncates ") + field);
+        }
+    }
+
+    const std::vector<uint8_t>& m_bytes;
+    std::size_t m_limit{0};
+    std::size_t m_offset{0};
+};
+
+struct WBatchedSliceArtifactRecord {
+    uint32_t y{0};
+    uint32_t w{0};
+    uint32_t level{0};
+    uint32_t noiseScaleDeg{0};
+    uint32_t towers{0};
+    uint32_t elements{0};
+    uint32_t encoding{0};
+    uint32_t slots{0};
+    uint32_t hopLevel{0};
+    uint64_t scalingFactorBits{0};
+    uint64_t scalingFactorInt{0};
+    uint32_t metadataCount{0};
+    std::string contentSha256;
+};
 
 uint64_t CheckedMultiply(uint64_t lhs, uint64_t rhs, const char* quantity) {
     if (rhs != 0 && lhs > std::numeric_limits<uint64_t>::max() / rhs) {
@@ -742,6 +1009,9 @@ GLIntWBatchedCensus MakeGLIntWBatchedCensus(const GLIntWBatchedParameters& param
             .boundedConformancePathImplemented = true;
         census.operations[static_cast<std::size_t>(GLIntOperation::InterMatrixRotate)]
             .boundedConformancePathImplemented = true;
+        census.aggregateSerializationImplemented = true;
+        census.operations[static_cast<std::size_t>(GLIntOperation::SerializeAggregate)]
+            .boundedConformancePathImplemented = true;
     }
     return census;
 }
@@ -1289,6 +1559,10 @@ void GLIntWBatchedSlicedCiphertext::Validate() const {
     uint32_t level = 0;
     uint32_t noiseScaleDeg = 0;
     std::size_t towers = 0;
+    uint32_t slots = 0;
+    std::size_t hopLevel = 0;
+    uint64_t scalingFactorBits = 0;
+    uint64_t scalingFactorInt = 0;
     for (std::size_t index = 0; index < m_slices.size(); ++index) {
         const auto& slice = m_slices[index];
         if (!slice) {
@@ -1306,12 +1580,30 @@ void GLIntWBatchedSlicedCiphertext::Validate() const {
             throw GLCiphertextError(
                 RowMessage("GL integer W-batched slice is not a two-component ciphertext", index));
         }
+        ValidateWBatchedSliceRingStructure(slice, m_context, index);
         const auto sliceTowers = slice->GetElements().front().GetNumOfElements();
+        const auto metadata = slice->GetMetadataMap();
+        if (!metadata || !metadata->empty()) {
+            throw GLCiphertextError(
+                RowMessage("GL integer W-batched slice has unsupported opaque metadata", index));
+        }
+        const auto sliceScalingFactor = slice->GetScalingFactor();
+        const auto sliceScalingFactorInt = slice->GetScalingFactorInt().ConvertToInt();
+        if (!std::isfinite(sliceScalingFactor) || sliceScalingFactor <= 0.0 ||
+            sliceScalingFactorInt == 0 ||
+            sliceScalingFactorInt >= m_parameters.plaintextModulus) {
+            throw GLCiphertextError(
+                RowMessage("GL integer W-batched slice scaling metadata is invalid", index));
+        }
         if (index == 0) {
             keyTag       = slice->GetKeyTag();
             level        = slice->GetLevel();
             noiseScaleDeg = slice->GetNoiseScaleDeg();
             towers       = sliceTowers;
+            slots        = slice->GetSlots();
+            hopLevel     = slice->GetHopLevel();
+            scalingFactorBits = StableDoubleBits(sliceScalingFactor);
+            scalingFactorInt  = sliceScalingFactorInt;
             if (keyTag.empty()) {
                 throw GLKeyMismatchError(
                     "GL integer W-batched slices require a nonempty shared key tag");
@@ -1323,7 +1615,10 @@ void GLIntWBatchedSlicedCiphertext::Validate() const {
                     RowMessage("GL integer W-batched slice uses a different key", index));
             }
             if (slice->GetLevel() != level || slice->GetNoiseScaleDeg() != noiseScaleDeg ||
-                sliceTowers != towers) {
+                sliceTowers != towers || slice->GetSlots() != slots ||
+                slice->GetHopLevel() != hopLevel ||
+                StableDoubleBits(sliceScalingFactor) != scalingFactorBits ||
+                sliceScalingFactorInt != scalingFactorInt) {
                 throw GLCiphertextError(
                     RowMessage("GL integer W-batched slice metadata is not uniform", index));
             }
@@ -1402,7 +1697,7 @@ bool GLIntWBatchedSlicedSchemelet::IsSecurityAuthorized() const noexcept {
 }
 
 bool GLIntWBatchedSlicedSchemelet::SupportsSerialization() const noexcept {
-    return false;
+    return true;
 }
 
 bool GLIntWBatchedSlicedSchemelet::SupportsBootstrap() const noexcept {
@@ -1763,6 +2058,269 @@ GLIntWBatchedSlicedCiphertext GLIntWBatchedSlicedSchemelet::EvalHadamard(
     }
     return GLIntWBatchedSlicedCiphertext(m_parameters, m_codec.GetRoots(), m_context,
                                          std::move(output));
+}
+
+GLIntWBatchedSerializedCiphertext GLIntWBatchedSlicedSchemelet::Serialize(
+    const GLIntWBatchedSlicedCiphertext& ciphertext) const {
+    ValidateAggregate(ciphertext, "GL integer W-batched ciphertext");
+    const auto& first = ciphertext.GetSlices().front();
+    const auto keyTag = ciphertext.GetKeyTag();
+    if (keyTag.size() > kMaxWBatchedKeyTagBytes) {
+        throw GLCiphertextError("GL integer W-batched key tag exceeds the artifact bound");
+    }
+
+    const auto contextPayload = SerializeOpenFHEBinary(m_context);
+    const auto contextSha256  = Sha256Hex(contextPayload);
+    const auto aggregatePayload = SerializeOpenFHEBinary(ciphertext.GetSlices());
+    if (aggregatePayload.size() > kMaxWBatchedPayloadBytes) {
+        throw GLCiphertextError("GL integer W-batched OpenFHE payload exceeds the artifact bound");
+    }
+
+    WBatchedCanonicalWriter writer;
+    writer.Fixed(kWBatchedCiphertextMagic);
+    writer.U32(kWBatchedCiphertextVersion);
+    writer.U32(m_parameters.dimension);
+    writer.U32(m_parameters.cyclotomicPrime);
+    writer.U32(m_parameters.wGenerator);
+    writer.U64(m_parameters.plaintextModulus);
+    writer.U32(m_parameters.multiplicativeDepth);
+    writer.U32(m_parameters.nativeRnsWordBits);
+    writer.U64(m_codec.GetRoots().zeta);
+    writer.U64(m_codec.GetRoots().eta);
+    writer.Fixed(contextSha256);
+    writer.String(keyTag);
+    writer.U32(static_cast<uint32_t>(GetSliceCount()));
+    writer.U32(first->GetLevel());
+    writer.U32(first->GetNoiseScaleDeg());
+    writer.U32(static_cast<uint32_t>(first->GetElements().front().GetNumOfElements()));
+    writer.U32(static_cast<uint32_t>(first->GetElements().size()));
+    writer.U32(static_cast<uint32_t>(first->GetEncodingType()));
+
+    const auto phi = static_cast<std::size_t>(m_parameters.cyclotomicPrime - 1);
+    for (std::size_t index = 0; index < GetSliceCount(); ++index) {
+        const auto& slice = ciphertext.GetSlices()[index];
+        writer.U32(static_cast<uint32_t>(index / phi));
+        writer.U32(static_cast<uint32_t>(index % phi));
+        writer.U32(slice->GetLevel());
+        writer.U32(slice->GetNoiseScaleDeg());
+        writer.U32(static_cast<uint32_t>(slice->GetElements().front().GetNumOfElements()));
+        writer.U32(static_cast<uint32_t>(slice->GetElements().size()));
+        writer.U32(static_cast<uint32_t>(slice->GetEncodingType()));
+        writer.U32(slice->GetSlots());
+        writer.U32(static_cast<uint32_t>(slice->GetHopLevel()));
+        writer.U64(StableDoubleBits(slice->GetScalingFactor()));
+        writer.U64(slice->GetScalingFactorInt().ConvertToInt());
+        writer.U32(static_cast<uint32_t>(slice->GetMetadataMap()->size()));
+        writer.Fixed(StableWBatchedSliceSha256(slice));
+    }
+
+    // The manifest root intentionally covers canonical context/key/shape and
+    // stable ciphertext-content records, but not cereal's object-graph bytes:
+    // OpenFHE can re-emit an equivalent graph with different pointer IDs
+    // after deserialization.  The separate payload SHA-256 protects those
+    // exact bytes while this semantic root survives a round trip.
+    const auto manifestRoot = Sha256Hex(writer.Bytes(), 0, writer.Bytes().size());
+    writer.U64(static_cast<uint64_t>(aggregatePayload.size()));
+    writer.Fixed(Sha256Hex(aggregatePayload));
+    writer.Fixed(aggregatePayload);
+    writer.Fixed(manifestRoot);
+    auto bytes = writer.Take();
+    if (bytes.size() > kMaxWBatchedArtifactBytes) {
+        throw GLCiphertextError("GL integer W-batched canonical artifact exceeds its size bound");
+    }
+    return GLIntWBatchedSerializedCiphertext{std::move(bytes), manifestRoot};
+}
+
+GLIntWBatchedSlicedCiphertext GLIntWBatchedSlicedSchemelet::Deserialize(
+    const GLIntWBatchedSerializedCiphertext& artifact) const {
+    if (artifact.bytes.size() > kMaxWBatchedArtifactBytes ||
+        artifact.bytes.size() < kWBatchedCiphertextMagic.size() + sizeof(uint32_t) +
+                                    kSha256HexLength) {
+        throw GLCiphertextError("GL integer W-batched artifact has an invalid bounded size");
+    }
+    if (!IsCanonicalSha256Hex(artifact.manifestRootSha256)) {
+        throw GLCiphertextError("GL integer W-batched artifact exposes a noncanonical manifest root");
+    }
+
+    const auto prefixLength = artifact.bytes.size() - kSha256HexLength;
+    const std::string trailer(
+        reinterpret_cast<const char*>(artifact.bytes.data() + prefixLength),
+        kSha256HexLength);
+    if (!IsCanonicalSha256Hex(trailer) || trailer != artifact.manifestRootSha256) {
+        throw GLCiphertextError("GL integer W-batched artifact manifest root mismatch");
+    }
+
+    // Pass 1 validates every outer-envelope length/digest plus all public
+    // context/shape metadata before Cereal runs.  Nested OpenFHE archive
+    // lengths remain Cereal-controlled, so this trusted-checkpoint API is not
+    // a resource sandbox for attacker-created archives.
+    WBatchedCanonicalReader reader(artifact.bytes, prefixLength);
+    if (reader.Fixed(kWBatchedCiphertextMagic.size(), "magic") !=
+        kWBatchedCiphertextMagic) {
+        throw GLCiphertextError("GL integer W-batched artifact magic mismatch");
+    }
+    if (reader.U32("version") != kWBatchedCiphertextVersion) {
+        throw GLCiphertextError("GL integer W-batched artifact version mismatch");
+    }
+
+    GLIntWBatchedParameters parameters;
+    parameters.dimension           = reader.U32("dimension");
+    parameters.cyclotomicPrime     = reader.U32("cyclotomic prime");
+    parameters.wGenerator          = reader.U32("W generator");
+    parameters.plaintextModulus    = reader.U64("plaintext modulus");
+    parameters.multiplicativeDepth = reader.U32("multiplicative depth");
+    parameters.nativeRnsWordBits   = reader.U32("native RNS width");
+    parameters.Validate();
+    if (!SameWBatchedParameters(parameters, m_parameters)) {
+        throw GLContextMismatchError(
+            "GL integer W-batched artifact parameters do not match the schemelet");
+    }
+
+    GLIntWBatchedCodecRoots roots;
+    roots.zeta = reader.U64("zeta");
+    roots.eta  = reader.U64("eta");
+    roots.Validate(parameters);
+    if (roots != m_codec.GetRoots()) {
+        throw GLContextMismatchError(
+            "GL integer W-batched artifact roots do not match the schemelet");
+    }
+
+    const auto contextSha256 = reader.Fixed(kSha256HexLength, "context SHA-256");
+    if (!IsCanonicalSha256Hex(contextSha256) ||
+        contextSha256 != Sha256Hex(SerializeOpenFHEBinary(m_context))) {
+        throw GLContextMismatchError(
+            "GL integer W-batched artifact context binding does not match the schemelet");
+    }
+    const auto keyTag = reader.String(kMaxWBatchedKeyTagBytes, "key tag");
+    if (keyTag.empty()) {
+        throw GLKeyMismatchError("GL integer W-batched artifact has an empty key tag");
+    }
+    if (reader.U32("slice count") != GetSliceCount()) {
+        throw GLDimensionError("GL integer W-batched artifact slice count mismatch");
+    }
+
+    const auto uniformLevel = reader.U32("uniform level");
+    const auto uniformNoise = reader.U32("uniform noise scale degree");
+    const auto uniformTowers = reader.U32("uniform tower count");
+    const auto uniformElements = reader.U32("uniform component count");
+    const auto uniformEncoding = reader.U32("uniform encoding");
+    const auto& contextChain =
+        m_context->GetCryptoParameters()->GetElementParams()->GetParams();
+    if (uniformTowers == 0 || uniformElements != 2 ||
+        uniformEncoding != static_cast<uint32_t>(COEF_PACKED_ENCODING) ||
+        uniformLevel >= contextChain.size() ||
+        uniformTowers != contextChain.size() - uniformLevel) {
+        throw GLCiphertextError("GL integer W-batched artifact uniform metadata is invalid");
+    }
+
+    std::array<WBatchedSliceArtifactRecord, 8> records;
+    const auto phi = static_cast<std::size_t>(m_parameters.cyclotomicPrime - 1);
+    for (std::size_t index = 0; index < records.size(); ++index) {
+        auto& record         = records[index];
+        record.y             = reader.U32("slice Y index");
+        record.w             = reader.U32("slice W index");
+        record.level         = reader.U32("slice level");
+        record.noiseScaleDeg = reader.U32("slice noise scale degree");
+        record.towers        = reader.U32("slice tower count");
+        record.elements      = reader.U32("slice component count");
+        record.encoding      = reader.U32("slice encoding");
+        record.slots         = reader.U32("slice slot count");
+        record.hopLevel      = reader.U32("slice hop level");
+        record.scalingFactorBits = reader.U64("slice floating scaling factor");
+        record.scalingFactorInt  = reader.U64("slice integer scaling factor");
+        record.metadataCount = reader.U32("slice opaque metadata count");
+        record.contentSha256 = reader.Fixed(kSha256HexLength, "slice content SHA-256");
+        if (record.y != index / phi || record.w != index % phi ||
+            record.level != uniformLevel || record.noiseScaleDeg != uniformNoise ||
+            record.towers != uniformTowers || record.elements != uniformElements ||
+            record.encoding != uniformEncoding ||
+            !std::isfinite(DoubleFromStableBits(record.scalingFactorBits)) ||
+            DoubleFromStableBits(record.scalingFactorBits) <= 0.0 ||
+            record.scalingFactorInt == 0 ||
+            record.scalingFactorInt >= m_parameters.plaintextModulus ||
+            record.metadataCount != 0 ||
+            !IsCanonicalSha256Hex(record.contentSha256)) {
+            throw GLCiphertextError(
+                "GL integer W-batched artifact slice order or metadata is invalid");
+        }
+    }
+
+    if (Sha256Hex(artifact.bytes, 0, reader.Offset()) != trailer) {
+        throw GLCiphertextError("GL integer W-batched semantic manifest root mismatch");
+    }
+
+    const auto payloadLength64 = reader.U64("OpenFHE aggregate payload length");
+    if (payloadLength64 > kMaxWBatchedPayloadBytes ||
+        payloadLength64 > std::numeric_limits<std::size_t>::max()) {
+        throw GLCiphertextError("GL integer W-batched OpenFHE payload length is invalid");
+    }
+    const auto payloadLength = static_cast<std::size_t>(payloadLength64);
+    const auto payloadSha256 = reader.Fixed(kSha256HexLength, "OpenFHE aggregate SHA-256");
+    if (!IsCanonicalSha256Hex(payloadSha256)) {
+        throw GLCiphertextError("GL integer W-batched payload SHA-256 is not canonical");
+    }
+    const auto payloadOffset = reader.Payload(payloadLength, "OpenFHE aggregate payload");
+    if (!reader.Done() || Sha256Hex(artifact.bytes, payloadOffset, payloadLength) != payloadSha256) {
+        throw GLCiphertextError("GL integer W-batched OpenFHE aggregate payload mismatch");
+    }
+
+    // Pass 2: only after all public bytes are bounded and integrity-checked do
+    // we invoke OpenFHE's binary deserializer and construct ciphertexts.
+    std::vector<Ciphertext<DCRTPoly>> slices;
+    try {
+        const std::string payload(
+            reinterpret_cast<const char*>(artifact.bytes.data() + payloadOffset),
+            payloadLength);
+        std::istringstream stream(payload, std::ios::in | std::ios::binary);
+        Serial::Deserialize(slices, stream, SerType::BINARY);
+        if (stream.peek() != std::char_traits<char>::eof()) {
+            throw GLCiphertextError(
+                "OpenFHE W-batched aggregate payload has trailing bytes");
+        }
+    }
+    catch (const std::bad_alloc&) {
+        throw GLCiphertextError(
+            "OpenFHE exhausted memory while loading the W-batched aggregate payload");
+    }
+    catch (const std::exception& error) {
+        throw GLCiphertextError(std::string("OpenFHE rejected the W-batched aggregate payload: ") +
+                                error.what());
+    }
+    if (slices.size() != GetSliceCount()) {
+        throw GLDimensionError(
+            "GL integer W-batched OpenFHE aggregate payload has the wrong slice count");
+    }
+    for (std::size_t index = 0; index < slices.size(); ++index) {
+        const auto& slice  = slices[index];
+        const auto& record = records[index];
+        if (!slice || slice->GetCryptoContext().get() != m_context.get()) {
+            throw GLContextMismatchError(
+                "deserialized GL integer W-batched slice belongs to a different context");
+        }
+        if (slice->GetKeyTag() != keyTag) {
+            throw GLKeyMismatchError(
+                "deserialized GL integer W-batched slice key tag mismatches its envelope");
+        }
+        ValidateWBatchedSliceRingStructure(slice, m_context, index);
+        const auto metadata = slice->GetMetadataMap();
+        if (slice->GetLevel() != record.level ||
+            slice->GetNoiseScaleDeg() != record.noiseScaleDeg ||
+            slice->GetElements().size() != record.elements ||
+            slice->GetElements().empty() ||
+            slice->GetElements().front().GetNumOfElements() != record.towers ||
+            static_cast<uint32_t>(slice->GetEncodingType()) != record.encoding ||
+            slice->GetSlots() != record.slots ||
+            slice->GetHopLevel() != record.hopLevel ||
+            StableDoubleBits(slice->GetScalingFactor()) != record.scalingFactorBits ||
+            slice->GetScalingFactorInt().ConvertToInt() != record.scalingFactorInt ||
+            !metadata || metadata->size() != record.metadataCount ||
+            StableWBatchedSliceSha256(slice) != record.contentSha256) {
+            throw GLCiphertextError(
+                "deserialized GL integer W-batched slice metadata or digest mismatch");
+        }
+    }
+    return GLIntWBatchedSlicedCiphertext(m_parameters, m_codec.GetRoots(), m_context,
+                                         std::move(slices));
 }
 
 // ---------------------------------------------------------------------------
