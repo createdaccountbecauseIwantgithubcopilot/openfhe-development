@@ -248,6 +248,90 @@ std::vector<std::complex<double>> SineOracle(
     return output;
 }
 
+std::vector<std::complex<long double>> LogicalGLRoots(std::size_t n) {
+    const long double pi = std::acos(-1.0L);
+    const std::size_t order = 4 * n;
+    std::vector<std::complex<long double>> roots(n);
+    std::size_t exponent = 1;
+    for (std::size_t slot = 0; slot < n; ++slot) {
+        const long double angle =
+            2.0L * pi * static_cast<long double>(exponent) /
+            static_cast<long double>(order);
+        roots[slot] = std::polar(1.0L, angle);
+        exponent = (exponent * 5) % order;
+    }
+    return roots;
+}
+
+std::vector<std::complex<double>> XForwardOracle(
+    const std::vector<std::complex<double>>& coefficients) {
+    const auto n = coefficients.size();
+    const auto roots = LogicalGLRoots(n);
+    std::vector<std::complex<double>> result(n);
+    for (std::size_t slot = 0; slot < n; ++slot) {
+        std::complex<long double> sum(0.0L, 0.0L);
+        std::complex<long double> power(1.0L, 0.0L);
+        for (const auto& coefficient : coefficients) {
+            sum += std::complex<long double>(coefficient.real(),
+                                             coefficient.imag()) * power;
+            power *= roots[slot];
+        }
+        result[slot] = {static_cast<double>(sum.real()),
+                        static_cast<double>(sum.imag())};
+    }
+    return result;
+}
+
+std::vector<std::complex<double>> XInverseOracle(
+    const std::vector<std::complex<double>>& slots) {
+    const auto n = slots.size();
+    const auto roots = LogicalGLRoots(n);
+    std::vector<std::complex<double>> result(n);
+    for (std::size_t coefficient = 0; coefficient < n; ++coefficient) {
+        std::complex<long double> sum(0.0L, 0.0L);
+        for (std::size_t slot = 0; slot < n; ++slot) {
+            sum += std::complex<long double>(slots[slot].real(),
+                                             slots[slot].imag()) *
+                   std::pow(std::conj(roots[slot]),
+                            static_cast<int>(coefficient));
+        }
+        sum /= static_cast<long double>(n);
+        result[coefficient] = {static_cast<double>(sum.real()),
+                               static_cast<double>(sum.imag())};
+    }
+    return result;
+}
+
+std::vector<std::complex<double>> CanonicalMatrixOracle(
+    const std::vector<std::vector<std::complex<double>>>& yRows) {
+    const auto n = yRows.size();
+    if (n == 0) {
+        throw GLDimensionError("canonical GL oracle has no Y rows");
+    }
+    const auto roots = LogicalGLRoots(n);
+    std::vector<std::complex<double>> result(n * n);
+    for (std::size_t xSlot = 0; xSlot < n; ++xSlot) {
+        for (std::size_t ySlot = 0; ySlot < n; ++ySlot) {
+            std::complex<long double> sum(0.0L, 0.0L);
+            std::complex<long double> power(1.0L, 0.0L);
+            for (std::size_t y = 0; y < n; ++y) {
+                if (yRows[y].size() != n) {
+                    throw GLDimensionError(
+                        "canonical GL oracle row has the wrong size");
+                }
+                sum += std::complex<long double>(yRows[y][xSlot].real(),
+                                                 yRows[y][xSlot].imag()) *
+                       power;
+                power *= roots[ySlot];
+            }
+            result[xSlot * n + ySlot] = {
+                static_cast<double>(sum.real()),
+                static_cast<double>(sum.imag())};
+        }
+    }
+    return result;
+}
+
 double MaxError(const std::vector<std::complex<double>>& actual,
                 const std::vector<std::complex<double>>& expected) {
     if (actual.size() != expected.size()) {
@@ -774,6 +858,101 @@ TEST(GLShip, ExactN8RefreshOnlyAllY) {
     EXPECT_LT(MaxError(decoded.GetValues(), values), 5e-2);
 }
 
+TEST(GLShip, ExactN16DirectRefreshOnlyIndependentOracleAndNegatives) {
+    constexpr std::size_t n = 16;
+    GLSchemelet gl(ExactParameters(n, 5));
+    GLShipSchemelet ship(gl, ShipParameters(n, 2));
+    const auto primary = gl.KeyGen();
+    auto client = ship.KeyGen(primary, {{3, 1}, {14, -1}});
+
+    const auto values = RefreshMatrix(n);
+    const auto encoded = gl.Encode(GLPlaintext(n, values));
+    const auto encrypted = gl.Encrypt(primary.publicKey, encoded);
+    const auto secondEncrypted = gl.Encrypt(primary.publicKey, encoded);
+    bool randomizedInput = false;
+    for (std::size_t row = 0; row < n; ++row) {
+        randomizedInput = randomizedInput ||
+                          NativeElementsDiffer(encrypted.GetRows()[row],
+                                               secondEncrypted.GetRows()[row]);
+    }
+    EXPECT_TRUE(randomizedInput);
+
+    const auto depleted = DepleteToTwoTowers(encrypted);
+    ASSERT_EQ(TowerCount(depleted.GetRows().front()), 2U);
+
+    const auto missingBottomSwitch =
+        GLShipTestAccess::WithoutBottomSwitch(client.GetEvaluationKey());
+    EXPECT_THROW(ship.RefreshOnly(depleted, missingBottomSwitch),
+                 GLShipEvaluationKeyError);
+
+    const auto wrongPrimary = gl.KeyGen();
+    const auto wrongKeyInput = DepleteToTwoTowers(
+        gl.Encrypt(wrongPrimary.publicKey, encoded));
+    EXPECT_THROW(ship.RefreshOnly(wrongKeyInput, client.GetEvaluationKey()),
+                 GLKeyMismatchError);
+
+    CryptoContextImpl<DCRTPoly>::ClearEvalMultKeys(
+        primary.secretKey->GetKeyTag());
+    CryptoContextImpl<DCRTPoly>::ClearEvalAutomorphismKeys(
+        primary.secretKey->GetKeyTag());
+
+    const auto refreshed = ship.RefreshOnly(depleted, client.GetEvaluationKey());
+    ASSERT_EQ(refreshed.GetRows().size(), n);
+    EXPECT_EQ(refreshed.GetKeyTag(), primary.secretKey->GetKeyTag());
+    EXPECT_GT(TowerCount(refreshed.GetRows().front()),
+              TowerCount(depleted.GetRows().front()));
+
+    std::vector<std::vector<std::complex<double>>> decodedRows(n);
+    for (std::size_t row = 0; row < n; ++row) {
+        const auto& native = refreshed.GetRows()[row];
+        ASSERT_TRUE(native);
+        EXPECT_EQ(native->NumberCiphertextElements(), 2U);
+        EXPECT_EQ(native->GetEncodingType(), CKKS_PACKED_ENCODING);
+        EXPECT_EQ(native->GetSlots(), n);
+        EXPECT_EQ(native->GetKeyTag(), primary.secretKey->GetKeyTag());
+        DCRTPoly zero(native->GetElements()[1].GetParams(),
+                      Format::EVALUATION, true);
+        EXPECT_NE(native->GetElements()[1], zero);
+        decodedRows[row] = DecodeSlots(gl.GetCryptoContext(),
+                                       primary.secretKey, native, n);
+    }
+
+    const auto decoded = gl.Decrypt(primary.secretKey, refreshed);
+    EXPECT_LT(MaxError(decoded.GetValues(),
+                       CanonicalMatrixOracle(decodedRows)), 1e-8);
+
+    std::vector<std::vector<std::complex<double>>> expectedRows(n);
+    for (std::size_t row = 0; row < n; ++row) {
+        auto slots = encoded.GetRows()[row]->GetCKKSPackedValue();
+        slots.resize(n);
+        const auto xCoefficients = XInverseOracle(slots);
+        for (const auto& coefficient : xCoefficients) {
+            EXPECT_LE(std::abs(coefficient.real()), 1.0);
+            EXPECT_LE(std::abs(coefficient.imag()), 1.0);
+        }
+        expectedRows[row] = XForwardOracle(SineOracle(
+            xCoefficients, client.GetEvaluationKey().GetBottomModulus(),
+            client.GetEvaluationKey().GetParameters().gamma));
+    }
+    const auto expected = CanonicalMatrixOracle(expectedRows);
+    EXPECT_LT(MaxError(decoded.GetValues(), expected), 6e-2);
+
+    const auto postAdded = gl.Add(refreshed, refreshed);
+    const auto postDecoded = gl.Decrypt(primary.secretKey, postAdded);
+    EXPECT_LT(MaxError(postDecoded.GetValues(),
+                       ScaledMatrix(decoded.GetValues(), 2.0)), 1e-2);
+    for (std::size_t row = 0; row < n; ++row) {
+        const auto& native = postAdded.GetRows()[row];
+        ASSERT_TRUE(native);
+        EXPECT_EQ(native->GetLevel(), refreshed.GetRows()[row]->GetLevel());
+        EXPECT_EQ(native->GetNoiseScaleDeg(), 1U);
+        EXPECT_EQ(TowerCount(native), TowerCount(refreshed.GetRows()[row]));
+        DCRTPoly zero(native->GetElements()[1].GetParams(),
+                      Format::EVALUATION, true);
+        EXPECT_NE(native->GetElements()[1], zero);
+    }
+}
+
 TEST(GLShip, EncryptedSelectorIsLoadBearing) {
     GLSchemelet gl(ExactParameters(4, 4));
     GLShipSchemelet ship(gl, ShipParameters(4, 2));
@@ -1088,6 +1267,7 @@ TEST(GLShip, HybridParametersValidateAndDepth) {
 
     GLSchemelet gl4(ExactParameters(4, 6));
     GLSchemelet gl8(ExactParameters(8, 7));
+    GLSchemelet gl16(ExactParameters(16, 6));
     EXPECT_NO_THROW(GLShipSchemelet(gl4, HybridShipParameters(4, 2, 2)));
     EXPECT_NO_THROW(GLShipSchemelet(gl8, HybridShipParameters(8, 3, 4)));
     EXPECT_NO_THROW(GLShipSchemelet(gl8, HybridShipParameters(8, 3, 2)));
@@ -1097,6 +1277,9 @@ TEST(GLShip, HybridParametersValidateAndDepth) {
     // Both selection modes stay legal on the same deeper context.
     EXPECT_NO_THROW(GLShipSchemelet(gl4, ShipParameters(4, 2)));
     EXPECT_NO_THROW(GLShipSchemelet(gl8, ShipParameters(8, 3)));
+    EXPECT_NO_THROW(GLShipSchemelet(gl16, ShipParameters(16, 2)));
+    EXPECT_THROW(GLShipSchemelet(gl16, HybridShipParameters(16, 2, 2)),
+                 GLShipUnsupportedError);
 
     // Negative #1: direct parameters take no hybrid coarse fields.
     auto directWithTheta = ShipParameters(4, 2);

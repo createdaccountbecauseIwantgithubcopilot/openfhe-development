@@ -9,8 +9,9 @@
 // GL section-3.6 operation set: Negate/Sub, Hadamard, row/column rotation,
 // conjugation, native transpose, and the Remark 3.13 transposed encoding.
 // n=4 pins the shared cross-port contract vectors; n=8 checks every operation
-// against a clear oracle computed in-test.  Toy dims n=4/8 with HEStd_NotSet
-// remain conformance geometry, not a security claim.
+// against a clear oracle computed in-test; n=16 has a bounded exact-ring
+// codec/rotation composition gate. Toy dims n=4/8/16 with HEStd_NotSet remain
+// conformance geometry, not a security claim.
 
 #include "gtest/gtest.h"
 
@@ -267,6 +268,23 @@ Matrix DeterministicN8Second() {
             const auto realPart = static_cast<double>((2 * j + 3 * k) % 5) - 2.0;
             const auto imagPart = (static_cast<double>((j + 3 * k) % 7) - 3.0) / 8.0;
             values[j * 8 + k]   = {realPart, imagPart};
+        }
+    }
+    return values;
+}
+
+Matrix DeterministicN16() {
+    constexpr std::size_t n = 16;
+    Matrix values(n * n);
+    for (std::size_t j = 0; j < n; ++j) {
+        for (std::size_t k = 0; k < n; ++k) {
+            const auto realNumerator =
+                static_cast<int>((3 * j + 5 * k) % 13) - 6;
+            const auto imagNumerator =
+                static_cast<int>((7 * j + 2 * k) % 11) - 5;
+            values[j * n + k] = {
+                static_cast<double>(realNumerator) / 16.0,
+                static_cast<double>(imagNumerator) / 32.0};
         }
     }
     return values;
@@ -611,6 +629,33 @@ TEST(GLOps, CompositionRowColTransposeN8) {
     const auto expected =
         OracleRowRotate(OracleColumnRotate(OracleTranspose(m1, n), n, 1), n, 1);
     ExpectMatrixNear(scheme.Decrypt(keys.secretKey, composed), expected, kExactOpTolerance);
+}
+
+TEST(GLOps, ExactN16CodecAndRotationCompositionOracle) {
+    constexpr std::size_t n = 16;
+    GLSchemelet scheme(OpsParameters(n, 2 * n));
+    ASSERT_TRUE(scheme.UsesExactNativeRing());
+    EXPECT_EQ(scheme.GetCryptoContext()->GetRingDimension(), 2 * n);
+    EXPECT_EQ(scheme.GetCryptoContext()->GetCyclotomicOrder(), 4 * n);
+
+    const auto values = DeterministicN16();
+    const GLPlaintext plaintext(n, values);
+    ExpectMatrixNear(scheme.Decode(scheme.Encode(plaintext)), values, 1e-12);
+    ExpectMatrixNear(scheme.DecodeTransposed(scheme.EncodeTransposed(plaintext)),
+                     values, 1e-12);
+
+    const auto keys = scheme.KeyGen();
+    const auto rotationKey = scheme.EvalRowRotateKeyGen(keys.secretKey, {5});
+    const auto encrypted = scheme.Encrypt(keys.publicKey, scheme.Encode(plaintext));
+    const auto composed = scheme.EvalRowRotate(
+        scheme.EvalColumnRotate(encrypted, 7), 5, rotationKey);
+    ExpectRowMetadata(composed, n, keys.publicKey->GetKeyTag(), 0, 1);
+    ExpectSameScalingFactor(composed, encrypted);
+
+    const auto expected =
+        OracleRowRotate(OracleColumnRotate(values, n, 7), n, 5);
+    ExpectMatrixNear(scheme.Decrypt(keys.secretKey, composed), expected,
+                     kExactOpTolerance);
 }
 
 TEST(GLOps, HadamardAfterMatMulLevelBookkeepingN4) {

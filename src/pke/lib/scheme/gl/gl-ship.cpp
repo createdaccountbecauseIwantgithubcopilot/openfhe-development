@@ -375,8 +375,10 @@ void GLShipParameters::Validate(const GLGeometry& geometry,
                                 const GLParameters& glParameters) const {
     // The dimension gate fires before any selection logic, so every selection
     // mode keeps failing closed at n=4096 pending production parameters.
-    if (dimension != geometry.GetDimension() || (dimension != 4 && dimension != 8)) {
-        throw GLShipParameterError("GL SHIP conformance supports only matching n=4 or n=8");
+    if (dimension != geometry.GetDimension() ||
+        (dimension != 4 && dimension != 8 && dimension != 16)) {
+        throw GLShipParameterError(
+            "GL SHIP conformance supports matching n=4/8, plus direct-column n=16");
     }
     if (!std::isfinite(gamma) || gamma <= 2.0) {
         throw GLShipParameterError("GL SHIP gamma must be finite and greater than two");
@@ -391,6 +393,10 @@ void GLShipParameters::Validate(const GLGeometry& geometry,
         selection != GLShipSelection::HYBRID_MASKED_COLUMN) {
         throw GLShipUnsupportedError(
             "GL SHIP currently supports direct-column and hybrid masked-column selection only");
+    }
+    if (selection == GLShipSelection::HYBRID_MASKED_COLUMN && dimension == 16) {
+        throw GLShipUnsupportedError(
+            "GL SHIP hybrid conformance remains restricted to n=4 or n=8");
     }
     if (selection == GLShipSelection::DIRECT_COLUMN) {
         if (coarseBlockSize != 0 || !coarseWindows.empty()) {
@@ -425,7 +431,7 @@ void GLShipParameters::Validate(const GLGeometry& geometry,
         throw GLNativeModeError("GL SHIP requires exact ringDimension=2n; transport rings are rejected");
     }
     if (glParameters.securityLevel != HEStd_NotSet) {
-        throw GLNativeModeError("GL SHIP n=4/8 is an HEStd_NotSet conformance mode only");
+        throw GLNativeModeError("GL SHIP n=4/8/16 is an HEStd_NotSet conformance mode only");
     }
     if (glParameters.scalingTechnique != FLEXIBLEAUTO) {
         throw GLShipUnsupportedError(

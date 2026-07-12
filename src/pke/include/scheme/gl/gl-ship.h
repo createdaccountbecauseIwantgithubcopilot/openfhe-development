@@ -237,7 +237,9 @@ private:
 };
 
 /**
- * Bounded, exact-ring SHIP implementation for n=4/8 conformance only.
+ * Bounded, exact-ring direct-column SHIP implementation for n=4/8/16
+ * conformance only. Hybrid masked-column material remains n=4/8 because its
+ * distinct depth and selector-material contract has not been extended.
  *
  * The evaluator derives all root tables from the actual public A/B components
  * of the randomized low-level ciphertext.  It never decrypts and never creates
@@ -266,7 +268,7 @@ public:
         const GLShipEvaluationKey& evaluationKey) const;
 
     /**
-     * Exact-ring n=4/8 ordinary refresh.
+     * Exact-ring direct-column n=4/8/16 ordinary refresh. Hybrid remains n=4/8.
      *
      * Every independently computed Gaussian X-coefficient lane must have real
      * and imaginary magnitude at most one.  This is an encrypted-message

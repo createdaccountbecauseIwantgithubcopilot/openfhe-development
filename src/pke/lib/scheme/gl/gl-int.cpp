@@ -457,11 +457,17 @@ void RequireUniformRowMetadataInt(const GLIntCiphertext& ciphertext, const char*
 // ---------------------------------------------------------------------------
 
 GLGeometry GLIntParameters::GetGeometry() const {
+    if (dimension != 4 && dimension != 8) {
+        throw GLDimensionError("GL integer conformance supports only n=4 or n=8");
+    }
     return GLGeometry(dimension);
 }
 
 void GLIntParameters::Validate() const {
-    const GLGeometry geometry(dimension);  // rejects everything but n=4/8, including 4096
+    if (dimension != 4 && dimension != 8) {
+        throw GLDimensionError("GL integer conformance supports only n=4 or n=8");
+    }
+    const GLGeometry geometry(dimension);
     if (multiplicativeDepth < 1) {
         throw GLDepthError("GL integer mode requires multiplicativeDepth >= 1");
     }
