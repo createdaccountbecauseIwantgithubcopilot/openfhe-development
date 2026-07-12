@@ -10,6 +10,7 @@
 #include "glscheme/production_profiles.hpp"
 #include "glscheme/gl128_scheme.hpp"
 #include "glscheme/gl128_bootstrap.hpp"
+#include "glscheme/gl128_bootstrap_research.hpp"
 #include "glscheme/gl128_bootstrap_acceptance.hpp"
 #include "glscheme/gl128_ciphertext_artifact.hpp"
 #include "glscheme/rns_dft_plaintext_provider.hpp"
@@ -30,6 +31,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 namespace lbcrypto {
@@ -44,6 +46,7 @@ public:
     using MatrixBatch = glscheme::rns::GlrMatrixBatch;
     using Plaintext = glscheme::rns::GlrPlaintext;
     using Ciphertext = glscheme::rns::GlrCiphertext;
+    using SparseSecretKey = glscheme::rns::GlrSparseSecretKey;
     using KeyId = glscheme::rns::GlrKskId;
     using KeyRing = glscheme::rns::GlrRing;
     using KeyManifest = glscheme::rns::GlrKskManifest;
@@ -62,6 +65,29 @@ public:
         glscheme::rns::GlrDftPlaintextProvider;
     using NativeRefreshDftPlaintextBinding =
         glscheme::rns::GlrDftPlaintextBinding;
+    using NativeDftPlaintextKind = glscheme::rns::GlrDftPlaintextKind;
+    using NativeDftPlaintextMaterialPolicy =
+        glscheme::rns::GlrDftPlaintextMaterialPolicy;
+    using NativeDftPlaintextManifestEntry =
+        glscheme::rns::GlrDftPlaintextManifestEntry;
+    using NativeDftPlaintextManifest =
+        glscheme::rns::GlrDftPlaintextManifest;
+    using NativeDftPlaintextEntrySink =
+        glscheme::rns::GlrDftPlaintextEntrySink;
+    using NativeDftPlaintextGenerationConfig =
+        glscheme::rns::GlrDftPlaintextGenerationConfig;
+    using NativeDftPlaintextGenerationResult =
+        glscheme::rns::GlrDftPlaintextGenerationResult;
+    using NativeDftPlaintextRecordSink =
+        glscheme::rns::GlrDftPlaintextRecordSink;
+    using NativeDftPlaintextRecordSource =
+        glscheme::rns::GlrDftPlaintextRecordSource;
+    using NativeDftPlaintextRecordReceipt =
+        glscheme::rns::GlrDftPlaintextRecordReceipt;
+    using NativeRecordedDftPlaintextProvider =
+        glscheme::rns::GlrRecordedDftPlaintextProvider;
+    using NativeDftPlaintextByteCensus =
+        glscheme::rns::GlrDftPlaintextByteCensus;
     using NativeRefreshGadgetProvider =
         glscheme::rns::GlrShipGadgetProvider;
     using NativeRefreshGadgetBinding =
@@ -119,6 +145,26 @@ public:
         glscheme::rns::Gl128EvaluationResult;
     using NativeGL128PlainProductOptions =
         glscheme::rns::Gl128PlainProductOptions;
+    using NativeGL128TransposedCodecEvidence =
+        glscheme::rns::Gl128TransposedCodecEvidence;
+    using NativeGL128TransposedPlaintext =
+        glscheme::rns::Gl128TransposedPlaintext;
+    using NativeGL128TransposedCiphertext =
+        glscheme::rns::Gl128TransposedCiphertext;
+    using NativeGL128TransposedDecodeResult =
+        glscheme::rns::Gl128TransposedDecodeResult;
+    using NativeGL128LeftPlainMatrixMultiplyEvidence =
+        glscheme::rns::Gl128LeftPlainMatrixMultiplyEvidence;
+    using NativeGL128LeftPlainMatrixMultiplyResult =
+        glscheme::rns::Gl128LeftPlainMatrixMultiplyResult;
+    using NativeGL128ModulusMaintenanceKind =
+        glscheme::rns::Gl128ModulusMaintenanceKind;
+    using NativeGL128ModulusMaintenanceEvidence =
+        glscheme::rns::Gl128ModulusMaintenanceEvidence;
+    using NativeGL128ModulusMaintenanceResult =
+        glscheme::rns::Gl128ModulusMaintenanceResult;
+    using TransposedPlaintext = NativeGL128TransposedPlaintext;
+    using TransposedCiphertext = NativeGL128TransposedCiphertext;
     using NativeCompactKskSetSink = glscheme::rns::GlrCompactKskSetSink;
     using NativeCompactKskSetGenerationResult =
         glscheme::rns::GlrCompactKskSetGenerationResult;
@@ -168,6 +214,32 @@ public:
         glscheme::rns::Gl128BootstrapEvidence;
     using NativeGL128BootstrapResult =
         glscheme::rns::Gl128BootstrapResult;
+    using NativeGL128H40FreeSupportProxyResearchReceipt =
+        glscheme::rns::GlrGl128H40FreeSupportProxyResearchReceipt;
+    using NativeGL128ResearchOnlySession =
+        glscheme::rns::Gl128ResearchOnlySession;
+    using NativeGL128ResearchSelectorGenerationSeed =
+        glscheme::rns::Gl128ResearchSelectorGenerationSeed;
+    using NativeGL128ResearchSelectorPersistenceSink =
+        glscheme::rns::Gl128ResearchSelectorPersistenceSink;
+    using NativeGL128ResearchPersistedSelectorBank =
+        glscheme::rns::Gl128ResearchPersistedSelectorBank;
+    using NativeGL128ResearchSelectorBlobLeaseCallbacks =
+        glscheme::rns::Gl128ResearchSelectorBlobLeaseCallbacks;
+    using NativeGL128ResearchSelectorOpeningReceipt =
+        glscheme::rns::Gl128ResearchSelectorOpeningReceipt;
+    using NativeGL128ResearchSelectorProviderOpeningResult =
+        glscheme::rns::Gl128ResearchSelectorProviderOpeningResult;
+    using NativeGL128ResearchInputPreparationEvidence =
+        glscheme::rns::Gl128ResearchInputPreparationEvidence;
+    using NativeGL128ResearchInputPreparationResult =
+        glscheme::rns::Gl128ResearchInputPreparationResult;
+    using NativeGL128ResearchAllYStcEvidence =
+        glscheme::rns::Gl128ResearchAllYStcEvidence;
+    using NativeGL128ResearchBootstrapEvidence =
+        glscheme::rns::Gl128ResearchBootstrapEvidence;
+    using NativeGL128ResearchBootstrapResult =
+        glscheme::rns::Gl128ResearchBootstrapResult;
     using NativeGL128BootstrapAcceptanceLimits =
         glscheme::rns::Gl128BootstrapAcceptanceLimits;
     using NativeGL128BootstrapAcceptanceReceipt =
@@ -180,6 +252,38 @@ public:
         glscheme::rns::Gl128CiphertextArtifactReceipt;
     using NativeGL128CiphertextArtifactReadResult =
         glscheme::rns::Gl128CiphertextArtifactReadResult;
+
+    static_assert(NativeGL128ResearchOnlySession::research_only);
+    static_assert(
+        !NativeGL128ResearchOnlySession::production_security_claim);
+    static_assert(
+        !NativeGL128ResearchOnlySession::production_authorization_admitted);
+    static_assert(NativeGL128ResearchPersistedSelectorBank::research_only);
+    static_assert(NativeGL128ResearchSelectorOpeningReceipt::research_only);
+    static_assert(NativeGL128ResearchBootstrapEvidence::research_only);
+    static_assert(!std::is_convertible_v<
+                  NativeGL128ResearchOnlySession,
+                  NativeGL128DirectBootstrapAuthorizationBundle>);
+    static_assert(!std::is_constructible_v<
+                  NativeGL128DirectBootstrapAuthorizationBundle,
+                  NativeGL128ResearchOnlySession>);
+    static_assert(!std::is_convertible_v<
+                  NativeGL128ResearchPersistedSelectorBank,
+                  NativeGL128PersistedSelectorBankResult>);
+    static_assert(!std::is_constructible_v<
+                  NativeGL128PersistedSelectorBankResult,
+                  NativeGL128ResearchPersistedSelectorBank>);
+    static_assert(!std::is_convertible_v<
+                  NativeGL128ResearchSelectorProviderOpeningResult,
+                  NativeDirectVectorProductionSelectorProviderOpeningResult>);
+    static_assert(!std::is_convertible_v<
+                  NativeGL128ResearchBootstrapResult,
+                  NativeGL128BootstrapResult>);
+
+    static constexpr std::size_t kLegacyDftPlaintextEntryCount =
+        glscheme::rns::kGlrDftPlaintextEntryCount;
+    static constexpr std::size_t kForwardDftPlaintextEntryCount =
+        glscheme::rns::kGlrDftPlaintextForwardEntryCount;
 
     struct DirectVectorProductionRowResult {
         Ciphertext ciphertext;
@@ -747,6 +851,19 @@ public:
         const NativeRefreshDftPlaintextProvider& provider,
         const NativeRefreshDftPlaintextBinding& binding) const;
 
+    // Direct-coefficient bootstrap needs only the two forward StC records.
+    // This seam emits and opens schema-v2 material without changing the
+    // legacy four-record CtS/StC session API above.
+    NativeDftPlaintextGenerationResult GenerateForwardDftPlaintextEntries(
+        double forwardScale, std::uint32_t forwardLevel,
+        const NativeDftPlaintextEntrySink& sink) const;
+    NativeValidatedDftPlaintextProviderSession
+    OpenForwardDftPlaintextSession(
+        const NativeRefreshDftPlaintextProvider& provider,
+        const NativeRefreshDftPlaintextBinding& binding) const;
+    NativeDftPlaintextByteCensus ModelForwardDftPlaintextStreamingBytes(
+        std::uint32_t forwardLevel) const;
+
     // Owner-side bounded key generation and evaluator-side compact opening.
     // A zero seed requests operating-system entropy.  Persistence remains
     // caller-owned through the core sink/loader callbacks.
@@ -822,6 +939,46 @@ public:
         const Ciphertext& canonicalCiphertext,
         const NativeGL128DirectBootstrapAuthorizationBundle& authorization,
         const NativeDirectVectorProductionSelectorProviderOpeningResult&
+            selectorOpening,
+        const NativeValidatedDftPlaintextProviderSession& dftSession,
+        const CompactDirectBootstrapKeys& evaluationKeys,
+        const NativeCtsStcConfig& config = {},
+        double normalizationRelativeTolerance =
+            glscheme::rns::kGl128BootstrapNormalizationRelativeTolerance) const;
+
+    // Explicitly non-production code-completeness lane.  Every value and
+    // receipt stays in the research-only type family: there is no adapter
+    // conversion to the production authorization bundle or selector receipt.
+    NativeGL128H40FreeSupportProxyResearchReceipt
+    RecordH40FreeSupportProxyForResearch(
+        const SecurityReport& researchProxyReport) const;
+    NativeGL128ResearchOnlySession BeginResearchOnlyBootstrapSession(
+        const SecretKey& primaryKey, const SparseSecretKey& sparseKey,
+        std::string ownerKeySeedCommitment,
+        const NativeGL128H40FreeSupportProxyResearchReceipt& proxyEvidence)
+        const;
+    NativeGL128ResearchPersistedSelectorBank
+    GeneratePersistedResearchSelectorBank(
+        const SecretKey& primaryKey, const SparseSecretKey& sparseKey,
+        const NativeGL128ResearchOnlySession& session,
+        const NativeGL128ResearchSelectorGenerationSeed& generationSeed,
+        const NativeGL128ResearchSelectorPersistenceSink& sink) const;
+    NativeGL128ResearchSelectorProviderOpeningResult
+    OpenPersistedResearchSelectorProvider(
+        const NativeGL128ResearchOnlySession& session,
+        const NativeGL128ResearchPersistedSelectorBank& persisted,
+        const CompactDirectBootstrapKeys& evaluationKeys,
+        NativeGL128ResearchSelectorBlobLeaseCallbacks callbacks) const;
+    NativeGL128ResearchInputPreparationResult PrepareResearchDirectShipInput(
+        const Ciphertext& canonicalCiphertext,
+        const NativeGL128ResearchOnlySession& session,
+        const CompactDirectBootstrapKeys& evaluationKeys,
+        double normalizationRelativeTolerance =
+            glscheme::rns::kGl128BootstrapNormalizationRelativeTolerance) const;
+    NativeGL128ResearchBootstrapResult BootstrapResearchDirect(
+        const Ciphertext& canonicalCiphertext,
+        const NativeGL128ResearchOnlySession& session,
+        const NativeGL128ResearchSelectorProviderOpeningResult&
             selectorOpening,
         const NativeValidatedDftPlaintextProviderSession& dftSession,
         const CompactDirectBootstrapKeys& evaluationKeys,
@@ -1018,6 +1175,40 @@ public:
                      std::uint32_t level = 0,
                      bool slotDomain = false) const;
     MatrixBatch Decode(const Plaintext& plaintext) const;
+
+    // Remark 3.13 typed transposed convention.  These values cannot be
+    // silently passed to the ordinary plaintext/ciphertext API.
+    NativeGL128TransposedPlaintext EncodeTransposed(
+        const MatrixBatch& matrices, double scale = 0.0,
+        std::uint32_t level = 0) const;
+    NativeGL128TransposedDecodeResult DecodeTransposed(
+        const NativeGL128TransposedPlaintext& plaintext) const;
+    NativeGL128TransposedCiphertext EncryptTransposed(
+        const SecretKey& secretKey,
+        const NativeGL128TransposedPlaintext& plaintext,
+        std::uint64_t seed = 0) const;
+    NativeGL128TransposedCiphertext EncryptTransposed(
+        const PublicKey& publicKey,
+        const NativeGL128TransposedPlaintext& plaintext,
+        std::uint64_t seed = 0) const;
+    NativeGL128TransposedCiphertext EncryptTransposed(
+        const CompactPublicKey& publicKey,
+        const NativeGL128TransposedPlaintext& plaintext,
+        std::uint64_t seed = 0) const;
+    NativeGL128TransposedPlaintext DecryptTransposed(
+        const SecretKey& secretKey,
+        const NativeGL128TransposedCiphertext& ciphertext) const;
+    NativeGL128TransposedDecodeResult DecryptDecodeTransposed(
+        const SecretKey& secretKey,
+        const NativeGL128TransposedCiphertext& ciphertext) const;
+    NativeGL128LeftPlainMatrixMultiplyResult MatrixMultiplyPlainLeft(
+        const NativeGL128TransposedPlaintext& plaintextLeft,
+        const NativeGL128TransposedCiphertext& encryptedRight,
+        const NativeGL128PlainProductOptions& options = {}) const;
+    NativeGL128ModulusMaintenanceResult LogicalRescale(
+        const Ciphertext& ciphertext) const;
+    NativeGL128ModulusMaintenanceResult DropToLevel(
+        const Ciphertext& ciphertext, std::uint32_t targetLevel) const;
 
     Ciphertext Encrypt(const SecretKey& secretKey, const Plaintext& plaintext,
                        std::uint64_t seed = 0, bool slotDomain = true) const;

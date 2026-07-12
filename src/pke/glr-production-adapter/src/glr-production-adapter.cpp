@@ -530,6 +530,48 @@ const GLRProductionAdapter::NativeKeyProvider& RequireDirectBootstrapKeys(
     return provider;
 }
 
+const GLRProductionAdapter::NativeKeyProvider&
+RequireResearchDirectBootstrapKeys(
+    const GLRProductionAdapter::Context& context,
+    const GLRProductionAdapter::CompactDirectBootstrapKeys& keys,
+    const GLRProductionAdapter::NativeGL128ResearchOnlySession& session) {
+    const auto plan =
+        glscheme::rns::glr_gl128_direct_bootstrap_key_plan(context);
+    RequireDirectBootstrapKeyGeneration(
+        context, plan, keys.GetGenerationResult());
+    const auto& lineage = keys.GetLineage();
+    const auto& provider = keys.GetNativeProvider();
+    if (session.schema !=
+            glscheme::rns::kGl128ResearchOnlySessionSchema ||
+        session.session_binding_commitment !=
+            glscheme::rns::glr_gl128_research_session_binding_commitment(
+                session) ||
+        !session.exact_owner_lineage_bound ||
+        !session.exact_structured_window_geometry_bound ||
+        !session.historical_proxy_revalidated ||
+        !session.compact_authenticated_streaming_enabled ||
+        lineage.parameter_fingerprint != session.parameter_fingerprint ||
+        lineage.support_commitment != session.support_commitment ||
+        lineage.owner_key_seed_commitment !=
+            session.owner_key_seed_commitment ||
+        lineage.primary_secret_lineage_commitment !=
+            session.primary_secret_lineage_commitment ||
+        lineage.sparse_secret_lineage_commitment !=
+            session.sparse_secret_lineage_commitment ||
+        provider.secret_material_accessed() ||
+        provider.parameter_fingerprint() != lineage.parameter_fingerprint ||
+        provider.sparse_support_commitment() != lineage.support_commitment ||
+        glscheme::rns::glr_ksk_manifest_commitment(provider.manifest()) !=
+            lineage.ksk_manifest_commitment ||
+        provider.public_material_commitment() !=
+            lineage.ksk_public_material_commitment) {
+        throw GlrError(
+            "GLRProductionAdapter: compact direct-bootstrap keys and the "
+            "research-only session disagree");
+    }
+    return provider;
+}
+
 GLRProductionAdapter::FixedProfileBindingText FixedBindingText(
     std::string_view value) {
     GLRProductionAdapter::FixedProfileBindingText out;
@@ -2304,6 +2346,42 @@ GLRProductionAdapter::OpenDftPlaintextSession(
         m_context, provider, binding);
 }
 
+GLRProductionAdapter::NativeDftPlaintextGenerationResult
+GLRProductionAdapter::GenerateForwardDftPlaintextEntries(
+    double forwardScale, std::uint32_t forwardLevel,
+    const NativeDftPlaintextEntrySink& sink) const {
+    return glscheme::rns::glr_generate_forward_dft_plaintext_entries(
+        m_context, forwardScale, forwardLevel, sink);
+}
+
+GLRProductionAdapter::NativeValidatedDftPlaintextProviderSession
+GLRProductionAdapter::OpenForwardDftPlaintextSession(
+    const NativeRefreshDftPlaintextProvider& provider,
+    const NativeRefreshDftPlaintextBinding& binding) const {
+    const auto& manifest = provider.manifest();
+    if (manifest.schema !=
+            glscheme::rns::kGlrDftPlaintextForwardManifestSchema ||
+        manifest.entries.size() !=
+            glscheme::rns::kGlrDftPlaintextForwardEntryCount ||
+        binding.expected_manifest_schema !=
+            glscheme::rns::kGlrDftPlaintextForwardManifestSchema ||
+        binding.expected_entry_count !=
+            glscheme::rns::kGlrDftPlaintextForwardEntryCount) {
+        throw GlrError(
+            "GLRProductionAdapter: direct bootstrap requires the "
+            "forward-only two-record DFT schema");
+    }
+    return glscheme::rns::glr_open_dft_plaintext_provider_session(
+        m_context, provider, binding);
+}
+
+GLRProductionAdapter::NativeDftPlaintextByteCensus
+GLRProductionAdapter::ModelForwardDftPlaintextStreamingBytes(
+    std::uint32_t forwardLevel) const {
+    return glscheme::rns::glr_model_forward_dft_plaintext_streaming_bytes(
+        m_context.params, forwardLevel);
+}
+
 GLRProductionAdapter::NativeCompactKskSetGenerationResult
 GLRProductionAdapter::GenerateCompactSchemeKeys(
     const SecretKey& primaryKey, const NativeGL128SchemeKeyPlan& plan,
@@ -2509,6 +2587,86 @@ GLRProductionAdapter::BootstrapDirect(
     return glscheme::rns::glr_gl128_bootstrap(
         m_context, canonicalCiphertext, authorization, selectorOpening,
         dftSession, provider, evaluationKeys.GetLineage(), config,
+        normalizationRelativeTolerance);
+}
+
+GLRProductionAdapter::NativeGL128H40FreeSupportProxyResearchReceipt
+GLRProductionAdapter::RecordH40FreeSupportProxyForResearch(
+    const SecurityReport& researchProxyReport) const {
+    const auto profile =
+        glscheme::rns::glr_gl128_validate_context(m_context);
+    return glscheme::rns::
+        glr_record_gl128_h40_free_support_proxy_for_research(
+            m_context.params, profile.support_commitment,
+            researchProxyReport);
+}
+
+GLRProductionAdapter::NativeGL128ResearchOnlySession
+GLRProductionAdapter::BeginResearchOnlyBootstrapSession(
+    const SecretKey& primaryKey, const SparseSecretKey& sparseKey,
+    std::string ownerKeySeedCommitment,
+    const NativeGL128H40FreeSupportProxyResearchReceipt& proxyEvidence)
+    const {
+    RequireProductionSecretKey(m_context, primaryKey);
+    return glscheme::rns::glr_gl128_begin_research_only_session(
+        m_context, primaryKey, sparseKey, ownerKeySeedCommitment,
+        proxyEvidence);
+}
+
+GLRProductionAdapter::NativeGL128ResearchPersistedSelectorBank
+GLRProductionAdapter::GeneratePersistedResearchSelectorBank(
+    const SecretKey& primaryKey, const SparseSecretKey& sparseKey,
+    const NativeGL128ResearchOnlySession& session,
+    const NativeGL128ResearchSelectorGenerationSeed& generationSeed,
+    const NativeGL128ResearchSelectorPersistenceSink& sink) const {
+    RequireProductionSecretKey(m_context, primaryKey);
+    return glscheme::rns::
+        glr_gl128_research_generate_persisted_selector_bank(
+            m_context, primaryKey, sparseKey, session, generationSeed, sink);
+}
+
+GLRProductionAdapter::NativeGL128ResearchSelectorProviderOpeningResult
+GLRProductionAdapter::OpenPersistedResearchSelectorProvider(
+    const NativeGL128ResearchOnlySession& session,
+    const NativeGL128ResearchPersistedSelectorBank& persisted,
+    const CompactDirectBootstrapKeys& evaluationKeys,
+    NativeGL128ResearchSelectorBlobLeaseCallbacks callbacks) const {
+    const auto& provider = RequireResearchDirectBootstrapKeys(
+        m_context, evaluationKeys, session);
+    return glscheme::rns::
+        glr_gl128_research_open_persisted_selector_provider(
+            m_context, session, persisted, evaluationKeys.GetLineage(),
+            provider, std::move(callbacks));
+}
+
+GLRProductionAdapter::NativeGL128ResearchInputPreparationResult
+GLRProductionAdapter::PrepareResearchDirectShipInput(
+    const Ciphertext& canonicalCiphertext,
+    const NativeGL128ResearchOnlySession& session,
+    const CompactDirectBootstrapKeys& evaluationKeys,
+    double normalizationRelativeTolerance) const {
+    const auto& provider = RequireResearchDirectBootstrapKeys(
+        m_context, evaluationKeys, session);
+    return glscheme::rns::glr_gl128_research_prepare_direct_ship_input(
+        m_context, canonicalCiphertext, session,
+        evaluationKeys.GetLineage(), provider,
+        normalizationRelativeTolerance);
+}
+
+GLRProductionAdapter::NativeGL128ResearchBootstrapResult
+GLRProductionAdapter::BootstrapResearchDirect(
+    const Ciphertext& canonicalCiphertext,
+    const NativeGL128ResearchOnlySession& session,
+    const NativeGL128ResearchSelectorProviderOpeningResult& selectorOpening,
+    const NativeValidatedDftPlaintextProviderSession& dftSession,
+    const CompactDirectBootstrapKeys& evaluationKeys,
+    const NativeCtsStcConfig& config,
+    double normalizationRelativeTolerance) const {
+    const auto& provider = RequireResearchDirectBootstrapKeys(
+        m_context, evaluationKeys, session);
+    return glscheme::rns::glr_gl128_research_bootstrap(
+        m_context, canonicalCiphertext, session, selectorOpening, dftSession,
+        provider, evaluationKeys.GetLineage(), config,
         normalizationRelativeTolerance);
 }
 
@@ -3096,6 +3254,90 @@ GLRProductionAdapter::Plaintext GLRProductionAdapter::Encode(
 GLRProductionAdapter::MatrixBatch GLRProductionAdapter::Decode(
     const Plaintext& plaintext) const {
     return glscheme::rns::glr_gl128_decode(m_context, plaintext);
+}
+
+GLRProductionAdapter::NativeGL128TransposedPlaintext
+GLRProductionAdapter::EncodeTransposed(
+    const MatrixBatch& matrices, double scale, std::uint32_t level) const {
+    return glscheme::rns::glr_gl128_encode_transposed(
+        m_context, matrices, scale, level);
+}
+
+GLRProductionAdapter::NativeGL128TransposedDecodeResult
+GLRProductionAdapter::DecodeTransposed(
+    const NativeGL128TransposedPlaintext& plaintext) const {
+    return glscheme::rns::glr_gl128_decode_transposed(m_context, plaintext);
+}
+
+GLRProductionAdapter::NativeGL128TransposedCiphertext
+GLRProductionAdapter::EncryptTransposed(
+    const SecretKey& secretKey,
+    const NativeGL128TransposedPlaintext& plaintext,
+    std::uint64_t seed) const {
+    RequireProductionSecretKey(m_context, secretKey);
+    GlrRngOwner rng = MakeRng(seed);
+    return glscheme::rns::glr_gl128_encrypt_secret_transposed(
+        m_context, secretKey, plaintext, *rng);
+}
+
+GLRProductionAdapter::NativeGL128TransposedCiphertext
+GLRProductionAdapter::EncryptTransposed(
+    const PublicKey& publicKey,
+    const NativeGL128TransposedPlaintext& plaintext,
+    std::uint64_t seed) const {
+    GlrRngOwner rng = MakeRng(seed);
+    return glscheme::rns::glr_gl128_encrypt_public_transposed(
+        m_context, publicKey, plaintext, *rng);
+}
+
+GLRProductionAdapter::NativeGL128TransposedCiphertext
+GLRProductionAdapter::EncryptTransposed(
+    const CompactPublicKey& publicKey,
+    const NativeGL128TransposedPlaintext& plaintext,
+    std::uint64_t seed) const {
+    GlrRngOwner rng = MakeRng(seed);
+    return glscheme::rns::glr_gl128_encrypt_public_transposed(
+        m_context, publicKey, plaintext, *rng);
+}
+
+GLRProductionAdapter::NativeGL128TransposedPlaintext
+GLRProductionAdapter::DecryptTransposed(
+    const SecretKey& secretKey,
+    const NativeGL128TransposedCiphertext& ciphertext) const {
+    RequireProductionSecretKey(m_context, secretKey);
+    return glscheme::rns::glr_gl128_decrypt_transposed(
+        m_context, secretKey, ciphertext);
+}
+
+GLRProductionAdapter::NativeGL128TransposedDecodeResult
+GLRProductionAdapter::DecryptDecodeTransposed(
+    const SecretKey& secretKey,
+    const NativeGL128TransposedCiphertext& ciphertext) const {
+    RequireProductionSecretKey(m_context, secretKey);
+    return glscheme::rns::glr_gl128_decrypt_decode_transposed(
+        m_context, secretKey, ciphertext);
+}
+
+GLRProductionAdapter::NativeGL128LeftPlainMatrixMultiplyResult
+GLRProductionAdapter::MatrixMultiplyPlainLeft(
+    const NativeGL128TransposedPlaintext& plaintextLeft,
+    const NativeGL128TransposedCiphertext& encryptedRight,
+    const NativeGL128PlainProductOptions& options) const {
+    return glscheme::rns::glr_gl128_matrix_multiply_plain_left(
+        m_context, plaintextLeft, encryptedRight, options);
+}
+
+GLRProductionAdapter::NativeGL128ModulusMaintenanceResult
+GLRProductionAdapter::LogicalRescale(const Ciphertext& ciphertext) const {
+    return glscheme::rns::glr_gl128_logical_rescale(
+        m_context, ciphertext);
+}
+
+GLRProductionAdapter::NativeGL128ModulusMaintenanceResult
+GLRProductionAdapter::DropToLevel(
+    const Ciphertext& ciphertext, std::uint32_t targetLevel) const {
+    return glscheme::rns::glr_gl128_drop_to_level(
+        m_context, ciphertext, targetLevel);
 }
 
 GLRProductionAdapter::Ciphertext GLRProductionAdapter::Encrypt(
