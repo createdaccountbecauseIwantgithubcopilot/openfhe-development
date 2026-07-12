@@ -13,6 +13,7 @@
 #include "glscheme/gl128_bootstrap_research.hpp"
 #include "glscheme/gl128_bootstrap_acceptance.hpp"
 #include "glscheme/gl128_ciphertext_artifact.hpp"
+#include "glscheme/glr_device_ks.hpp"
 #include "glscheme/rns_dft_plaintext_provider.hpp"
 #include "glscheme/rns_encode.hpp"
 #include "glscheme/rns_hybrid_ks.hpp"
@@ -21,6 +22,7 @@
 #include "glscheme/rns_ship.hpp"
 #include "glscheme/rns_ship_compact_selector.hpp"
 #include "glscheme/rns_ship_direct_composition.hpp"
+#include "glscheme/rns_ship_direct_gpu_all_y.hpp"
 #include "glscheme/rns_ship_direct_vector.hpp"
 #include "glscheme/rns_ship_gadget_provider.hpp"
 #include "glscheme/rns_w_algebra.hpp"
@@ -129,6 +131,28 @@ public:
         glscheme::rns::GlrShipDirectAllYStcEvidence;
     using NativeDirectVectorFullReturnEvidence =
         glscheme::rns::GlrShipDirectFullReturnEvidence;
+    using NativeDirectGpuPublicTableEvidence =
+        glscheme::rns::GlrShipDirectDevicePublicTableEvidence;
+    using NativeDirectGpuLeafSourceEvidence =
+        glscheme::rns::GlrShipDirectGpuLeafSourceEvidence;
+    using NativeDirectGpuAllYCachePlan =
+        glscheme::rns::GlrShipDirectGpuAllYCachePlan;
+    using NativeDirectGpuResidentQ0SliceProducer =
+        glscheme::rns::GlrShipDirectGpuResidentQ0SliceProducer;
+    using NativeDirectGpuAllYRequest =
+        glscheme::rns::GlrShipDirectGpuAllYRequest;
+    using NativeDirectGpuAllYEvidence =
+        glscheme::rns::GlrShipDirectGpuAllYEvidence;
+    using NativeDirectGpuAllYResult =
+        glscheme::rns::GlrShipDirectGpuAllYResult;
+    using NativeDirectGpuBootstrapRequest =
+        glscheme::rns::GlrShipDirectGpuBootstrapRequest;
+    using NativeDirectGpuPreparationEvidence =
+        glscheme::rns::GlrShipDirectGpuPreparationEvidence;
+    using NativeDirectGpuBootstrapEvidence =
+        glscheme::rns::GlrShipDirectGpuBootstrapEvidence;
+    using NativeDirectGpuBootstrapResult =
+        glscheme::rns::GlrShipDirectGpuBootstrapResult;
     using NativeGL128ProfileReceipt = glscheme::rns::Gl128ProfileReceipt;
     using NativeGL128SchemeWorkload = glscheme::rns::Gl128SchemeWorkload;
     using NativeGL128SchemeKeyPlan = glscheme::rns::Gl128SchemeKeyPlan;
@@ -244,6 +268,8 @@ public:
         glscheme::rns::Gl128BootstrapAcceptanceLimits;
     using NativeGL128BootstrapAcceptanceReceipt =
         glscheme::rns::Gl128BootstrapAcceptanceReceipt;
+    using NativeGL128ResearchBootstrapAcceptanceReceipt =
+        glscheme::rns::Gl128ResearchBootstrapAcceptanceReceipt;
     using NativeGL128CiphertextArtifactSink =
         glscheme::rns::Gl128CiphertextArtifactSink;
     using NativeGL128CiphertextArtifactSource =
@@ -261,6 +287,12 @@ public:
     static_assert(NativeGL128ResearchPersistedSelectorBank::research_only);
     static_assert(NativeGL128ResearchSelectorOpeningReceipt::research_only);
     static_assert(NativeGL128ResearchBootstrapEvidence::research_only);
+    static_assert(
+        NativeGL128ResearchBootstrapAcceptanceReceipt::research_only);
+    static_assert(!NativeGL128ResearchBootstrapAcceptanceReceipt::
+                      production_security_claim);
+    static_assert(!NativeGL128ResearchBootstrapAcceptanceReceipt::
+                      production_authorization_admitted);
     static_assert(!std::is_convertible_v<
                   NativeGL128ResearchOnlySession,
                   NativeGL128DirectBootstrapAuthorizationBundle>);
@@ -279,11 +311,57 @@ public:
     static_assert(!std::is_convertible_v<
                   NativeGL128ResearchBootstrapResult,
                   NativeGL128BootstrapResult>);
+    static_assert(!std::is_convertible_v<
+                  NativeGL128ResearchBootstrapAcceptanceReceipt,
+                  NativeGL128BootstrapAcceptanceReceipt>);
+    static_assert(!std::is_constructible_v<
+                  NativeGL128BootstrapAcceptanceReceipt,
+                  NativeGL128ResearchBootstrapAcceptanceReceipt>);
 
     static constexpr std::size_t kLegacyDftPlaintextEntryCount =
         glscheme::rns::kGlrDftPlaintextEntryCount;
     static constexpr std::size_t kForwardDftPlaintextEntryCount =
         glscheme::rns::kGlrDftPlaintextForwardEntryCount;
+
+    // Evidence-only projection of the current resident-q0 GPU ABI.  `native`
+    // retains every core counter/bit; the append-only named fields make the
+    // resident versus explicit-host-fallback decision and q0 metadata rebase
+    // visible without retaining request callbacks or material pointers.  This
+    // is not an execution result and cannot authorize or claim production.
+    struct ResidentQ0GpuBootstrapEvidenceProjection final {
+        static constexpr bool research_only = true;
+        static constexpr bool evidence_only = true;
+        static constexpr bool production_security_claim = false;
+        static constexpr bool production_authorization_admitted = false;
+
+        std::string schema =
+            "openfhe.glr.resident_q0_gpu_bootstrap_evidence.v1";
+        NativeDirectGpuBootstrapEvidence native;
+        std::uint64_t modeledResidentPublicTableBuilds = 0;
+        std::uint64_t modeledHostFallbackTableUploads = 0;
+        std::uint64_t publicTablePrewarmH2DBytes = 0;
+        std::uint64_t publicTablePrewarmD2HBytes = 0;
+        std::uint64_t publicQ0BoundaryD2HBytes = 0;
+        double publicQ0PreRebaseScale = 1.0;
+        double publicQ0PostRebaseScale = 1.0;
+        bool explicitHostBoundaryFallbackRequested = false;
+        bool residentQ0PathRequested = false;
+        bool publicQ0RawResidueMetadataRebased = false;
+        bool allYPublicQ0TableEncoderResident = false;
+        bool publicQ0TableBoundaryDeclared = false;
+        bool publicQ0TableEncoderResident = false;
+        bool fullyDeviceResident = false;
+        bool nativeEvidenceComplete = false;
+        bool productionSecurityClaimed = false;
+    };
+
+    static_assert(
+        ResidentQ0GpuBootstrapEvidenceProjection::research_only);
+    static_assert(!ResidentQ0GpuBootstrapEvidenceProjection::
+                       production_security_claim);
+    static_assert(!std::is_convertible_v<
+                  ResidentQ0GpuBootstrapEvidenceProjection,
+                  NativeDirectGpuBootstrapResult>);
 
     struct DirectVectorProductionRowResult {
         Ciphertext ciphertext;
@@ -995,6 +1073,23 @@ public:
         const MatrixBatch& expected,
         const NativeGL128BootstrapResult& bootstrap,
         const NativeGL128BootstrapAcceptanceLimits& limits = {}) const;
+
+    // Owner-only exhaustive acceptance for the explicitly research-only
+    // bootstrap lane.  The distinct return type cannot become a production
+    // acceptance receipt even when its measured value/noise limits pass.
+    NativeGL128ResearchBootstrapAcceptanceReceipt
+    AcceptResearchBootstrapDirect(
+        const SecretKey& primaryKey, const MatrixBatch& expected,
+        const NativeGL128ResearchOnlySession& session,
+        const NativeGL128ResearchBootstrapResult& bootstrap,
+        const NativeGL128BootstrapAcceptanceLimits& limits = {}) const;
+
+    // Pure projection: validates and copies already-authored native evidence;
+    // it never invokes the GPU endpoint or supplies production authorization.
+    ResidentQ0GpuBootstrapEvidenceProjection
+    ProjectResidentQ0GpuBootstrapEvidence(
+        const NativeDirectGpuBootstrapRequest& request,
+        const NativeDirectGpuBootstrapEvidence& evidence) const;
 
     // Streaming NATIVE32 artifact codec.  Residues retain the uint64_t
     // arithmetic ABI in memory but persist as exact uint32_t words, halving

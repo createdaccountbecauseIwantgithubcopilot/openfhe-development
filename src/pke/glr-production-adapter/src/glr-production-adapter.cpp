@@ -2681,6 +2681,120 @@ GLRProductionAdapter::AcceptBootstrapDirect(
         m_context, primaryKey, expected, bootstrap, limits);
 }
 
+GLRProductionAdapter::NativeGL128ResearchBootstrapAcceptanceReceipt
+GLRProductionAdapter::AcceptResearchBootstrapDirect(
+    const SecretKey& primaryKey, const MatrixBatch& expected,
+    const NativeGL128ResearchOnlySession& session,
+    const NativeGL128ResearchBootstrapResult& bootstrap,
+    const NativeGL128BootstrapAcceptanceLimits& limits) const {
+    RequireProductionSecretKey(m_context, primaryKey);
+    return glscheme::rns::glr_gl128_accept_research_bootstrap_output(
+        m_context, primaryKey, expected, session, bootstrap, limits);
+}
+
+GLRProductionAdapter::ResidentQ0GpuBootstrapEvidenceProjection
+GLRProductionAdapter::ProjectResidentQ0GpuBootstrapEvidence(
+    const NativeDirectGpuBootstrapRequest& request,
+    const NativeDirectGpuBootstrapEvidence& evidence) const {
+    const auto& preparation = evidence.preparation;
+    const auto& allY = evidence.all_y;
+    const auto& cache = allY.cache_plan;
+    const std::string fingerprint =
+        glscheme::rns::glr_parameter_fingerprint(m_context.params);
+    if (request.schema !=
+            "glscheme.ship_direct_gpu_bootstrap_request.v1" ||
+        request.canonical_primary_input == nullptr ||
+        request.authorization == nullptr ||
+        request.selector_opening == nullptr ||
+        request.evaluation_keys == nullptr ||
+        request.resident_dft_bank == nullptr ||
+        request.stc_config == nullptr ||
+        evidence.schema !=
+            "glscheme.ship_direct_gpu_bootstrap_evidence.v1" ||
+        preparation.schema !=
+            "glscheme.ship_direct_gpu_preparation_evidence.v1" ||
+        allY.schema != "glscheme.ship_direct_gpu_all_y_evidence.v1" ||
+        cache.schema !=
+            "glscheme.ship_direct_gpu_all_y_cache_plan.v1" ||
+        evidence.parameter_fingerprint != fingerprint ||
+        allY.parameter_fingerprint != fingerprint ||
+        !evidence.completed || !preparation.completed || !allY.completed ||
+        !allY.exact_256x128x128_profile || !cache.exact_gl128_profile ||
+        !evidence.evaluator_secret_free || !allY.evaluator_secret_free ||
+        !preparation.output_sparse_q0_device_resident ||
+        !preparation.public_q0_raw_residue_metadata_rebased ||
+        !std::isfinite(preparation.public_q0_pre_rebase_scale) ||
+        preparation.public_q0_pre_rebase_scale <= 0.0 ||
+        preparation.public_q0_pre_rebase_scale !=
+            preparation.normalized_scale ||
+        preparation.public_q0_post_rebase_scale != 1.0 ||
+        cache.modeled_resident_public_table_builds == 0U ||
+        cache.modeled_host_fallback_table_uploads !=
+            cache.modeled_resident_public_table_builds ||
+        cache.modeled_public_table_uploads !=
+            cache.modeled_host_fallback_table_uploads ||
+        allY.public_table_prewarm_d2h_bytes != 0U ||
+        evidence.public_q0_boundary_d2h_bytes !=
+            allY.public_slice_boundary_d2h_bytes ||
+        evidence.public_q0_table_boundary_declared !=
+            allY.public_slice_boundary_d2h_declared) {
+        throw GlrError(
+            "GLRProductionAdapter: resident-q0 GPU evidence is incomplete "
+            "or inconsistent with the canonical native ledger");
+    }
+
+    if (request.use_public_q0_host_boundary_fallback) {
+        if (allY.public_table_prewarm_h2d_bytes != 0U ||
+            evidence.public_q0_boundary_d2h_bytes == 0U ||
+            !evidence.public_q0_table_boundary_declared ||
+            allY.public_q0_table_encoder_resident ||
+            evidence.public_q0_table_encoder_resident ||
+            evidence.fully_device_resident) {
+            throw GlrError(
+                "GLRProductionAdapter: explicit public-q0 host fallback "
+                "evidence was mislabeled as resident");
+        }
+    } else if (evidence.public_q0_boundary_d2h_bytes != 0U ||
+               evidence.public_q0_table_boundary_declared ||
+               !allY.public_q0_table_encoder_resident ||
+               !evidence.public_q0_table_encoder_resident ||
+               !evidence.fully_device_resident) {
+        throw GlrError(
+            "GLRProductionAdapter: resident public-q0 table evidence did "
+            "not close without the explicit host fallback");
+    }
+
+    ResidentQ0GpuBootstrapEvidenceProjection out;
+    out.native = evidence;
+    out.modeledResidentPublicTableBuilds =
+        cache.modeled_resident_public_table_builds;
+    out.modeledHostFallbackTableUploads =
+        cache.modeled_host_fallback_table_uploads;
+    out.publicTablePrewarmH2DBytes =
+        allY.public_table_prewarm_h2d_bytes;
+    out.publicTablePrewarmD2HBytes =
+        allY.public_table_prewarm_d2h_bytes;
+    out.publicQ0BoundaryD2HBytes = evidence.public_q0_boundary_d2h_bytes;
+    out.publicQ0PreRebaseScale = preparation.public_q0_pre_rebase_scale;
+    out.publicQ0PostRebaseScale = preparation.public_q0_post_rebase_scale;
+    out.explicitHostBoundaryFallbackRequested =
+        request.use_public_q0_host_boundary_fallback;
+    out.residentQ0PathRequested =
+        !request.use_public_q0_host_boundary_fallback;
+    out.publicQ0RawResidueMetadataRebased =
+        preparation.public_q0_raw_residue_metadata_rebased;
+    out.allYPublicQ0TableEncoderResident =
+        allY.public_q0_table_encoder_resident;
+    out.publicQ0TableBoundaryDeclared =
+        evidence.public_q0_table_boundary_declared;
+    out.publicQ0TableEncoderResident =
+        evidence.public_q0_table_encoder_resident;
+    out.fullyDeviceResident = evidence.fully_device_resident;
+    out.nativeEvidenceComplete = evidence.completed;
+    out.productionSecurityClaimed = false;
+    return out;
+}
+
 GLRProductionAdapter::NativeGL128CiphertextArtifactReceipt
 GLRProductionAdapter::WriteCiphertextArtifact(
     const Ciphertext& ciphertext,
