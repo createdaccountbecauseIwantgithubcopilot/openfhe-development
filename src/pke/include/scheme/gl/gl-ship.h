@@ -115,6 +115,15 @@ public:
 
     static std::vector<std::complex<double>> RootVector(
         uint64_t q0, const std::vector<int64_t>& exponents);
+
+    /**
+     * Load-bearing SHIP base-node constant.  After multiplying by
+     * exp(2*pi*i*Z/q0), conjugation-add yields
+     * gamma/(2*pi)*sin(2*pi*Z/q0).  Keeping this as a tested algebra helper
+     * prevents broad refresh tolerances from hiding a systematic output-leg
+     * scale or sign drift.
+     */
+    static std::complex<double> BaseNodeScale(double gamma);
 };
 
 class GLShipSchemelet;

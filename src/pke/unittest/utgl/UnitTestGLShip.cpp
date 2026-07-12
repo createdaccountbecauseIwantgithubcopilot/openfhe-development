@@ -634,6 +634,39 @@ TEST(GLShip, GaussianWrapAndRootFactorOracles) {
     }
 }
 
+TEST(GLShip, BaseNodeScalePinsOutputLegConstantAndSign) {
+    constexpr double gamma = 64.0;
+    constexpr uint64_t q0 = 65537;
+    const long double pi = std::acos(-1.0L);
+    const auto scale = GLShipAlgebra::BaseNodeScale(gamma);
+    EXPECT_DOUBLE_EQ(scale.real(), 0.0);
+    EXPECT_NEAR(scale.imag(),
+                -gamma / (4.0 * static_cast<double>(pi)), 1e-15);
+
+    for (const int64_t exponent : {-32768, -17003, -1, 0, 1, 19001, 32768}) {
+        const long double angle =
+            2.0L * pi * static_cast<long double>(exponent) /
+            static_cast<long double>(q0);
+        const std::complex<long double> omega =
+            std::polar(1.0L, angle);
+        const std::complex<long double> base(
+            static_cast<long double>(scale.real()),
+            static_cast<long double>(scale.imag()));
+        const long double conjugationAdd = 2.0L * std::real(base * omega);
+        const long double sineOracle =
+            static_cast<long double>(gamma) / (2.0L * pi) *
+            std::sin(angle);
+        EXPECT_NEAR(static_cast<double>(conjugationAdd),
+                    static_cast<double>(sineOracle), 2e-15)
+            << "exponent " << exponent;
+    }
+
+    EXPECT_THROW(GLShipAlgebra::BaseNodeScale(0.0), GLShipParameterError);
+    EXPECT_THROW(GLShipAlgebra::BaseNodeScale(
+                     std::numeric_limits<double>::quiet_NaN()),
+                 GLShipParameterError);
+}
+
 TEST(GLShip, CanonicalRowBackingPolynomialIsXInverseAndNormalizesAtQ0) {
     GLSchemelet gl(ExactParameters(4, 4));
     GLShipSchemelet ship(gl, ShipParameters(4, 2));

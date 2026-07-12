@@ -529,6 +529,15 @@ std::vector<std::complex<double>> GLShipAlgebra::RootVector(
     return result;
 }
 
+std::complex<double> GLShipAlgebra::BaseNodeScale(double gamma) {
+    if (!std::isfinite(gamma) || gamma <= 0.0) {
+        throw GLShipParameterError(
+            "GL SHIP base-node scale requires finite positive gamma");
+    }
+    const double pi = std::acos(-1.0);
+    return {0.0, -gamma / (4.0 * pi)};
+}
+
 GLShipEvaluationKey::GLShipEvaluationKey(
     GLShipParameters parameters, CryptoContext<DCRTPoly> context,
     std::string sparseKeyTag, std::string primaryKeyTag, uint64_t q0,
@@ -1333,8 +1342,8 @@ GLShipHalfBootstrapResult GLShipSchemelet::EvalHalfBootstrapValidated(
         b, MultiplyByNegativeGaussianI(b)};
     const std::vector<std::vector<GLShipGaussianInteger>> branchA = {
         a, MultiplyByNegativeGaussianI(a)};
-    const auto pi = std::acos(-1.0);
-    const std::complex<double> shipScale(0.0, -m_parameters.gamma / (4.0 * pi));
+    const std::complex<double> shipScale =
+        GLShipAlgebra::BaseNodeScale(m_parameters.gamma);
 
     const bool hybrid =
         m_parameters.selection == GLShipSelection::HYBRID_MASKED_COLUMN;
