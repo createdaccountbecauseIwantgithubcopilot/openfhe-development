@@ -10,6 +10,7 @@
 #include "glscheme/production_profiles.hpp"
 #include "glscheme/gl128_scheme.hpp"
 #include "glscheme/gl128_bootstrap.hpp"
+#include "glscheme/gl128_bootstrap_acceptance.hpp"
 #include "glscheme/rns_dft_plaintext_provider.hpp"
 #include "glscheme/rns_encode.hpp"
 #include "glscheme/rns_hybrid_ks.hpp"
@@ -165,6 +166,10 @@ public:
         glscheme::rns::Gl128BootstrapEvidence;
     using NativeGL128BootstrapResult =
         glscheme::rns::Gl128BootstrapResult;
+    using NativeGL128BootstrapAcceptanceLimits =
+        glscheme::rns::Gl128BootstrapAcceptanceLimits;
+    using NativeGL128BootstrapAcceptanceReceipt =
+        glscheme::rns::Gl128BootstrapAcceptanceReceipt;
 
     struct DirectVectorProductionRowResult {
         Ciphertext ciphertext;
@@ -801,6 +806,16 @@ public:
         const CompactDirectBootstrapKeys& evaluationKeys,
         const NativeCtsStcConfig& config = {},
         double normalizationRelativeTolerance = 1.0e-12) const;
+
+    // Owner-side exhaustive post-bootstrap acceptance.  This is kept out of
+    // BootstrapDirect so an evaluator cannot self-author a correctness/noise
+    // claim.  It decrypts only after the completed result is returned and
+    // checks all 4,194,304 slots plus every coefficient across active Q.
+    NativeGL128BootstrapAcceptanceReceipt AcceptBootstrapDirect(
+        const SecretKey& primaryKey,
+        const MatrixBatch& expected,
+        const NativeGL128BootstrapResult& bootstrap,
+        const NativeGL128BootstrapAcceptanceLimits& limits = {}) const;
 
     OrdinaryRefreshPackFacade ResumableOrdinaryRefreshPack() const noexcept;
 

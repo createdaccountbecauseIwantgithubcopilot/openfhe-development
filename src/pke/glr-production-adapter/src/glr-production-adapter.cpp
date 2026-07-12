@@ -2480,6 +2480,17 @@ GLRProductionAdapter::BootstrapDirect(
         normalizationRelativeTolerance);
 }
 
+GLRProductionAdapter::NativeGL128BootstrapAcceptanceReceipt
+GLRProductionAdapter::AcceptBootstrapDirect(
+    const SecretKey& primaryKey,
+    const MatrixBatch& expected,
+    const NativeGL128BootstrapResult& bootstrap,
+    const NativeGL128BootstrapAcceptanceLimits& limits) const {
+    RequireProductionSecretKey(m_context, primaryKey);
+    return glscheme::rns::glr_gl128_accept_bootstrap_output(
+        m_context, primaryKey, expected, bootstrap, limits);
+}
+
 GLRProductionAdapter::OrdinaryRefreshPackFacade
 GLRProductionAdapter::ResumableOrdinaryRefreshPack() const noexcept {
     return OrdinaryRefreshPackFacade(m_context);
