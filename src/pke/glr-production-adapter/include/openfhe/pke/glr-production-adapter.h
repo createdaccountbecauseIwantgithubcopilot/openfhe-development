@@ -8,6 +8,8 @@
 // are OpenFHE DCRT rows, and the adapter exposes no DCRT conversion seam.
 
 #include "glscheme/production_profiles.hpp"
+#include "glscheme/gl128_scheme.hpp"
+#include "glscheme/gl128_bootstrap.hpp"
 #include "glscheme/rns_dft_plaintext_provider.hpp"
 #include "glscheme/rns_encode.hpp"
 #include "glscheme/rns_hybrid_ks.hpp"
@@ -98,6 +100,81 @@ public:
         glscheme::rns::GlrShipDirectAllYStcEvidence;
     using NativeDirectVectorFullReturnEvidence =
         glscheme::rns::GlrShipDirectFullReturnEvidence;
+    using NativeGL128ProfileReceipt = glscheme::rns::Gl128ProfileReceipt;
+    using NativeGL128SchemeWorkload = glscheme::rns::Gl128SchemeWorkload;
+    using NativeGL128SchemeKeyPlan = glscheme::rns::Gl128SchemeKeyPlan;
+    using NativeGL128DirectBootstrapKeyPlan =
+        glscheme::rns::Gl128DirectBootstrapKeyPlan;
+    using NativeGL128DirectBootstrapKeyLineageBinding =
+        glscheme::rns::Gl128DirectBootstrapKeyLineageBinding;
+    using NativeGL128DirectBootstrapKeyGenerationResult =
+        glscheme::rns::Gl128DirectBootstrapKeyGenerationResult;
+    using NativeGL128Operation = glscheme::rns::Gl128Operation;
+    using NativeGL128EvaluationEvidence =
+        glscheme::rns::Gl128EvaluationEvidence;
+    using NativeGL128EvaluationResult =
+        glscheme::rns::Gl128EvaluationResult;
+    using NativeGL128PlainProductOptions =
+        glscheme::rns::Gl128PlainProductOptions;
+    using NativeCompactKskSetSink = glscheme::rns::GlrCompactKskSetSink;
+    using NativeCompactKskSetGenerationResult =
+        glscheme::rns::GlrCompactKskSetGenerationResult;
+    using NativeCompactKskBlobLeaseCallbacks =
+        glscheme::rns::GlrCompactKskBlobLeaseCallbacks;
+    using NativeDirectVectorProductionSelectorGenerationSeed =
+        glscheme::rns::
+            GlrShipDirectVectorProductionSelectorGenerationSeed;
+    using NativeDirectVectorProductionSelectorGenerator =
+        glscheme::rns::
+            GlrShipDirectVectorProductionSelectorGenerator;
+    using NativeDirectVectorProductionSelectorManifestCheckpoint =
+        glscheme::rns::
+            GlrShipDirectVectorProductionSelectorManifestCheckpoint;
+    using NativeDirectVectorProductionSelectorManifestFinalizationResult =
+        glscheme::rns::
+            GlrShipDirectVectorProductionSelectorManifestFinalizationResult;
+    using NativeDirectVectorProductionSelectorBlobPersistenceEvidence =
+        glscheme::rns::
+            GlrShipDirectVectorProductionSelectorBlobPersistenceEvidence;
+    using NativeDirectVectorProductionSelectorBlobLeaseCallbacks =
+        glscheme::rns::
+            GlrShipDirectVectorProductionSelectorBlobLeaseCallbacks;
+    using NativeDirectVectorProductionSelectorProviderOpeningResult =
+        glscheme::rns::
+            GlrShipDirectVectorProductionSelectorProviderOpeningResult;
+    using NativeDirectVectorPublicSlice =
+        glscheme::rns::GlrShipDirectPublicSlice;
+    using NativeValidatedDftPlaintextProviderSession =
+        glscheme::rns::GlrValidatedDftPlaintextProviderSession;
+    using NativeCtsStcConfig = glscheme::rns::GlrCtsStcConfig;
+    using NativeDirectVectorAllYStcResult =
+        glscheme::rns::GlrShipDirectAllYStcResult;
+    using NativeGL128DirectBootstrapAuthorizationBundle =
+        glscheme::rns::Gl128DirectBootstrapAuthorizationBundle;
+    using NativeGL128SelectorPersistenceSink =
+        glscheme::rns::Gl128SelectorPersistenceSink;
+    using NativeGL128PersistedSelectorBankResult =
+        glscheme::rns::Gl128PersistedSelectorBankResult;
+    using NativeGL128DirectInputPreparationEvidence =
+        glscheme::rns::Gl128DirectInputPreparationEvidence;
+    using NativeGL128DirectInputPreparationResult =
+        glscheme::rns::Gl128DirectInputPreparationResult;
+    using NativeGL128BootstrapRepresentation =
+        glscheme::rns::Gl128BootstrapRepresentation;
+    using NativeGL128BootstrapEvidence =
+        glscheme::rns::Gl128BootstrapEvidence;
+    using NativeGL128BootstrapResult =
+        glscheme::rns::Gl128BootstrapResult;
+
+    struct DirectVectorProductionRowResult {
+        Ciphertext ciphertext;
+        NativeDirectVectorEvidence evidence;
+    };
+
+    struct DirectVectorProductionAllYResult {
+        NativeDirectVectorAllYStcResult native;
+        NativeDirectVectorAllYStcEvidence evidence;
+    };
 
     // Allocation-free expected shape for composing 128 direct-vector Y rows
     // into one bounded R' tensor and returning it through the genuine StC
@@ -570,6 +647,65 @@ public:
         std::unique_ptr<NativeKeyProvider> m_provider;
     };
 
+    // Storage-bounded evaluator material produced by the canonical seeded-a
+    // core path.  The object retains only the authenticated manifest/binding
+    // receipt and a provider which expands one externally stored compact key
+    // inside each synchronous lease.  It never owns a full key set.
+    class CompactEvaluationKeys final {
+    public:
+        CompactEvaluationKeys(const CompactEvaluationKeys&) = delete;
+        CompactEvaluationKeys& operator=(const CompactEvaluationKeys&) =
+            delete;
+        CompactEvaluationKeys(CompactEvaluationKeys&&) noexcept = default;
+        CompactEvaluationKeys& operator=(CompactEvaluationKeys&&) noexcept =
+            default;
+        ~CompactEvaluationKeys() = default;
+
+        const NativeCompactKskSetGenerationResult& GetGenerationResult()
+            const noexcept;
+        const NativeKeyProvider& GetNativeProvider() const;
+        bool HasKey(const KeyId& id) const noexcept;
+
+    private:
+        friend class GLRProductionAdapter;
+        CompactEvaluationKeys(
+            NativeCompactKskSetGenerationResult generation,
+            std::unique_ptr<NativeKeyProvider> provider);
+
+        NativeCompactKskSetGenerationResult m_generation;
+        std::unique_ptr<NativeKeyProvider> m_provider;
+    };
+
+    // Direct-bootstrap counterpart which cannot lose the owner-secret lineage
+    // receipt while the compact provider remains live.
+    class CompactDirectBootstrapKeys final {
+    public:
+        CompactDirectBootstrapKeys(const CompactDirectBootstrapKeys&) = delete;
+        CompactDirectBootstrapKeys& operator=(
+            const CompactDirectBootstrapKeys&) = delete;
+        CompactDirectBootstrapKeys(CompactDirectBootstrapKeys&&) noexcept =
+            default;
+        CompactDirectBootstrapKeys& operator=(
+            CompactDirectBootstrapKeys&&) noexcept = default;
+        ~CompactDirectBootstrapKeys() = default;
+
+        const NativeGL128DirectBootstrapKeyGenerationResult&
+        GetGenerationResult() const noexcept;
+        const NativeGL128DirectBootstrapKeyLineageBinding& GetLineage()
+            const noexcept;
+        const NativeKeyProvider& GetNativeProvider() const;
+        bool HasKey(const KeyId& id) const noexcept;
+
+    private:
+        friend class GLRProductionAdapter;
+        CompactDirectBootstrapKeys(
+            NativeGL128DirectBootstrapKeyGenerationResult generation,
+            std::unique_ptr<NativeKeyProvider> provider);
+
+        NativeGL128DirectBootstrapKeyGenerationResult m_generation;
+        std::unique_ptr<NativeKeyProvider> m_provider;
+    };
+
     // Returns and validates the one profile this provider accepts:
     // GL-128-257-N32, physical layout 256x128x128.
     static Profile CanonicalProfile();
@@ -584,6 +720,87 @@ public:
     ~GLRProductionAdapter() = default;
 
     const Context& GetContext() const noexcept;
+
+    // Core-owned exact-profile receipt and complete storage-aware plans.  The
+    // adapter does not reconstruct IDs, levels, or byte counts independently.
+    NativeGL128ProfileReceipt GetCanonicalProfileReceipt() const;
+    NativeGL128SchemeKeyPlan PlanCanonicalSchemeKeys(
+        const NativeGL128SchemeWorkload& workload = {}) const;
+    NativeGL128DirectBootstrapKeyPlan
+    PlanCanonicalDirectBootstrapKeys() const;
+    NativeValidatedDftPlaintextProviderSession OpenDftPlaintextSession(
+        const NativeRefreshDftPlaintextProvider& provider,
+        const NativeRefreshDftPlaintextBinding& binding) const;
+
+    // Owner-side bounded key generation and evaluator-side compact opening.
+    // A zero seed requests operating-system entropy.  Persistence remains
+    // caller-owned through the core sink/loader callbacks.
+    NativeCompactKskSetGenerationResult GenerateCompactSchemeKeys(
+        const SecretKey& primaryKey,
+        const NativeGL128SchemeKeyPlan& plan,
+        std::string ownerKeySeedCommitment,
+        const NativeCompactKskSetSink& sink,
+        std::uint64_t seed = 0) const;
+    NativeGL128DirectBootstrapKeyGenerationResult
+    GenerateCompactDirectBootstrapKeys(
+        const SecretKey& primaryKey,
+        const glscheme::rns::GlrSparseSecretKey& sparseKey,
+        const NativeGL128DirectBootstrapKeyPlan& plan,
+        std::string ownerKeySeedCommitment,
+        const NativeCompactKskSetSink& sink,
+        std::uint64_t seed = 0) const;
+    CompactEvaluationKeys OpenCompactSchemeKeys(
+        const NativeGL128SchemeKeyPlan& plan,
+        NativeCompactKskSetGenerationResult generation,
+        NativeCompactKskBlobLeaseCallbacks callbacks) const;
+    CompactDirectBootstrapKeys OpenCompactDirectBootstrapKeys(
+        const NativeGL128DirectBootstrapKeyPlan& plan,
+        NativeGL128DirectBootstrapKeyGenerationResult generation,
+        NativeCompactKskBlobLeaseCallbacks callbacks) const;
+
+    // Canonical end-to-end owner/evaluator direct-bootstrap facade.  This is
+    // the preferred production surface over manually composing the lower
+    // selector methods below.  The transform config is shared by inverse CtS
+    // and forward StC and is validated before the first large CtS transient.
+    NativeGL128DirectBootstrapAuthorizationBundle AuthorizeDirectBootstrap(
+        const SecretKey& primaryKey,
+        const glscheme::rns::GlrSparseSecretKey& sparseKey,
+        std::string ownerKeySeedCommitment,
+        const SecurityReport& sparseH40SecurityReport,
+        const NativeDirectVectorDensePrimarySecurityEvidence&
+            densePrimarySecurity) const;
+    NativeGL128PersistedSelectorBankResult GeneratePersistedDirectSelectorBank(
+        const SecretKey& primaryKey,
+        const glscheme::rns::GlrSparseSecretKey& sparseKey,
+        const NativeGL128DirectBootstrapAuthorizationBundle& authorization,
+        const NativeDirectVectorProductionSelectorGenerationSeed&
+            generationSeed,
+        const NativeGL128SelectorPersistenceSink& sink,
+        const NativeDirectVectorProductionSelectorManifestCheckpoint*
+            resumeCheckpoint = nullptr) const;
+    NativeDirectVectorProductionSelectorProviderOpeningResult
+    OpenPersistedDirectSelectorBank(
+        const NativeGL128DirectBootstrapAuthorizationBundle& authorization,
+        const NativeGL128PersistedSelectorBankResult& persisted,
+        const CompactDirectBootstrapKeys& evaluationKeys,
+        NativeDirectVectorProductionSelectorBlobLeaseCallbacks callbacks)
+        const;
+    NativeGL128DirectInputPreparationResult PrepareDirectShipInput(
+        const Ciphertext& canonicalCiphertext,
+        const NativeGL128DirectBootstrapAuthorizationBundle& authorization,
+        const NativeValidatedDftPlaintextProviderSession& dftSession,
+        const CompactDirectBootstrapKeys& evaluationKeys,
+        const NativeCtsStcConfig& config = {},
+        double normalizationRelativeTolerance = 1.0e-12) const;
+    NativeGL128BootstrapResult BootstrapDirect(
+        const Ciphertext& canonicalCiphertext,
+        const NativeGL128DirectBootstrapAuthorizationBundle& authorization,
+        const NativeDirectVectorProductionSelectorProviderOpeningResult&
+            selectorOpening,
+        const NativeValidatedDftPlaintextProviderSession& dftSession,
+        const CompactDirectBootstrapKeys& evaluationKeys,
+        const NativeCtsStcConfig& config = {},
+        double normalizationRelativeTolerance = 1.0e-12) const;
 
     OrdinaryRefreshPackFacade ResumableOrdinaryRefreshPack() const noexcept;
 
@@ -623,6 +840,63 @@ public:
         const DirectVectorSelectorRecordPreflight& preflight,
         const DirectVectorPrimarySelectorStorageAuthorization& storage,
         const DirectVectorPrimaryAuthorization& authorization) const;
+
+    // Complete owner persistence and evaluator opening surface for the exact
+    // 640-record L4/h40 bank.  These calls delegate canonical record hashing,
+    // checkpoint authentication, compact expansion, and KSK-lineage joins to
+    // GLScheme; OpenFHE does not reinterpret selector ciphertexts.
+    std::unique_ptr<NativeDirectVectorProductionSelectorGenerator>
+    CreateDirectVectorPrimarySelectorGenerator(
+        const SecretKey& primaryKey,
+        const glscheme::rns::GlrSparseSecretKey& sparseKey,
+        const DirectVectorPrimaryAuthorization& authorization,
+        const DirectVectorPrimarySelectorStorageAuthorization& storage,
+        const NativeDirectVectorProductionSelectorGenerationSeed&
+            generationSeed) const;
+    NativeDirectVectorProductionSelectorManifestCheckpoint
+    BeginDirectVectorPrimarySelectorManifest(
+        const DirectVectorPrimaryAuthorization& authorization,
+        const DirectVectorPrimarySelectorStorageAuthorization& storage) const;
+    NativeDirectVectorProductionSelectorManifestCheckpoint
+    AppendDirectVectorPrimarySelectorRecord(
+        const DirectVectorPrimaryAuthorization& authorization,
+        const DirectVectorPrimarySelectorStorageAuthorization& storage,
+        const NativeDirectVectorProductionSelectorManifestCheckpoint&
+            checkpoint,
+        const NativeDirectVectorSelectorRecordGenerationResult& record) const;
+    NativeDirectVectorProductionSelectorManifestFinalizationResult
+    FinalizeDirectVectorPrimarySelectorManifests(
+        const DirectVectorPrimaryAuthorization& authorization,
+        const DirectVectorPrimarySelectorStorageAuthorization& storage,
+        const NativeDirectVectorProductionSelectorManifestCheckpoint&
+            checkpoint) const;
+    NativeDirectVectorProductionSelectorProviderOpeningResult
+    OpenPersistedDirectVectorPrimarySelectorProvider(
+        const DirectVectorPrimaryAuthorization& authorization,
+        const DirectVectorPrimarySelectorStorageAuthorization& storage,
+        const NativeDirectVectorProductionSelectorManifestCheckpoint&
+            checkpoint,
+        NativeDirectVectorProductionSelectorManifestFinalizationResult
+            finalized,
+        const CompactDirectBootstrapKeys& evaluationKeys,
+        const NativeDirectVectorProductionSelectorBlobPersistenceEvidence&
+            persistence,
+        NativeDirectVectorProductionSelectorBlobLeaseCallbacks callbacks)
+        const;
+    DirectVectorProductionRowResult ExecuteDirectVectorPrimaryRowProduction(
+        const NativeDirectVectorPublicSlice& input,
+        const DirectVectorPrimaryAuthorization& authorization,
+        const NativeDirectVectorProductionSelectorProviderOpeningResult&
+            selectorOpening,
+        const CompactDirectBootstrapKeys& evaluationKeys) const;
+    DirectVectorProductionAllYResult ExecuteDirectVectorAllYProduction(
+        const Ciphertext& q0SparseCoefficients,
+        const DirectVectorPrimaryAuthorization& authorization,
+        const NativeDirectVectorProductionSelectorProviderOpeningResult&
+            selectorOpening,
+        const CompactDirectBootstrapKeys& evaluationKeys,
+        const NativeValidatedDftPlaintextProviderSession& dftSession,
+        const NativeCtsStcConfig& config = {}) const;
 
     // Binds a completed owner-observed h=2 staging run to the exact
     // GL-128-257-N32 L4 -> L8 direct-vector evidence.  This is intentionally
@@ -754,6 +1028,44 @@ public:
                       const EvaluationKeys& keys) const;
     Ciphertext Hadamard(const Ciphertext& lhs, const Ciphertext& rhs,
                        const EvaluationKeys& keys) const;
+
+    // Receipt-preserving Section-3 operations.  These are the preferred
+    // production bindings: each result carries exact levels/scales, switch
+    // counts, stride-two drops, trace normalization, and secret-free evidence
+    // authored by the core facade.
+    NativeGL128EvaluationResult EvaluateAdd(
+        const Ciphertext& lhs, const Ciphertext& rhs) const;
+    NativeGL128EvaluationResult EvaluateSub(
+        const Ciphertext& lhs, const Ciphertext& rhs) const;
+    NativeGL128EvaluationResult EvaluateMatMul(
+        const Ciphertext& lhs, const Plaintext& rhs,
+        const NativeGL128PlainProductOptions& options = {}) const;
+    NativeGL128EvaluationResult EvaluateMatMul(
+        const Ciphertext& lhs, const Ciphertext& rhs,
+        const NativeKeyProvider& keys) const;
+    NativeGL128EvaluationResult EvaluateHadamard(
+        const Ciphertext& lhs, const Plaintext& rhs,
+        const NativeGL128PlainProductOptions& options = {}) const;
+    NativeGL128EvaluationResult EvaluateHadamard(
+        const Ciphertext& lhs, const Ciphertext& rhs,
+        const NativeKeyProvider& keys) const;
+    NativeGL128EvaluationResult EvaluateRotateRows(
+        const Ciphertext& ciphertext, std::int32_t amount,
+        const NativeKeyProvider& keys) const;
+    NativeGL128EvaluationResult EvaluateRotateColumns(
+        const Ciphertext& ciphertext, std::int32_t amount) const;
+    NativeGL128EvaluationResult EvaluateRotateMatrices(
+        const Ciphertext& ciphertext, std::int32_t amount,
+        const NativeKeyProvider& keys) const;
+    NativeGL128EvaluationResult EvaluateTranspose(
+        const Ciphertext& ciphertext,
+        const NativeKeyProvider& keys) const;
+    NativeGL128EvaluationResult EvaluateConjugate(
+        const Ciphertext& ciphertext,
+        const NativeKeyProvider& keys) const;
+    NativeGL128EvaluationResult EvaluateHermitianTranspose(
+        const Ciphertext& ciphertext,
+        const NativeKeyProvider& keys) const;
 
 private:
     explicit GLRProductionAdapter(Context context);

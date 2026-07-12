@@ -38,18 +38,6 @@ GlrRngOwner MakeRng(std::uint64_t seed) {
     return rng;
 }
 
-void RequireCanonicalBatch(const GLRProductionAdapter::MatrixBatch& matrices) {
-    constexpr std::uint32_t kN = 128;
-    constexpr std::uint32_t kPhi = 256;
-    constexpr std::uint64_t kValues = 4194304;
-    if (matrices.n != kN || matrices.count != kPhi ||
-        matrices.values.size() != kValues) {
-        throw GlrError(
-            "GLRProductionAdapter: encode requires the native W-batched "
-            "256x128x128 GL-128-257-N32 layout; W-free rows are not accepted");
-    }
-}
-
 std::uint64_t CheckedMul(std::uint64_t lhs, std::uint64_t rhs,
                          const char* what) {
     if (rhs != 0 && lhs > std::numeric_limits<std::uint64_t>::max() / rhs) {
@@ -150,20 +138,11 @@ void RequireProductionCiphertext(
         ciphertext.a.extended || ciphertext.b.extended ||
         ciphertext.level != ciphertext.b.level ||
         ciphertext.key_id != "primary" ||
+        !IsCanonicalSha256Root(ciphertext.key_lineage_commitment) ||
         !std::isfinite(ciphertext.scale) || ciphertext.scale <= 0.0) {
         throw GlrError(
             "GLRProductionAdapter: malformed primary production ciphertext "
             "metadata");
-    }
-}
-
-void RequireSlotCiphertext(const GLRProductionAdapter::Context& context,
-                           const GLRProductionAdapter::Ciphertext& ciphertext,
-                           const char* what) {
-    RequireProductionCiphertext(context, ciphertext);
-    if (ciphertext.b.domain != GlrDomain::Slot) {
-        throw GlrError(std::string("GLRProductionAdapter: ") + what +
-                       " requires a native Slot-domain ciphertext");
     }
 }
 
@@ -319,6 +298,233 @@ const GLRProductionAdapter::NativeKeyProvider& RequireEvaluationKeys(
         throw GlrError(
             "GLRProductionAdapter: evaluation keys are cross-parameter or "
             "accessed secret material");
+    }
+    return provider;
+}
+
+void RequireCanonicalSchemeKeyPlan(
+    const GLRProductionAdapter::Context& context,
+    const GLRProductionAdapter::NativeGL128SchemeKeyPlan& plan) {
+    const std::string fingerprint =
+        glscheme::rns::glr_parameter_fingerprint(context.params);
+    if (plan.schema != "glscheme.gl128_scheme_key_plan.v1" ||
+        plan.parameter_fingerprint != fingerprint || plan.key_level != 0U ||
+        !plan.matrix_product_relinearization_complete ||
+        !plan.hadamard_relinearization_complete ||
+        !plan.automorphism_keys_complete ||
+        !plan.seeded_public_a_compaction_planned) {
+        throw GlrError(
+            "GLRProductionAdapter: malformed canonical GL128 scheme-key "
+            "plan");
+    }
+    std::uint32_t small = 0;
+    std::uint32_t big = 0;
+    std::uint64_t full = 0;
+    std::uint64_t compact = 0;
+    std::uint64_t saved = 0;
+    for (std::size_t i = 0; i < plan.ids.size(); ++i) {
+        ValidateEvaluationKeyId(context, plan.ids[i]);
+        if (std::find(plan.ids.begin(), plan.ids.begin() + i, plan.ids[i]) !=
+            plan.ids.begin() + i) {
+            throw GlrError(
+                "GLRProductionAdapter: duplicate key ID in canonical "
+                "GL128 scheme-key plan");
+        }
+        const auto ring =
+            glscheme::rns::glr_ks_ring_for(plan.ids[i].direction);
+        if (ring == GlrRing::R) {
+            ++small;
+        } else {
+            ++big;
+        }
+        const auto census =
+            glscheme::rns::glr_model_seeded_switch_key_storage_at_level(
+                context.params, ring, plan.key_level);
+        full = CheckedAdd(full, census.full_materialized_bytes,
+                          "validating scheme-key full bytes");
+        compact = CheckedAdd(compact, census.compact_material_bytes,
+                             "validating scheme-key compact bytes");
+        saved = CheckedAdd(saved, census.saved_material_bytes,
+                           "validating scheme-key saved bytes");
+    }
+    if (plan.small_switch_key_count != small ||
+        plan.big_switch_key_count != big ||
+        plan.full_materialized_bytes != full ||
+        plan.compact_persistent_bytes != compact ||
+        plan.compact_bytes_saved != saved) {
+        throw GlrError(
+            "GLRProductionAdapter: forged canonical GL128 scheme-key byte "
+            "or direction census");
+    }
+}
+
+bool DirectBootstrapKeyPlanEquals(
+    const GLRProductionAdapter::NativeGL128DirectBootstrapKeyPlan& lhs,
+    const GLRProductionAdapter::NativeGL128DirectBootstrapKeyPlan& rhs) {
+    if (lhs.schema != rhs.schema ||
+        lhs.parameter_fingerprint != rhs.parameter_fingerprint ||
+        lhs.selector_level != rhs.selector_level ||
+        lhs.first_relinearization_level != rhs.first_relinearization_level ||
+        lhs.output_level != rhs.output_level ||
+        lhs.forward_return_level != rhs.forward_return_level ||
+        lhs.full_materialized_bytes != rhs.full_materialized_bytes ||
+        lhs.compact_persistent_bytes != rhs.compact_persistent_bytes ||
+        lhs.compact_bytes_saved != rhs.compact_bytes_saved ||
+        lhs.exact_h40_corridor != rhs.exact_h40_corridor ||
+        lhs.seeded_public_a_compaction_planned !=
+            rhs.seeded_public_a_compaction_planned ||
+        lhs.requirements.size() != rhs.requirements.size()) {
+        return false;
+    }
+    for (std::size_t i = 0; i < lhs.requirements.size(); ++i) {
+        const auto& a = lhs.requirements[i];
+        const auto& b = rhs.requirements[i];
+        if (!(a.id == b.id) || a.ring != b.ring ||
+            a.key_level != b.key_level ||
+            a.application_site != b.application_site) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void RequireCompactGeneration(
+    const GLRProductionAdapter::Context& context,
+    const GLRProductionAdapter::NativeCompactKskSetGenerationResult&
+        generation,
+    const std::vector<std::pair<GlrKskId, std::uint32_t>>& expected) {
+    const std::string fingerprint =
+        glscheme::rns::glr_parameter_fingerprint(context.params);
+    const auto& manifest = generation.manifest;
+    if (manifest.parameter_fingerprint != fingerprint ||
+        manifest.n != context.n() || manifest.p != context.p_() ||
+        manifest.phi != context.phi() ||
+        manifest.dnum != context.params.dnum ||
+        manifest.records.size() != expected.size() ||
+        generation.compact_records_emitted != expected.size() ||
+        generation.public_material_commitment.empty() ||
+        !generation.sink_secret_free || generation.full_key_set_materialized ||
+        generation.peak_live_full_keys > 1U ||
+        generation.peak_live_compact_records > 1U ||
+        generation.peak_live_readback_keys > 1U) {
+        throw GlrError(
+            "GLRProductionAdapter: compact key generation receipt is not a "
+            "bounded canonical GL128 key set");
+    }
+    for (std::size_t i = 0; i < expected.size(); ++i) {
+        const auto& record = manifest.records[i];
+        if (!(record.id == expected[i].first) ||
+            record.key_level != expected[i].second ||
+            record.ring !=
+                glscheme::rns::glr_ks_ring_for(expected[i].first.direction) ||
+            record.direction_tag !=
+                glscheme::rns::glr_ksk_id_tag(expected[i].first) ||
+            record.payload_commitment.empty()) {
+            throw GlrError(
+                "GLRProductionAdapter: compact key generation record does "
+                "not match the requested GL128 key/level order");
+        }
+    }
+    const auto binding = glscheme::rns::glr_make_leased_ksk_binding(
+        manifest, generation.public_material_commitment);
+    if (generation.binding.expected_manifest_commitment !=
+            binding.expected_manifest_commitment ||
+        generation.binding.expected_public_material_commitment !=
+            binding.expected_public_material_commitment ||
+        generation.binding.expected_parameter_fingerprint !=
+            binding.expected_parameter_fingerprint ||
+        generation.binding.expected_sparse_support_commitment !=
+            binding.expected_sparse_support_commitment ||
+        generation.binding.expected_record_count !=
+            binding.expected_record_count) {
+        throw GlrError(
+            "GLRProductionAdapter: compact key binding does not authenticate "
+            "its generation manifest");
+    }
+}
+
+void RequireDirectBootstrapKeyGeneration(
+    const GLRProductionAdapter::Context& context,
+    const GLRProductionAdapter::NativeGL128DirectBootstrapKeyPlan& plan,
+    const GLRProductionAdapter::
+        NativeGL128DirectBootstrapKeyGenerationResult& generation) {
+    std::vector<std::pair<GlrKskId, std::uint32_t>> expected;
+    expected.reserve(plan.requirements.size());
+    for (const auto& requirement : plan.requirements) {
+        expected.emplace_back(requirement.id, requirement.key_level);
+    }
+    RequireCompactGeneration(context, generation.key_generation, expected);
+    const auto& lineage = generation.lineage;
+    const auto& manifest = generation.key_generation.manifest;
+    const std::string fingerprint =
+        glscheme::rns::glr_parameter_fingerprint(context.params);
+    const std::string support =
+        glscheme::rns::glr_gl128_validate_context(context).support_commitment;
+    if (lineage.schema !=
+            "glscheme.gl128_direct_bootstrap_key_lineage_binding.v1" ||
+        lineage.parameter_fingerprint != fingerprint ||
+        lineage.support_commitment != support ||
+        lineage.owner_key_seed_commitment !=
+            manifest.key_seed_commitment ||
+        !IsCanonicalSha256Root(
+            lineage.primary_secret_lineage_commitment) ||
+        !IsCanonicalSha256Root(
+            lineage.sparse_secret_lineage_commitment) ||
+        lineage.primary_secret_lineage_commitment ==
+            lineage.sparse_secret_lineage_commitment ||
+        manifest.schema != "glscheme.rns_hybrid_ksk_manifest.v2" ||
+        manifest.primary_secret_lineage_commitment !=
+            lineage.primary_secret_lineage_commitment ||
+        manifest.sparse_secret_lineage_commitment !=
+            lineage.sparse_secret_lineage_commitment ||
+        lineage.ksk_manifest_commitment !=
+            glscheme::rns::glr_ksk_manifest_commitment(
+                manifest) ||
+        lineage.ksk_public_material_commitment !=
+            generation.key_generation.public_material_commitment ||
+        lineage.evaluation_key_records != plan.requirements.size() ||
+        !lineage.exact_five_key_plan ||
+        !lineage.generated_from_bound_primary_secret ||
+        !lineage.generated_from_bound_sparse_secret ||
+        !lineage.public_material_roots_bound ||
+        lineage.binding_commitment !=
+            glscheme::rns::
+                glr_gl128_direct_bootstrap_key_lineage_commitment(lineage)) {
+        throw GlrError(
+            "GLRProductionAdapter: direct-bootstrap compact keys do not "
+            "carry an authentic secret-derived lineage binding");
+    }
+}
+
+const GLRProductionAdapter::NativeKeyProvider& RequireDirectBootstrapKeys(
+    const GLRProductionAdapter::Context& context,
+    const GLRProductionAdapter::CompactDirectBootstrapKeys& keys,
+    const GLRProductionAdapter::
+        NativeDirectVectorProductionAuthorizationEvidence& authorization) {
+    const auto plan =
+        glscheme::rns::glr_gl128_direct_bootstrap_key_plan(context);
+    RequireDirectBootstrapKeyGeneration(
+        context, plan, keys.GetGenerationResult());
+    const auto& lineage = keys.GetLineage();
+    const auto& provider = keys.GetNativeProvider();
+    if (lineage.parameter_fingerprint != authorization.parameter_fingerprint ||
+        lineage.support_commitment != authorization.support_commitment ||
+        lineage.owner_key_seed_commitment !=
+            authorization.owner_key_seed_commitment ||
+        lineage.primary_secret_lineage_commitment !=
+            authorization.primary_secret_lineage_commitment ||
+        lineage.sparse_secret_lineage_commitment !=
+            authorization.sparse_secret_lineage_commitment ||
+        provider.secret_material_accessed() ||
+        provider.parameter_fingerprint() != lineage.parameter_fingerprint ||
+        provider.sparse_support_commitment() != lineage.support_commitment ||
+        glscheme::rns::glr_ksk_manifest_commitment(provider.manifest()) !=
+            lineage.ksk_manifest_commitment ||
+        provider.public_material_commitment() !=
+            lineage.ksk_public_material_commitment) {
+        throw GlrError(
+            "GLRProductionAdapter: compact direct-bootstrap provider, "
+            "secret-derived lineage, and selector authorization disagree");
     }
     return provider;
 }
@@ -1950,6 +2156,78 @@ std::uint64_t GLRProductionAdapter::EvaluationKeys::ResidentBytes() const noexce
     return m_plan.residentBytes;
 }
 
+GLRProductionAdapter::CompactEvaluationKeys::CompactEvaluationKeys(
+    NativeCompactKskSetGenerationResult generation,
+    std::unique_ptr<NativeKeyProvider> provider)
+    : m_generation(std::move(generation)),
+      m_provider(std::move(provider)) {
+    if (!m_provider) {
+        throw GlrError(
+            "GLRProductionAdapter: null compact evaluation-key provider");
+    }
+}
+
+const GLRProductionAdapter::NativeCompactKskSetGenerationResult&
+GLRProductionAdapter::CompactEvaluationKeys::GetGenerationResult()
+    const noexcept {
+    return m_generation;
+}
+
+const GLRProductionAdapter::NativeKeyProvider&
+GLRProductionAdapter::CompactEvaluationKeys::GetNativeProvider() const {
+    if (!m_provider) {
+        throw GlrError(
+            "GLRProductionAdapter: moved-from compact evaluation-key "
+            "provider");
+    }
+    return *m_provider;
+}
+
+bool GLRProductionAdapter::CompactEvaluationKeys::HasKey(
+    const KeyId& id) const noexcept {
+    return m_provider != nullptr && m_provider->has_key(id);
+}
+
+GLRProductionAdapter::CompactDirectBootstrapKeys::
+    CompactDirectBootstrapKeys(
+        NativeGL128DirectBootstrapKeyGenerationResult generation,
+        std::unique_ptr<NativeKeyProvider> provider)
+    : m_generation(std::move(generation)),
+      m_provider(std::move(provider)) {
+    if (!m_provider) {
+        throw GlrError(
+            "GLRProductionAdapter: null compact direct-bootstrap provider");
+    }
+}
+
+const GLRProductionAdapter::
+    NativeGL128DirectBootstrapKeyGenerationResult&
+GLRProductionAdapter::CompactDirectBootstrapKeys::GetGenerationResult()
+    const noexcept {
+    return m_generation;
+}
+
+const GLRProductionAdapter::NativeGL128DirectBootstrapKeyLineageBinding&
+GLRProductionAdapter::CompactDirectBootstrapKeys::GetLineage()
+    const noexcept {
+    return m_generation.lineage;
+}
+
+const GLRProductionAdapter::NativeKeyProvider&
+GLRProductionAdapter::CompactDirectBootstrapKeys::GetNativeProvider() const {
+    if (!m_provider) {
+        throw GlrError(
+            "GLRProductionAdapter: moved-from compact direct-bootstrap "
+            "provider");
+    }
+    return *m_provider;
+}
+
+bool GLRProductionAdapter::CompactDirectBootstrapKeys::HasKey(
+    const KeyId& id) const noexcept {
+    return m_provider != nullptr && m_provider->has_key(id);
+}
+
 GLRProductionAdapter::Profile GLRProductionAdapter::CanonicalProfile() {
     Profile profile = glscheme::production::gl128_257_n32();
     glscheme::production::validate(profile);
@@ -1960,17 +2238,19 @@ GLRProductionAdapter::Profile GLRProductionAdapter::CanonicalProfile() {
 
 GLRProductionAdapter GLRProductionAdapter::Create() {
     const Profile profile = CanonicalProfile();
-    glscheme::rns::GlrParams params =
-        glscheme::rns::glr_params_gl128_257_n32();
-    if (params.name != profile.parameter_source || params.n != profile.n ||
-        params.p != profile.p || params.phi != profile.phi ||
-        glscheme::rns::glr_parameter_fingerprint(params) !=
+    Context context = glscheme::rns::glr_gl128_make_context();
+    const auto receipt = glscheme::rns::glr_gl128_validate_context(context);
+    if (context.params.name != profile.parameter_source ||
+        receipt.profile_name != profile.parameter_source ||
+        receipt.matrix_order != profile.n ||
+        context.params.p != profile.p ||
+        receipt.matrix_count != profile.phi ||
+        receipt.parameter_fingerprint !=
             profile.binding_fingerprint) {
         throw GlrError(
             "GLRProductionAdapter: canonical profile/context binding mismatch");
     }
-    return GLRProductionAdapter(
-        glscheme::rns::GlrContext::create(std::move(params)));
+    return GLRProductionAdapter(std::move(context));
 }
 
 GLRProductionAdapter::GLRProductionAdapter(Context context)
@@ -1978,6 +2258,226 @@ GLRProductionAdapter::GLRProductionAdapter(Context context)
 
 const GLRProductionAdapter::Context& GLRProductionAdapter::GetContext() const noexcept {
     return m_context;
+}
+
+GLRProductionAdapter::NativeGL128ProfileReceipt
+GLRProductionAdapter::GetCanonicalProfileReceipt() const {
+    return glscheme::rns::glr_gl128_validate_context(m_context);
+}
+
+GLRProductionAdapter::NativeGL128SchemeKeyPlan
+GLRProductionAdapter::PlanCanonicalSchemeKeys(
+    const NativeGL128SchemeWorkload& workload) const {
+    auto plan = glscheme::rns::glr_gl128_scheme_key_plan(m_context, workload);
+    RequireCanonicalSchemeKeyPlan(m_context, plan);
+    return plan;
+}
+
+GLRProductionAdapter::NativeGL128DirectBootstrapKeyPlan
+GLRProductionAdapter::PlanCanonicalDirectBootstrapKeys() const {
+    return glscheme::rns::glr_gl128_direct_bootstrap_key_plan(m_context);
+}
+
+GLRProductionAdapter::NativeValidatedDftPlaintextProviderSession
+GLRProductionAdapter::OpenDftPlaintextSession(
+    const NativeRefreshDftPlaintextProvider& provider,
+    const NativeRefreshDftPlaintextBinding& binding) const {
+    return glscheme::rns::glr_open_dft_plaintext_provider_session(
+        m_context, provider, binding);
+}
+
+GLRProductionAdapter::NativeCompactKskSetGenerationResult
+GLRProductionAdapter::GenerateCompactSchemeKeys(
+    const SecretKey& primaryKey, const NativeGL128SchemeKeyPlan& plan,
+    std::string ownerKeySeedCommitment,
+    const NativeCompactKskSetSink& sink, std::uint64_t seed) const {
+    RequireCanonicalSchemeKeyPlan(m_context, plan);
+    RequireProductionSecretKey(m_context, primaryKey);
+    GlrRngOwner rng = MakeRng(seed);
+    auto generation = glscheme::rns::glr_gl128_generate_compact_scheme_keys(
+        m_context, plan, primaryKey, ownerKeySeedCommitment, *rng, sink);
+    std::vector<std::pair<GlrKskId, std::uint32_t>> expected;
+    expected.reserve(plan.ids.size());
+    for (const auto& id : plan.ids) {
+        expected.emplace_back(id, plan.key_level);
+    }
+    RequireCompactGeneration(m_context, generation, expected);
+    const std::string primaryLineage =
+        glscheme::rns::glr_ship_direct_primary_secret_lineage_commitment(
+            m_context, primaryKey);
+    if (generation.manifest.schema !=
+            "glscheme.rns_hybrid_ksk_manifest.v2" ||
+        generation.manifest.primary_secret_lineage_commitment !=
+            primaryLineage ||
+        !generation.manifest.sparse_secret_lineage_commitment.empty()) {
+        throw GlrError(
+            "GLRProductionAdapter: compact scheme keys lost their concrete "
+            "primary-secret lineage");
+    }
+    return generation;
+}
+
+GLRProductionAdapter::NativeGL128DirectBootstrapKeyGenerationResult
+GLRProductionAdapter::GenerateCompactDirectBootstrapKeys(
+    const SecretKey& primaryKey,
+    const glscheme::rns::GlrSparseSecretKey& sparseKey,
+    const NativeGL128DirectBootstrapKeyPlan& plan,
+    std::string ownerKeySeedCommitment,
+    const NativeCompactKskSetSink& sink, std::uint64_t seed) const {
+    const auto expectedPlan =
+        glscheme::rns::glr_gl128_direct_bootstrap_key_plan(m_context);
+    if (!DirectBootstrapKeyPlanEquals(plan, expectedPlan)) {
+        throw GlrError(
+            "GLRProductionAdapter: direct-bootstrap key plan is not the "
+            "canonical five-key h40 L4/L6/L18/L24 plan");
+    }
+    RequireProductionSecretKey(m_context, primaryKey);
+    GlrRngOwner rng = MakeRng(seed);
+    auto generation =
+        glscheme::rns::glr_gl128_generate_compact_direct_bootstrap_keys(
+            m_context, plan, primaryKey, sparseKey,
+            ownerKeySeedCommitment, *rng, sink);
+    RequireDirectBootstrapKeyGeneration(m_context, plan, generation);
+    return generation;
+}
+
+GLRProductionAdapter::CompactEvaluationKeys
+GLRProductionAdapter::OpenCompactSchemeKeys(
+    const NativeGL128SchemeKeyPlan& plan,
+    NativeCompactKskSetGenerationResult generation,
+    NativeCompactKskBlobLeaseCallbacks callbacks) const {
+    RequireCanonicalSchemeKeyPlan(m_context, plan);
+    std::vector<std::pair<GlrKskId, std::uint32_t>> expected;
+    expected.reserve(plan.ids.size());
+    for (const auto& id : plan.ids) {
+        expected.emplace_back(id, plan.key_level);
+    }
+    RequireCompactGeneration(m_context, generation, expected);
+    if (generation.manifest.schema !=
+            "glscheme.rns_hybrid_ksk_manifest.v2" ||
+        !IsCanonicalSha256Root(
+            generation.manifest.primary_secret_lineage_commitment) ||
+        !generation.manifest.sparse_secret_lineage_commitment.empty()) {
+        throw GlrError(
+            "GLRProductionAdapter: compact scheme-key opening requires one "
+            "concrete primary-secret lineage");
+    }
+    auto provider =
+        glscheme::rns::glr_make_authenticated_leased_compact_ksk_provider(
+            m_context, generation.manifest, generation.binding,
+            std::move(callbacks));
+    if (!provider || provider->secret_material_accessed()) {
+        throw GlrError(
+            "GLRProductionAdapter: compact scheme-key provider failed its "
+            "secret-free opening");
+    }
+    return CompactEvaluationKeys(std::move(generation),
+                                 std::move(provider));
+}
+
+GLRProductionAdapter::CompactDirectBootstrapKeys
+GLRProductionAdapter::OpenCompactDirectBootstrapKeys(
+    const NativeGL128DirectBootstrapKeyPlan& plan,
+    NativeGL128DirectBootstrapKeyGenerationResult generation,
+    NativeCompactKskBlobLeaseCallbacks callbacks) const {
+    const auto expectedPlan =
+        glscheme::rns::glr_gl128_direct_bootstrap_key_plan(m_context);
+    if (!DirectBootstrapKeyPlanEquals(plan, expectedPlan)) {
+        throw GlrError(
+            "GLRProductionAdapter: direct-bootstrap key plan is not the "
+            "canonical five-key h40 L4/L6/L18/L24 plan");
+    }
+    RequireDirectBootstrapKeyGeneration(m_context, plan, generation);
+    auto provider =
+        glscheme::rns::glr_make_authenticated_leased_compact_ksk_provider(
+            m_context, generation.key_generation.manifest,
+            generation.key_generation.binding,
+            std::move(callbacks));
+    if (!provider || provider->secret_material_accessed()) {
+        throw GlrError(
+            "GLRProductionAdapter: compact direct-bootstrap provider failed "
+            "its secret-free opening");
+    }
+    return CompactDirectBootstrapKeys(std::move(generation),
+                                      std::move(provider));
+}
+
+GLRProductionAdapter::NativeGL128DirectBootstrapAuthorizationBundle
+GLRProductionAdapter::AuthorizeDirectBootstrap(
+    const SecretKey& primaryKey,
+    const glscheme::rns::GlrSparseSecretKey& sparseKey,
+    std::string ownerKeySeedCommitment,
+    const SecurityReport& sparseH40SecurityReport,
+    const NativeDirectVectorDensePrimarySecurityEvidence&
+        densePrimarySecurity) const {
+    RequireProductionSecretKey(m_context, primaryKey);
+    return glscheme::rns::glr_gl128_authorize_direct_bootstrap(
+        m_context, primaryKey, sparseKey, ownerKeySeedCommitment,
+        sparseH40SecurityReport, densePrimarySecurity);
+}
+
+GLRProductionAdapter::NativeGL128PersistedSelectorBankResult
+GLRProductionAdapter::GeneratePersistedDirectSelectorBank(
+    const SecretKey& primaryKey,
+    const glscheme::rns::GlrSparseSecretKey& sparseKey,
+    const NativeGL128DirectBootstrapAuthorizationBundle& authorization,
+    const NativeDirectVectorProductionSelectorGenerationSeed& generationSeed,
+    const NativeGL128SelectorPersistenceSink& sink,
+    const NativeDirectVectorProductionSelectorManifestCheckpoint*
+        resumeCheckpoint) const {
+    RequireProductionSecretKey(m_context, primaryKey);
+    return glscheme::rns::glr_gl128_generate_persisted_selector_bank(
+        m_context, primaryKey, sparseKey, authorization, generationSeed, sink,
+        resumeCheckpoint);
+}
+
+GLRProductionAdapter::
+    NativeDirectVectorProductionSelectorProviderOpeningResult
+GLRProductionAdapter::OpenPersistedDirectSelectorBank(
+    const NativeGL128DirectBootstrapAuthorizationBundle& authorization,
+    const NativeGL128PersistedSelectorBankResult& persisted,
+    const CompactDirectBootstrapKeys& evaluationKeys,
+    NativeDirectVectorProductionSelectorBlobLeaseCallbacks callbacks) const {
+    const auto& provider = RequireDirectBootstrapKeys(
+        m_context, evaluationKeys, authorization.authorization);
+    return glscheme::rns::glr_gl128_open_persisted_selector_provider(
+        m_context, authorization, persisted, evaluationKeys.GetLineage(),
+        provider,
+        std::move(callbacks));
+}
+
+GLRProductionAdapter::NativeGL128DirectInputPreparationResult
+GLRProductionAdapter::PrepareDirectShipInput(
+    const Ciphertext& canonicalCiphertext,
+    const NativeGL128DirectBootstrapAuthorizationBundle& authorization,
+    const NativeValidatedDftPlaintextProviderSession& dftSession,
+    const CompactDirectBootstrapKeys& evaluationKeys,
+    const NativeCtsStcConfig& config,
+    double normalizationRelativeTolerance) const {
+    const auto& provider = RequireDirectBootstrapKeys(
+        m_context, evaluationKeys, authorization.authorization);
+    return glscheme::rns::glr_gl128_prepare_direct_ship_input(
+        m_context, canonicalCiphertext, authorization,
+        evaluationKeys.GetLineage(), dftSession, provider, config,
+        normalizationRelativeTolerance);
+}
+
+GLRProductionAdapter::NativeGL128BootstrapResult
+GLRProductionAdapter::BootstrapDirect(
+    const Ciphertext& canonicalCiphertext,
+    const NativeGL128DirectBootstrapAuthorizationBundle& authorization,
+    const NativeDirectVectorProductionSelectorProviderOpeningResult&
+        selectorOpening,
+    const NativeValidatedDftPlaintextProviderSession& dftSession,
+    const CompactDirectBootstrapKeys& evaluationKeys,
+    const NativeCtsStcConfig& config,
+    double normalizationRelativeTolerance) const {
+    const auto& provider = RequireDirectBootstrapKeys(
+        m_context, evaluationKeys, authorization.authorization);
+    return glscheme::rns::glr_gl128_bootstrap(
+        m_context, canonicalCiphertext, authorization, selectorOpening,
+        dftSession, provider, evaluationKeys.GetLineage(), config,
+        normalizationRelativeTolerance);
 }
 
 GLRProductionAdapter::OrdinaryRefreshPackFacade
@@ -2063,6 +2563,160 @@ void GLRProductionAdapter::ValidateDirectVectorPrimarySelectorRecordPreflight(
             "GLRProductionAdapter: random-access selector record preflight "
             "is forged or overstates record/material/value generation");
     }
+}
+
+std::unique_ptr<
+    GLRProductionAdapter::NativeDirectVectorProductionSelectorGenerator>
+GLRProductionAdapter::CreateDirectVectorPrimarySelectorGenerator(
+    const SecretKey& primaryKey,
+    const glscheme::rns::GlrSparseSecretKey& sparseKey,
+    const DirectVectorPrimaryAuthorization& authorization,
+    const DirectVectorPrimarySelectorStorageAuthorization& storage,
+    const NativeDirectVectorProductionSelectorGenerationSeed& generationSeed)
+    const {
+    ValidateDirectVectorPrimarySelectorStorageAuthorization(storage,
+                                                             authorization);
+    RequireProductionSecretKey(m_context, primaryKey);
+    return glscheme::rns::
+        glr_make_ship_direct_vector_gl128_selector_generator(
+            m_context, primaryKey, sparseKey, authorization.native,
+            storage.native, generationSeed);
+}
+
+GLRProductionAdapter::
+    NativeDirectVectorProductionSelectorManifestCheckpoint
+GLRProductionAdapter::BeginDirectVectorPrimarySelectorManifest(
+    const DirectVectorPrimaryAuthorization& authorization,
+    const DirectVectorPrimarySelectorStorageAuthorization& storage) const {
+    ValidateDirectVectorPrimarySelectorStorageAuthorization(storage,
+                                                             authorization);
+    return glscheme::rns::
+        glr_begin_ship_direct_vector_gl128_selector_manifest_checkpoint(
+            authorization.native, storage.native);
+}
+
+GLRProductionAdapter::
+    NativeDirectVectorProductionSelectorManifestCheckpoint
+GLRProductionAdapter::AppendDirectVectorPrimarySelectorRecord(
+    const DirectVectorPrimaryAuthorization& authorization,
+    const DirectVectorPrimarySelectorStorageAuthorization& storage,
+    const NativeDirectVectorProductionSelectorManifestCheckpoint& checkpoint,
+    const NativeDirectVectorSelectorRecordGenerationResult& record) const {
+    ValidateDirectVectorPrimarySelectorStorageAuthorization(storage,
+                                                             authorization);
+    return glscheme::rns::
+        glr_append_ship_direct_vector_gl128_selector_manifest_record(
+            m_context, authorization.native, storage.native, checkpoint,
+            record);
+}
+
+GLRProductionAdapter::
+    NativeDirectVectorProductionSelectorManifestFinalizationResult
+GLRProductionAdapter::FinalizeDirectVectorPrimarySelectorManifests(
+    const DirectVectorPrimaryAuthorization& authorization,
+    const DirectVectorPrimarySelectorStorageAuthorization& storage,
+    const NativeDirectVectorProductionSelectorManifestCheckpoint& checkpoint)
+    const {
+    ValidateDirectVectorPrimarySelectorStorageAuthorization(storage,
+                                                             authorization);
+    return glscheme::rns::
+        glr_finalize_ship_direct_vector_gl128_selector_manifests(
+            m_context, authorization.native, storage.native, checkpoint);
+}
+
+GLRProductionAdapter::
+    NativeDirectVectorProductionSelectorProviderOpeningResult
+GLRProductionAdapter::OpenPersistedDirectVectorPrimarySelectorProvider(
+    const DirectVectorPrimaryAuthorization& authorization,
+    const DirectVectorPrimarySelectorStorageAuthorization& storage,
+    const NativeDirectVectorProductionSelectorManifestCheckpoint& checkpoint,
+    NativeDirectVectorProductionSelectorManifestFinalizationResult finalized,
+    const CompactDirectBootstrapKeys& evaluationKeys,
+    const NativeDirectVectorProductionSelectorBlobPersistenceEvidence&
+        persistence,
+    NativeDirectVectorProductionSelectorBlobLeaseCallbacks callbacks) const {
+    ValidateDirectVectorPrimarySelectorStorageAuthorization(storage,
+                                                             authorization);
+    const auto& provider = RequireDirectBootstrapKeys(
+        m_context, evaluationKeys, authorization.native);
+    return glscheme::rns::
+        glr_open_ship_direct_vector_gl128_persisted_selector_provider(
+            m_context, authorization.native, storage.native, checkpoint,
+            std::move(finalized), provider, persistence,
+            std::move(callbacks));
+}
+
+GLRProductionAdapter::DirectVectorProductionRowResult
+GLRProductionAdapter::ExecuteDirectVectorPrimaryRowProduction(
+    const NativeDirectVectorPublicSlice& input,
+    const DirectVectorPrimaryAuthorization& authorization,
+    const NativeDirectVectorProductionSelectorProviderOpeningResult&
+        selectorOpening,
+    const CompactDirectBootstrapKeys& evaluationKeys) const {
+    const auto& provider = RequireDirectBootstrapKeys(
+        m_context, evaluationKeys, authorization.native);
+    DirectVectorProductionRowResult out;
+    out.ciphertext = glscheme::rns::
+        glr_ship_direct_vector_half_bootstrap_gl128_production(
+            m_context, input, authorization.native, selectorOpening,
+            provider, &out.evidence);
+    if (!out.evidence.production_authorization_bound ||
+        !out.evidence.production_selector_provider_admitted ||
+        !out.evidence.selector_payload_persistence_attested ||
+        !out.evidence.ksk_owner_seed_lineage_bound ||
+        !out.evidence.value_execution || out.evidence.insecure_toy_only ||
+        !out.evidence.evaluator_secret_free) {
+        throw GlrError(
+            "GLRProductionAdapter: direct production row returned incomplete "
+            "authorization/provider/value evidence");
+    }
+    return out;
+}
+
+GLRProductionAdapter::DirectVectorProductionAllYResult
+GLRProductionAdapter::ExecuteDirectVectorAllYProduction(
+    const Ciphertext& q0SparseCoefficients,
+    const DirectVectorPrimaryAuthorization& authorization,
+    const NativeDirectVectorProductionSelectorProviderOpeningResult&
+        selectorOpening,
+    const CompactDirectBootstrapKeys& evaluationKeys,
+    const NativeValidatedDftPlaintextProviderSession& dftSession,
+    const NativeCtsStcConfig& config) const {
+    const auto& provider = RequireDirectBootstrapKeys(
+        m_context, evaluationKeys, authorization.native);
+    DirectVectorProductionAllYResult out;
+    out.native =
+        glscheme::rns::glr_ship_direct_all_y_stc_gl128_production(
+            m_context, q0SparseCoefficients, authorization.native,
+            selectorOpening, provider, dftSession, config,
+            &out.evidence);
+    if (out.native.representation !=
+            glscheme::rns::GlrShipDirectFullReturnRepresentation::
+                refreshed_xy_slot_ciphertext ||
+        out.evidence.y_rows != glscheme::rns::kGl128MatrixOrder ||
+        !out.evidence.q0_only_sparse_rp_input ||
+        !out.evidence.strict_y_order ||
+        !out.evidence.every_y_row_direct_vector_executed ||
+        !out.evidence.every_xw_coefficient_simultaneous ||
+        !out.evidence.randomized_primary_rows ||
+        !out.evidence.selector_provider_secret_free ||
+        !out.evidence.evaluation_key_provider_secret_free ||
+        out.evidence.insecure_toy_only ||
+        !out.evidence.production_authorization_bound ||
+        !out.evidence.production_selector_opening_bound ||
+        !out.evidence.every_y_row_non_toy_production_evidence ||
+        !out.evidence.authenticated_dft_session_bound ||
+        !out.evidence.four_key_provider_bound ||
+        !out.evidence.exact_gl128_all_y_slot_ledger ||
+        !out.evidence.exact_l18_to_l22_return_ledger ||
+        !out.evidence.evaluator_api_has_no_decrypt_callback ||
+        !out.evidence.ciphertext_value_execution_performed ||
+        out.evidence.decrypted_value_noise_acceptance_recorded) {
+        throw GlrError(
+            "GLRProductionAdapter: all-Y direct production returned "
+            "incomplete persisted-selector/StC execution evidence");
+    }
+    return out;
 }
 
 GLRProductionAdapter::DirectVectorH2Stride2SmokeReceipt
@@ -2342,7 +2996,8 @@ GLRProductionAdapter::PublicKey GLRProductionAdapter::PublicKeyGen(
     const SecretKey& secretKey, std::uint64_t seed) const {
     RequireProductionSecretKey(m_context, secretKey);
     GlrRngOwner rng = MakeRng(seed);
-    return glscheme::rns::glr_keygen_public(m_context, secretKey, *rng);
+    return glscheme::rns::glr_gl128_keygen_public(
+        m_context, secretKey, *rng);
 }
 
 std::uint64_t GLRProductionAdapter::PublicKeyResidentBytes() const {
@@ -2352,9 +3007,8 @@ std::uint64_t GLRProductionAdapter::PublicKeyResidentBytes() const {
 GLRProductionAdapter::Plaintext GLRProductionAdapter::Encode(
     const MatrixBatch& matrices, double scale, std::uint32_t level,
     bool slotDomain) const {
-    RequireCanonicalBatch(matrices);
-    Plaintext plaintext =
-        glscheme::rns::glr_encode(m_context, matrices, scale, level);
+    Plaintext plaintext = glscheme::rns::glr_gl128_encode(
+        m_context, matrices, scale, level);
     if (slotDomain) {
         glscheme::rns::glr_to_slots(m_context, plaintext.poly);
     }
@@ -2363,13 +3017,7 @@ GLRProductionAdapter::Plaintext GLRProductionAdapter::Encode(
 
 GLRProductionAdapter::MatrixBatch GLRProductionAdapter::Decode(
     const Plaintext& plaintext) const {
-    RequireProductionPlaintext(m_context, plaintext);
-    if (plaintext.poly.domain == GlrDomain::Coeff) {
-        return glscheme::rns::glr_decode(m_context, plaintext);
-    }
-    Plaintext coefficientPlaintext = plaintext;
-    glscheme::rns::glr_to_coeffs(m_context, coefficientPlaintext.poly);
-    return glscheme::rns::glr_decode(m_context, coefficientPlaintext);
+    return glscheme::rns::glr_gl128_decode(m_context, plaintext);
 }
 
 GLRProductionAdapter::Ciphertext GLRProductionAdapter::Encrypt(
@@ -2378,38 +3026,53 @@ GLRProductionAdapter::Ciphertext GLRProductionAdapter::Encrypt(
     RequireProductionSecretKey(m_context, secretKey);
     RequireProductionPlaintext(m_context, plaintext);
     GlrRngOwner rng = MakeRng(seed);
-    return glscheme::rns::glr_encrypt(m_context, secretKey, plaintext, *rng,
-                                      slotDomain);
+    if (slotDomain) {
+        return glscheme::rns::glr_gl128_encrypt_secret(
+            m_context, secretKey, plaintext, *rng);
+    }
+    Ciphertext result = glscheme::rns::glr_encrypt(
+        m_context, secretKey, plaintext, *rng, slotDomain);
+    result.key_lineage_commitment =
+        glscheme::rns::glr_ship_direct_primary_secret_lineage_commitment(
+            m_context, secretKey);
+    return result;
 }
 
 GLRProductionAdapter::Ciphertext GLRProductionAdapter::Encrypt(
     const PublicKey& publicKey, const Plaintext& plaintext, std::uint64_t seed,
     bool slotDomain) const {
     RequireProductionPlaintext(m_context, plaintext);
+    if (publicKey.parameter_fingerprint !=
+            glscheme::rns::glr_parameter_fingerprint(m_context.params) ||
+        publicKey.key_id != "primary" ||
+        !IsCanonicalSha256Root(publicKey.key_lineage_commitment)) {
+        throw GlrError(
+            "GLRProductionAdapter: public encryption requires a "
+            "profile-generated concrete primary-lineage public key");
+    }
     GlrRngOwner rng = MakeRng(seed);
+    if (slotDomain) {
+        return glscheme::rns::glr_gl128_encrypt_public(
+            m_context, publicKey, plaintext, *rng);
+    }
     return glscheme::rns::glr_encrypt_public(
         m_context, publicKey, plaintext, *rng, slotDomain);
 }
 
 GLRProductionAdapter::Plaintext GLRProductionAdapter::Decrypt(
     const SecretKey& secretKey, const Ciphertext& ciphertext) const {
-    RequireProductionSecretKey(m_context, secretKey);
-    RequireProductionCiphertext(m_context, ciphertext);
-    return glscheme::rns::glr_decrypt(m_context, secretKey, ciphertext);
+    return glscheme::rns::glr_gl128_decrypt(
+        m_context, secretKey, ciphertext);
 }
 
 GLRProductionAdapter::Ciphertext GLRProductionAdapter::Add(
     const Ciphertext& lhs, const Ciphertext& rhs) const {
-    RequireProductionCiphertext(m_context, lhs);
-    RequireProductionCiphertext(m_context, rhs);
-    return glscheme::rns::glr_ct_add(m_context, lhs, rhs);
+    return glscheme::rns::glr_gl128_add(m_context, lhs, rhs).ciphertext;
 }
 
 GLRProductionAdapter::Ciphertext GLRProductionAdapter::Sub(
     const Ciphertext& lhs, const Ciphertext& rhs) const {
-    RequireProductionCiphertext(m_context, lhs);
-    RequireProductionCiphertext(m_context, rhs);
-    return glscheme::rns::glr_ct_sub(m_context, lhs, rhs);
+    return glscheme::rns::glr_gl128_subtract(m_context, lhs, rhs).ciphertext;
 }
 
 GLRProductionAdapter::Ciphertext GLRProductionAdapter::Negate(
@@ -2440,38 +3103,20 @@ GLRProductionAdapter::Ciphertext GLRProductionAdapter::Rescale(
 
 GLRProductionAdapter::Ciphertext GLRProductionAdapter::MatMul(
     const Ciphertext& ciphertext, const Plaintext& plaintext) const {
-    RequireSlotCiphertext(m_context, ciphertext, "plaintext MatMul");
-    RequireProductionPlaintext(m_context, plaintext);
-    if (plaintext.level != ciphertext.level) {
-        throw GlrError(
-            "GLRProductionAdapter: plaintext MatMul level mismatch");
-    }
-    if (plaintext.poly.domain == GlrDomain::Slot) {
-        return glscheme::rns::glr_matmul_pt_ct(m_context, ciphertext,
-                                                plaintext);
-    }
-    Plaintext slotPlaintext = plaintext;
-    glscheme::rns::glr_to_slots(m_context, slotPlaintext.poly);
-    return glscheme::rns::glr_matmul_pt_ct(m_context, ciphertext,
-                                            slotPlaintext);
+    NativeGL128PlainProductOptions options;
+    options.rescale = false;
+    return glscheme::rns::glr_gl128_matrix_multiply_plain(
+               m_context, ciphertext, plaintext, options)
+        .ciphertext;
 }
 
 GLRProductionAdapter::Ciphertext GLRProductionAdapter::Hadamard(
     const Ciphertext& ciphertext, const Plaintext& plaintext) const {
-    RequireSlotCiphertext(m_context, ciphertext, "plaintext Hadamard");
-    RequireProductionPlaintext(m_context, plaintext);
-    if (plaintext.level != ciphertext.level) {
-        throw GlrError(
-            "GLRProductionAdapter: plaintext Hadamard level mismatch");
-    }
-    if (plaintext.poly.domain == GlrDomain::Slot) {
-        return glscheme::rns::glr_hadamard_pt_ct(m_context, ciphertext,
-                                                  plaintext);
-    }
-    Plaintext slotPlaintext = plaintext;
-    glscheme::rns::glr_to_slots(m_context, slotPlaintext.poly);
-    return glscheme::rns::glr_hadamard_pt_ct(m_context, ciphertext,
-                                              slotPlaintext);
+    NativeGL128PlainProductOptions options;
+    options.rescale = false;
+    return glscheme::rns::glr_gl128_hadamard_plain(
+               m_context, ciphertext, plaintext, options)
+        .ciphertext;
 }
 
 GLRProductionAdapter::EvaluationKeyPlan
@@ -2578,6 +3223,7 @@ GLRProductionAdapter::MaterializeEvaluationKeys(
     }
 
     KeyManifest manifest;
+    manifest.schema = "glscheme.rns_hybrid_ksk_manifest.v2";
     manifest.parameter_fingerprint = plan.parameterFingerprint;
     manifest.n = m_context.n();
     manifest.p = m_context.p_();
@@ -2598,6 +3244,10 @@ GLRProductionAdapter::MaterializeEvaluationKeys(
     }
     manifest.sparse_support_commitment =
         "not-applicable:openfhe-glr-ordinary-evaluation-keys:v1";
+    manifest.primary_secret_lineage_commitment =
+        glscheme::rns::glr_ship_direct_primary_secret_lineage_commitment(
+            m_context, primaryKey);
+    manifest.sparse_secret_lineage_commitment.clear();
     for (const auto& key : nativeKeys) {
         glscheme::rns::GlrKskRecord record;
         record.id = key.id;
@@ -2626,65 +3276,164 @@ GLRProductionAdapter::MaterializeEvaluationKeys(
 GLRProductionAdapter::Ciphertext GLRProductionAdapter::RotateRows(
     const Ciphertext& ciphertext, std::int32_t amount,
     const EvaluationKeys& keys) const {
-    RequireSlotCiphertext(m_context, ciphertext, "row rotation");
     const auto& provider = RequireEvaluationKeys(m_context, keys);
-    return glscheme::rns::glr_rotate_rows_ct(m_context, ciphertext, amount,
-                                             provider);
+    return glscheme::rns::glr_gl128_rotate_rows(
+               m_context, ciphertext, amount, provider)
+        .ciphertext;
 }
 
 GLRProductionAdapter::Ciphertext GLRProductionAdapter::RotateColumns(
     const Ciphertext& ciphertext, std::int32_t amount) const {
-    RequireSlotCiphertext(m_context, ciphertext, "column rotation");
-    return glscheme::rns::glr_rotate_cols_ct(m_context, ciphertext, amount);
+    return glscheme::rns::glr_gl128_rotate_columns(
+               m_context, ciphertext, amount)
+        .ciphertext;
 }
 
 GLRProductionAdapter::Ciphertext GLRProductionAdapter::RotateMatrices(
     const Ciphertext& ciphertext, std::int32_t amount,
     const EvaluationKeys& keys) const {
-    RequireSlotCiphertext(m_context, ciphertext, "matrix rotation");
     const auto& provider = RequireEvaluationKeys(m_context, keys);
-    return glscheme::rns::glr_rotate_matrices_ct(m_context, ciphertext, amount,
-                                                 provider);
+    return glscheme::rns::glr_gl128_rotate_matrices(
+               m_context, ciphertext, amount, provider)
+        .ciphertext;
 }
 
 GLRProductionAdapter::Ciphertext GLRProductionAdapter::Transpose(
     const Ciphertext& ciphertext, const EvaluationKeys& keys) const {
-    RequireSlotCiphertext(m_context, ciphertext, "transpose");
     const auto& provider = RequireEvaluationKeys(m_context, keys);
-    return glscheme::rns::glr_transpose_ct(m_context, ciphertext, provider);
+    return glscheme::rns::glr_gl128_transpose(
+               m_context, ciphertext, provider)
+        .ciphertext;
 }
 
 GLRProductionAdapter::Ciphertext GLRProductionAdapter::Conjugate(
     const Ciphertext& ciphertext, const EvaluationKeys& keys) const {
-    RequireSlotCiphertext(m_context, ciphertext, "conjugation");
     const auto& provider = RequireEvaluationKeys(m_context, keys);
-    return glscheme::rns::glr_conjugate_ct(m_context, ciphertext, provider);
+    return glscheme::rns::glr_gl128_conjugate(
+               m_context, ciphertext, provider)
+        .ciphertext;
 }
 
 GLRProductionAdapter::Ciphertext GLRProductionAdapter::HermitianTranspose(
     const Ciphertext& ciphertext, const EvaluationKeys& keys) const {
-    RequireSlotCiphertext(m_context, ciphertext, "Hermitian transpose");
     const auto& provider = RequireEvaluationKeys(m_context, keys);
-    return glscheme::rns::glr_hermitian_transpose_ct(m_context, ciphertext,
-                                                     provider);
+    return glscheme::rns::glr_gl128_hermitian_transpose(
+               m_context, ciphertext, provider)
+        .ciphertext;
 }
 
 GLRProductionAdapter::Ciphertext GLRProductionAdapter::MatMul(
     const Ciphertext& lhs, const Ciphertext& rhs,
     const EvaluationKeys& keys) const {
-    RequireSlotCiphertext(m_context, lhs, "ciphertext MatMul");
-    RequireSlotCiphertext(m_context, rhs, "ciphertext MatMul");
     const auto& provider = RequireEvaluationKeys(m_context, keys);
-    return glscheme::rns::glr_matmul_ct_ct(m_context, lhs, rhs, provider);
+    return glscheme::rns::glr_gl128_matrix_multiply_cipher(
+               m_context, lhs, rhs, provider)
+        .ciphertext;
 }
 
 GLRProductionAdapter::Ciphertext GLRProductionAdapter::Hadamard(
     const Ciphertext& lhs, const Ciphertext& rhs,
     const EvaluationKeys& keys) const {
-    RequireSlotCiphertext(m_context, lhs, "ciphertext Hadamard");
-    RequireSlotCiphertext(m_context, rhs, "ciphertext Hadamard");
     const auto& provider = RequireEvaluationKeys(m_context, keys);
-    return glscheme::rns::glr_hadamard_ct_ct(m_context, lhs, rhs, provider);
+    return glscheme::rns::glr_gl128_hadamard_cipher(
+               m_context, lhs, rhs, provider)
+        .ciphertext;
+}
+
+GLRProductionAdapter::NativeGL128EvaluationResult
+GLRProductionAdapter::EvaluateAdd(const Ciphertext& lhs,
+                                  const Ciphertext& rhs) const {
+    return glscheme::rns::glr_gl128_add(m_context, lhs, rhs);
+}
+
+GLRProductionAdapter::NativeGL128EvaluationResult
+GLRProductionAdapter::EvaluateSub(const Ciphertext& lhs,
+                                  const Ciphertext& rhs) const {
+    return glscheme::rns::glr_gl128_subtract(m_context, lhs, rhs);
+}
+
+GLRProductionAdapter::NativeGL128EvaluationResult
+GLRProductionAdapter::EvaluateMatMul(
+    const Ciphertext& lhs, const Plaintext& rhs,
+    const NativeGL128PlainProductOptions& options) const {
+    return glscheme::rns::glr_gl128_matrix_multiply_plain(
+        m_context, lhs, rhs, options);
+}
+
+GLRProductionAdapter::NativeGL128EvaluationResult
+GLRProductionAdapter::EvaluateMatMul(
+    const Ciphertext& lhs, const Ciphertext& rhs,
+    const NativeKeyProvider& keys) const {
+    if (keys.secret_material_accessed()) {
+        throw GlrError(
+            "GLRProductionAdapter: ct-ct matrix multiplication provider "
+            "reports secret-material access");
+    }
+    return glscheme::rns::glr_gl128_matrix_multiply_cipher(
+        m_context, lhs, rhs, keys);
+}
+
+GLRProductionAdapter::NativeGL128EvaluationResult
+GLRProductionAdapter::EvaluateHadamard(
+    const Ciphertext& lhs, const Plaintext& rhs,
+    const NativeGL128PlainProductOptions& options) const {
+    return glscheme::rns::glr_gl128_hadamard_plain(
+        m_context, lhs, rhs, options);
+}
+
+GLRProductionAdapter::NativeGL128EvaluationResult
+GLRProductionAdapter::EvaluateHadamard(
+    const Ciphertext& lhs, const Ciphertext& rhs,
+    const NativeKeyProvider& keys) const {
+    if (keys.secret_material_accessed()) {
+        throw GlrError(
+            "GLRProductionAdapter: ct-ct Hadamard provider reports "
+            "secret-material access");
+    }
+    return glscheme::rns::glr_gl128_hadamard_cipher(
+        m_context, lhs, rhs, keys);
+}
+
+GLRProductionAdapter::NativeGL128EvaluationResult
+GLRProductionAdapter::EvaluateRotateRows(
+    const Ciphertext& ciphertext, std::int32_t amount,
+    const NativeKeyProvider& keys) const {
+    return glscheme::rns::glr_gl128_rotate_rows(
+        m_context, ciphertext, amount, keys);
+}
+
+GLRProductionAdapter::NativeGL128EvaluationResult
+GLRProductionAdapter::EvaluateRotateColumns(
+    const Ciphertext& ciphertext, std::int32_t amount) const {
+    return glscheme::rns::glr_gl128_rotate_columns(
+        m_context, ciphertext, amount);
+}
+
+GLRProductionAdapter::NativeGL128EvaluationResult
+GLRProductionAdapter::EvaluateRotateMatrices(
+    const Ciphertext& ciphertext, std::int32_t amount,
+    const NativeKeyProvider& keys) const {
+    return glscheme::rns::glr_gl128_rotate_matrices(
+        m_context, ciphertext, amount, keys);
+}
+
+GLRProductionAdapter::NativeGL128EvaluationResult
+GLRProductionAdapter::EvaluateTranspose(
+    const Ciphertext& ciphertext, const NativeKeyProvider& keys) const {
+    return glscheme::rns::glr_gl128_transpose(m_context, ciphertext, keys);
+}
+
+GLRProductionAdapter::NativeGL128EvaluationResult
+GLRProductionAdapter::EvaluateConjugate(
+    const Ciphertext& ciphertext, const NativeKeyProvider& keys) const {
+    return glscheme::rns::glr_gl128_conjugate(m_context, ciphertext, keys);
+}
+
+GLRProductionAdapter::NativeGL128EvaluationResult
+GLRProductionAdapter::EvaluateHermitianTranspose(
+    const Ciphertext& ciphertext, const NativeKeyProvider& keys) const {
+    return glscheme::rns::glr_gl128_hermitian_transpose(
+        m_context, ciphertext, keys);
 }
 
 }  // namespace lbcrypto

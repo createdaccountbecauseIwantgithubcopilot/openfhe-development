@@ -320,9 +320,157 @@ int main() {
         const Adapter::NativeDirectVectorEvidence&;
     using DirectSmokeReceiptRef =
         const Adapter::DirectVectorH2Stride2SmokeReceipt&;
+    using NativeKeyProviderRef = const Adapter::NativeKeyProvider&;
+    using NativeSchemeWorkloadRef =
+        const Adapter::NativeGL128SchemeWorkload&;
+    using NativePlainProductOptionsRef =
+        const Adapter::NativeGL128PlainProductOptions&;
+    using SparseKeyRef = const glscheme::rns::GlrSparseSecretKey&;
+    using SecretKeyRef = const Adapter::SecretKey&;
+    using SelectorGenerationSeedRef = const Adapter::
+        NativeDirectVectorProductionSelectorGenerationSeed&;
+    using SelectorCheckpointRef = const Adapter::
+        NativeDirectVectorProductionSelectorManifestCheckpoint&;
+    using SelectorRecordRef = const Adapter::
+        NativeDirectVectorSelectorRecordGenerationResult&;
+    using SelectorOpeningRef = const Adapter::
+        NativeDirectVectorProductionSelectorProviderOpeningResult&;
+    using DftSessionRef = const Adapter::
+        NativeValidatedDftPlaintextProviderSession&;
+    using BootstrapAuthorizationRef = const Adapter::
+        NativeGL128DirectBootstrapAuthorizationBundle&;
+    using PersistedSelectorBankRef = const Adapter::
+        NativeGL128PersistedSelectorBankResult&;
+    using CtsStcConfigRef = const Adapter::NativeCtsStcConfig&;
+    using DftProviderRef = const Adapter::NativeRefreshDftPlaintextProvider&;
+    using DftBindingRef = const Adapter::NativeRefreshDftPlaintextBinding&;
+    using DirectBootstrapKeysRef =
+        const Adapter::CompactDirectBootstrapKeys&;
+    using DirectBootstrapPlanRef =
+        const Adapter::NativeGL128DirectBootstrapKeyPlan&;
+    using CompactKskSinkRef = const Adapter::NativeCompactKskSetSink&;
+    static_assert(std::is_same_v<
+                  Adapter::NativeGL128ProfileReceipt,
+                  glscheme::rns::Gl128ProfileReceipt>);
+    static_assert(std::is_same_v<
+                  Adapter::NativeGL128EvaluationResult,
+                  glscheme::rns::Gl128EvaluationResult>);
+    static_assert(glscheme::rns::kGl128BootstrapDftScale == 0x1p46);
+    static_assert(!std::is_copy_constructible_v<
+                  Adapter::CompactEvaluationKeys>);
+    static_assert(!std::is_copy_constructible_v<
+                  Adapter::CompactDirectBootstrapKeys>);
+    static_assert(std::is_same_v<
+                  decltype(std::declval<AdapterRef>()
+                               .GetCanonicalProfileReceipt()),
+                  Adapter::NativeGL128ProfileReceipt>);
+    static_assert(std::is_same_v<
+                  decltype(std::declval<AdapterRef>()
+                               .PlanCanonicalSchemeKeys(
+                                   std::declval<NativeSchemeWorkloadRef>())),
+                  Adapter::NativeGL128SchemeKeyPlan>);
+    static_assert(std::is_same_v<
+                  decltype(std::declval<AdapterRef>()
+                               .PlanCanonicalDirectBootstrapKeys()),
+                  Adapter::NativeGL128DirectBootstrapKeyPlan>);
+    static_assert(std::is_same_v<
+                  decltype(std::declval<AdapterRef>()
+                               .GenerateCompactDirectBootstrapKeys(
+                                   std::declval<SecretKeyRef>(),
+                                   std::declval<SparseKeyRef>(),
+                                   std::declval<DirectBootstrapPlanRef>(),
+                                   std::declval<std::string>(),
+                                   std::declval<CompactKskSinkRef>(), 1)),
+                  Adapter::
+                      NativeGL128DirectBootstrapKeyGenerationResult>);
+    static_assert(std::is_same_v<
+                  decltype(std::declval<AdapterRef>()
+                               .OpenDftPlaintextSession(
+                                   std::declval<DftProviderRef>(),
+                                   std::declval<DftBindingRef>())),
+                  Adapter::NativeValidatedDftPlaintextProviderSession>);
+    static_assert(std::is_same_v<
+                  decltype(std::declval<AdapterRef>().EvaluateAdd(
+                      std::declval<CiphertextRef>(),
+                      std::declval<CiphertextRef>())),
+                  Adapter::NativeGL128EvaluationResult>);
+    static_assert(std::is_same_v<
+                  decltype(std::declval<AdapterRef>().EvaluateMatMul(
+                      std::declval<CiphertextRef>(),
+                      std::declval<PlaintextRef>(),
+                      std::declval<NativePlainProductOptionsRef>())),
+                  Adapter::NativeGL128EvaluationResult>);
+    static_assert(std::is_same_v<
+                  decltype(std::declval<AdapterRef>().EvaluateMatMul(
+                      std::declval<CiphertextRef>(),
+                      std::declval<CiphertextRef>(),
+                      std::declval<NativeKeyProviderRef>())),
+                  Adapter::NativeGL128EvaluationResult>);
+    static_assert(std::is_same_v<
+                  decltype(std::declval<AdapterRef>()
+                               .CreateDirectVectorPrimarySelectorGenerator(
+                                   std::declval<SecretKeyRef>(),
+                                   std::declval<SparseKeyRef>(),
+                                   std::declval<DirectAuthorizationRef>(),
+                                   std::declval<DirectStorageAuthorizationRef>(),
+                                   std::declval<SelectorGenerationSeedRef>())),
+                  std::unique_ptr<Adapter::
+                      NativeDirectVectorProductionSelectorGenerator>>);
+    static_assert(std::is_same_v<
+                  decltype(std::declval<AdapterRef>()
+                               .BeginDirectVectorPrimarySelectorManifest(
+                                   std::declval<DirectAuthorizationRef>(),
+                                   std::declval<DirectStorageAuthorizationRef>())),
+                  Adapter::
+                      NativeDirectVectorProductionSelectorManifestCheckpoint>);
+    static_assert(std::is_same_v<
+                  decltype(std::declval<AdapterRef>()
+                               .AppendDirectVectorPrimarySelectorRecord(
+                                   std::declval<DirectAuthorizationRef>(),
+                                   std::declval<DirectStorageAuthorizationRef>(),
+                                   std::declval<SelectorCheckpointRef>(),
+                                   std::declval<SelectorRecordRef>())),
+                  Adapter::
+                      NativeDirectVectorProductionSelectorManifestCheckpoint>);
+    static_assert(std::is_same_v<
+                  decltype(std::declval<AdapterRef>()
+                               .ExecuteDirectVectorAllYProduction(
+                                   std::declval<CiphertextRef>(),
+                                   std::declval<DirectAuthorizationRef>(),
+                                   std::declval<SelectorOpeningRef>(),
+                                   std::declval<DirectBootstrapKeysRef>(),
+                                   std::declval<DftSessionRef>())),
+                  Adapter::DirectVectorProductionAllYResult>);
+    static_assert(std::is_same_v<
+                  decltype(std::declval<AdapterRef>().PrepareDirectShipInput(
+                      std::declval<CiphertextRef>(),
+                      std::declval<BootstrapAuthorizationRef>(),
+                      std::declval<DftSessionRef>(),
+                      std::declval<DirectBootstrapKeysRef>(),
+                      std::declval<CtsStcConfigRef>(), 1.0e-12)),
+                  Adapter::NativeGL128DirectInputPreparationResult>);
+    static_assert(std::is_same_v<
+                  decltype(std::declval<AdapterRef>().BootstrapDirect(
+                      std::declval<CiphertextRef>(),
+                      std::declval<BootstrapAuthorizationRef>(),
+                      std::declval<SelectorOpeningRef>(),
+                      std::declval<DftSessionRef>(),
+                      std::declval<DirectBootstrapKeysRef>(),
+                      std::declval<CtsStcConfigRef>(), 1.0e-12)),
+                  Adapter::NativeGL128BootstrapResult>);
+    static_assert(std::is_same_v<
+                  decltype(std::declval<AdapterRef>()
+                               .OpenPersistedDirectSelectorBank(
+                                   std::declval<BootstrapAuthorizationRef>(),
+                                   std::declval<PersistedSelectorBankRef>(),
+                                   std::declval<DirectBootstrapKeysRef>(),
+                                   std::declval<Adapter::
+                                       NativeDirectVectorProductionSelectorBlobLeaseCallbacks>())),
+                  Adapter::
+                      NativeDirectVectorProductionSelectorProviderOpeningResult>);
     static_assert(std::is_trivially_copyable_v<
                   Adapter::DirectVectorAllYReturnPreflight>);
-    static_assert(std::is_trivially_copyable_v<
+    static_assert(!std::is_trivially_copyable_v<
                   Adapter::DirectVectorH2Stride2SmokeReceipt>);
     static_assert(std::is_same_v<
                   decltype(std::declval<AdapterRef>()
@@ -511,6 +659,67 @@ int main() {
             "wrong context geometry");
     Require(context.params.coeffs_Rp() == 4194304ULL,
             "context is not the production R' tensor");
+    const auto profileReceipt = adapter.GetCanonicalProfileReceipt();
+    Require(profileReceipt.schema == "glscheme.gl128_profile_receipt.v1" &&
+                profileReceipt.profile_name == "GL-128-257-N32" &&
+                profileReceipt.parameter_fingerprint ==
+                    glscheme::rns::glr_parameter_fingerprint(context.params) &&
+                profileReceipt.matrix_order == 128 &&
+                profileReceipt.matrix_count == 256 &&
+                profileReceipt.complex_slot_count == 4194304ULL &&
+                profileReceipt.secret_ring_dimension == 65536ULL &&
+                profileReceipt.q_prime_count == 25 &&
+                profileReceipt.special_prime_count == 14 &&
+                profileReceipt.rescale_stride == 2 &&
+                profileReceipt.sparse_hamming_weight == 40 &&
+                profileReceipt.exact_profile &&
+                profileReceipt.canonical_ship_geometry &&
+                !profileReceipt.sparse_security_admitted,
+            "core GL128 profile receipt lost its exact production binding");
+
+    const auto schemeKeyPlan = adapter.PlanCanonicalSchemeKeys();
+    Require(schemeKeyPlan.schema == "glscheme.gl128_scheme_key_plan.v1" &&
+                schemeKeyPlan.parameter_fingerprint ==
+                    profileReceipt.parameter_fingerprint &&
+                schemeKeyPlan.key_level == 0 &&
+                schemeKeyPlan.ids.size() == 5 &&
+                schemeKeyPlan.small_switch_key_count == 2 &&
+                schemeKeyPlan.big_switch_key_count == 3 &&
+                schemeKeyPlan.matrix_product_relinearization_complete &&
+                schemeKeyPlan.hadamard_relinearization_complete &&
+                schemeKeyPlan.automorphism_keys_complete &&
+                schemeKeyPlan.seeded_public_a_compaction_planned &&
+                schemeKeyPlan.compact_persistent_bytes <
+                    schemeKeyPlan.full_materialized_bytes &&
+                schemeKeyPlan.compact_bytes_saved ==
+                    schemeKeyPlan.full_materialized_bytes -
+                        schemeKeyPlan.compact_persistent_bytes,
+            "complete core GL128 scheme-key plan is malformed");
+
+    const auto directKeyPlan =
+        adapter.PlanCanonicalDirectBootstrapKeys();
+    Require(directKeyPlan.schema ==
+                    "glscheme.gl128_direct_bootstrap_key_plan.v1" &&
+                directKeyPlan.parameter_fingerprint ==
+                    profileReceipt.parameter_fingerprint &&
+                directKeyPlan.requirements.size() == 5 &&
+                directKeyPlan.selector_level == 4 &&
+                directKeyPlan.first_relinearization_level == 6 &&
+                directKeyPlan.output_level == 18 &&
+                directKeyPlan.forward_return_level == 22 &&
+                directKeyPlan.requirements[0].key_level == 6 &&
+                directKeyPlan.requirements[1].key_level == 18 &&
+                directKeyPlan.requirements[2].key_level == 24 &&
+                directKeyPlan.requirements[3].key_level == 18 &&
+                directKeyPlan.requirements[4].key_level == 18 &&
+                directKeyPlan.exact_h40_corridor &&
+                directKeyPlan.seeded_public_a_compaction_planned &&
+                directKeyPlan.compact_persistent_bytes <
+                    directKeyPlan.full_materialized_bytes &&
+                directKeyPlan.compact_bytes_saved ==
+                    directKeyPlan.full_materialized_bytes -
+                        directKeyPlan.compact_persistent_bytes,
+            "complete core GL128 direct-bootstrap key plan is malformed");
     const std::uint64_t expectedPublicKeyBytes =
         std::uint64_t{context.active_q_primes(0)} * 2 *
         context.params.coeffs_R() * 2 * sizeof(std::uint64_t);
@@ -1735,15 +1944,21 @@ int main() {
     // plaintext/ciphertext allocation remains in the resource-qualified lane.
     Adapter::PublicKey publicKey = adapter.PublicKeyGen(
         secretKey, 0x474c525055424b45ULL);
+    const std::string primarySecretLineage =
+        glscheme::rns::glr_ship_direct_primary_secret_lineage_commitment(
+            context, secretKey);
     Require(publicKey.key_id == "primary" &&
-                publicKey.parameter_fingerprint == profile.binding_fingerprint,
-            "production public key lost its primary/fingerprint binding");
+                publicKey.parameter_fingerprint == profile.binding_fingerprint &&
+                publicKey.key_lineage_commitment == primarySecretLineage,
+            "production public key lost its concrete primary-secret lineage");
     Require(publicKey.b.ring == glscheme::rns::GlrRing::R &&
                 publicKey.a.ring == glscheme::rns::GlrRing::R &&
                 !publicKey.b.extended && !publicKey.a.extended &&
                 publicKey.byte_size() == expectedPublicKeyBytes,
             "production public key is not the compact Q-only ring-R pair");
     publicKey.secure_clear();
+    Require(publicKey.key_lineage_commitment.empty(),
+            "public-key secure_clear retained the secret-lineage root");
 
     // A nonempty production plan must be rejected before generation when the
     // caller's explicit byte budget is one byte short.  Do not materialize
