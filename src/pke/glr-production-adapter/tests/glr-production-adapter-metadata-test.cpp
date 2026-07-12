@@ -1,5 +1,6 @@
 #include "openfhe/pke/glr-production-adapter.h"
 
+#include <cmath>
 #include <cstdint>
 #include <iostream>
 #include <numeric>
@@ -34,6 +35,10 @@ int main() {
                   Adapter::FixedProfileBindingText>);
     static_assert(std::is_trivially_copyable_v<
                   Adapter::RefreshTraceKeyEntry>);
+    static_assert(std::is_trivially_copyable_v<
+                  Adapter::RefreshKeyLevelByteModel>);
+    static_assert(std::is_trivially_copyable_v<
+                  Adapter::NativeRefreshEndpointPreflight>);
     static_assert(std::is_trivially_copyable_v<
                   Adapter::OrdinaryRefreshPreflight>);
     using AdapterRef = const Adapter&;
@@ -177,6 +182,82 @@ int main() {
                 refresh.native.exact_prime_w_dual &&
                 !refresh.native.heap_allocation_required,
             "canonical prime-p refresh census is wrong");
+
+    // The native endpoint arithmetic is fixed to the reviewed Q7+P14
+    // corridor: gamma=64, canonical input delta, DFT scale 2^46, refreshed
+    // fold/key level 18, and level-17 transform material.  Feasible arithmetic
+    // remains preflight-only until an authenticated h40 authorization and all
+    // owner/provider seams exist.
+    const auto& endpoint = refresh.endpoint;
+    Require(endpoint.total_q_primes == 25 &&
+                endpoint.rescale_stride == 2 &&
+                endpoint.required_input_live_q_primes == 7 &&
+                endpoint.input_level == 18 &&
+                endpoint.cts_output_level == 22 &&
+                endpoint.normalized_level == 24 &&
+                endpoint.packed_level == 18 &&
+                endpoint.output_level == 22 &&
+                endpoint.cts_rescale_count == 4 &&
+                endpoint.normalization_rescale_count == 2 &&
+                endpoint.stc_rescale_count == 4,
+            "canonical endpoint level/rescale ledger is not "
+            "18->22->24->fold18->22");
+    Require(endpoint.normalization_multiplier == 1154461932539ULL &&
+                refresh.refreshGamma == 64.0 &&
+                endpoint.input_scale == context.params.delta &&
+                endpoint.dft_scale == std::ldexp(1.0, 46) &&
+                refresh.normalizationRelativeTolerance == 1.0e-12 &&
+                endpoint.normalization_relative_error <=
+                    refresh.normalizationRelativeTolerance &&
+                endpoint.integer_multiplier_exactly_representable &&
+                endpoint.strict_normalization_feasible &&
+                !endpoint.would_require_scale_snapping &&
+                !endpoint.scale_snapping_enabled,
+            "canonical endpoint strict integer normalization is wrong");
+    Require(endpoint.canonical_gl128_257_n32 &&
+                !endpoint.context_or_key_allocation_required &&
+                endpoint.arithmetic_preflight_only &&
+                endpoint.requires_h40_corridor &&
+                endpoint.security_binding_required &&
+                !endpoint.production_execution_admitted &&
+                endpoint.fold_level == 18 &&
+                endpoint.transform_material_level == 17 &&
+                endpoint.transform_material_alignment_safe &&
+                endpoint.stc_headroom_valid,
+            "canonical endpoint preflight confused arithmetic with "
+            "production authorization");
+    Require(refresh.traceKeyLevel == 18 &&
+                refresh.nonTraceKeyLevel == 18 &&
+                refresh.corridorQPrimeCount == 7 &&
+                refresh.corridorSpecialPrimeCount == 14 &&
+                refresh.requiredSparseHammingWeight == 40 &&
+                refresh.reducedExposureCorridorRequired &&
+                refresh.securityAuthorizationRequired,
+            "canonical refresh key/corridor requirements are wrong");
+    constexpr std::uint64_t MiB = 1024ULL * 1024ULL;
+    constexpr std::uint64_t GiB = 1024ULL * MiB;
+    Require(refresh.keyLevelModelCount ==
+                Adapter::kCanonicalRefreshKeyLevelModelCount &&
+                refresh.keyLevelModels.size() == 2,
+            "canonical Q7/Q8 key-size census count is wrong");
+    const auto& q7Keys = refresh.keyLevelModels[0];
+    const auto& q8Keys = refresh.keyLevelModels[1];
+    Require(q7Keys.keyLevel == 18 &&
+                q7Keys.ringRPerKeyBytes == 21ULL * MiB &&
+                q7Keys.ringRpPerKeyBytes == 2ULL * GiB + 640ULL * MiB &&
+                q7Keys.ringRauxPerKeyBytes == 5ULL * GiB + 256ULL * MiB,
+            "level-18 Q7 one-digit key byte model is wrong");
+    Require(q8Keys.keyLevel == 17 &&
+                q8Keys.ringRPerKeyBytes == 22ULL * MiB &&
+                q8Keys.ringRpPerKeyBytes == 2ULL * GiB + 768ULL * MiB &&
+                q8Keys.ringRauxPerKeyBytes == 5ULL * GiB + 512ULL * MiB,
+            "level-17 Q8 one-digit key byte model is wrong");
+    Require(refresh.traceRotationKeyResidentBytes == 15ULL * 21ULL * MiB,
+            "listed level-18 trace-key byte total is wrong");
+    Require(refresh.listedNonTraceKeyDebtResidentBytes ==
+                3ULL * 21ULL * MiB + (2ULL * GiB + 640ULL * MiB) +
+                    (5ULL * GiB + 256ULL * MiB),
+            "listed level-18 non-trace key-debt byte total is wrong");
     Require(refresh.traceKeyCount ==
                 Adapter::kCanonicalRefreshTraceKeyCount &&
                 refresh.traceKeys.size() == 15,
@@ -228,6 +309,8 @@ int main() {
     }
     Require(refresh.availability ==
                 Adapter::OrdinaryRefreshAvailability::preflight_only &&
+                refresh.reducedExposureCorridorRequired &&
+                refresh.securityAuthorizationRequired &&
                 refresh.sparseKeyRequired &&
                 refresh.encryptedSelectorBankRequired &&
                 refresh.encryptedGadgetBankRequired &&
@@ -254,6 +337,50 @@ int main() {
                 forged.traceKeys[14].id.amount = 127;
             }),
             "forged refresh trace-key list did not fail closed");
+    Require(rejectedRefreshForgery([](auto& forged) {
+                ++forged.endpoint.normalization_multiplier;
+            }),
+            "forged endpoint normalization K did not fail closed");
+    Require(rejectedRefreshForgery([](auto& forged) {
+                forged.endpoint.dft_scale = std::ldexp(1.0, 45);
+            }),
+            "forged endpoint DFT scale did not fail closed");
+    Require(rejectedRefreshForgery([](auto& forged) {
+                forged.endpoint.input_level = 17;
+            }),
+            "forged endpoint level ledger did not fail closed");
+    Require(rejectedRefreshForgery([](auto& forged) {
+                forged.endpoint.would_require_scale_snapping = true;
+            }),
+            "forged scale-snapping endpoint did not fail closed");
+    Require(rejectedRefreshForgery([](auto& forged) {
+                forged.endpoint.production_execution_admitted = true;
+            }),
+            "forged native endpoint admission did not fail closed");
+    Require(rejectedRefreshForgery([](auto& forged) {
+                forged.traceKeyLevel = 17;
+            }),
+            "forged trace-key level did not fail closed");
+    Require(rejectedRefreshForgery([](auto& forged) {
+                forged.nonTraceKeyLevel = 17;
+            }),
+            "forged endpoint non-trace key level did not fail closed");
+    Require(rejectedRefreshForgery([](auto& forged) {
+                forged.keyLevelModels[0].ringRPerKeyBytes *= 2;
+            }),
+            "forged/doubled Q7 key byte model did not fail closed");
+    Require(rejectedRefreshForgery([](auto& forged) {
+                ++forged.listedNonTraceKeyDebtResidentBytes;
+            }),
+            "forged listed key-debt byte total did not fail closed");
+    Require(rejectedRefreshForgery([](auto& forged) {
+                forged.corridorSpecialPrimeCount = 13;
+            }),
+            "forged P14 corridor did not fail closed");
+    Require(rejectedRefreshForgery([](auto& forged) {
+                forged.securityAuthorizationRequired = false;
+            }),
+            "forged security-authorization requirement did not fail closed");
     Require(rejectedRefreshForgery([](auto& forged) {
                 forged.productionExecutionExposed = true;
             }),

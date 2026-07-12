@@ -364,6 +364,55 @@ bool NativeRefreshPreflightEquals(
            lhs.heap_allocation_required == rhs.heap_allocation_required;
 }
 
+bool NativeRefreshEndpointPreflightEquals(
+    const GLRProductionAdapter::NativeRefreshEndpointPreflight& lhs,
+    const GLRProductionAdapter::NativeRefreshEndpointPreflight& rhs) {
+    return lhs.total_q_primes == rhs.total_q_primes &&
+           lhs.rescale_stride == rhs.rescale_stride &&
+           lhs.required_input_live_q_primes ==
+               rhs.required_input_live_q_primes &&
+           lhs.input_level == rhs.input_level &&
+           lhs.cts_output_level == rhs.cts_output_level &&
+           lhs.normalized_level == rhs.normalized_level &&
+           lhs.packed_level == rhs.packed_level &&
+           lhs.output_level == rhs.output_level &&
+           lhs.cts_rescale_count == rhs.cts_rescale_count &&
+           lhs.normalization_rescale_count ==
+               rhs.normalization_rescale_count &&
+           lhs.stc_rescale_count == rhs.stc_rescale_count &&
+           lhs.normalization_multiplier == rhs.normalization_multiplier &&
+           lhs.input_scale == rhs.input_scale &&
+           lhs.dft_scale == rhs.dft_scale &&
+           lhs.cts_output_scale == rhs.cts_output_scale &&
+           lhs.normalization_raw_multiplier ==
+               rhs.normalization_raw_multiplier &&
+           lhs.normalization_target_scale ==
+               rhs.normalization_target_scale &&
+           lhs.normalized_scale == rhs.normalized_scale &&
+           lhs.normalization_relative_error ==
+               rhs.normalization_relative_error &&
+           lhs.integer_multiplier_exactly_representable ==
+               rhs.integer_multiplier_exactly_representable &&
+           lhs.strict_normalization_feasible ==
+               rhs.strict_normalization_feasible &&
+           lhs.would_require_scale_snapping ==
+               rhs.would_require_scale_snapping &&
+           lhs.scale_snapping_enabled == rhs.scale_snapping_enabled &&
+           lhs.canonical_gl128_257_n32 == rhs.canonical_gl128_257_n32 &&
+           lhs.context_or_key_allocation_required ==
+               rhs.context_or_key_allocation_required &&
+           lhs.arithmetic_preflight_only == rhs.arithmetic_preflight_only &&
+           lhs.requires_h40_corridor == rhs.requires_h40_corridor &&
+           lhs.security_binding_required == rhs.security_binding_required &&
+           lhs.production_execution_admitted ==
+               rhs.production_execution_admitted &&
+           lhs.fold_level == rhs.fold_level &&
+           lhs.transform_material_level == rhs.transform_material_level &&
+           lhs.transform_material_alignment_safe ==
+               rhs.transform_material_alignment_safe &&
+           lhs.stc_headroom_valid == rhs.stc_headroom_valid;
+}
+
 GLRProductionAdapter::OrdinaryRefreshPreflight
 MakeCanonicalOrdinaryRefreshPreflight(
     const GLRProductionAdapter::Context& context) {
@@ -400,6 +449,61 @@ MakeCanonicalOrdinaryRefreshPreflight(
             "diverged from the canonical production census");
     }
 
+    constexpr double kRefreshGamma = 64.0;
+    constexpr double kNormalizationTolerance = 1.0e-12;
+    constexpr std::uint32_t kRefreshedKeyLevel = 18;
+    constexpr std::uint32_t kTransformMaterialLevel = 17;
+    glscheme::rns::GlrShipRefreshOnlyParameters refreshParameters;
+    refreshParameters.gamma = kRefreshGamma;
+    out.endpoint =
+        glscheme::rns::glr_ship_refresh_only_endpoint_preflight(
+            context.params, refreshParameters,
+            /*canonical input scale=*/context.params.delta,
+            /*public DFT scale=*/std::ldexp(1.0, 46),
+            kNormalizationTolerance, kRefreshedKeyLevel,
+            kTransformMaterialLevel);
+    if (out.endpoint.total_q_primes != 25 ||
+        out.endpoint.rescale_stride != 2 ||
+        out.endpoint.required_input_live_q_primes != 7 ||
+        out.endpoint.input_level != 18 ||
+        out.endpoint.cts_output_level != 22 ||
+        out.endpoint.normalized_level != 24 ||
+        out.endpoint.packed_level != 18 ||
+        out.endpoint.output_level != 22 ||
+        out.endpoint.cts_rescale_count != 4 ||
+        out.endpoint.normalization_rescale_count != 2 ||
+        out.endpoint.stc_rescale_count != 4 ||
+        out.endpoint.normalization_multiplier != 1154461932539ULL ||
+        out.endpoint.input_scale != context.params.delta ||
+        out.endpoint.dft_scale != std::ldexp(1.0, 46) ||
+        !out.endpoint.integer_multiplier_exactly_representable ||
+        !out.endpoint.strict_normalization_feasible ||
+        out.endpoint.would_require_scale_snapping ||
+        out.endpoint.scale_snapping_enabled ||
+        !out.endpoint.canonical_gl128_257_n32 ||
+        out.endpoint.context_or_key_allocation_required ||
+        !out.endpoint.arithmetic_preflight_only ||
+        !out.endpoint.requires_h40_corridor ||
+        !out.endpoint.security_binding_required ||
+        out.endpoint.production_execution_admitted ||
+        out.endpoint.fold_level != kRefreshedKeyLevel ||
+        out.endpoint.transform_material_level != kTransformMaterialLevel ||
+        !out.endpoint.transform_material_alignment_safe ||
+        !out.endpoint.stc_headroom_valid ||
+        out.endpoint.normalization_relative_error >
+            kNormalizationTolerance) {
+        throw GlrError(
+            "GLRProductionAdapter: native ordinary-refresh endpoint "
+            "preflight diverged from the canonical Q7+P14 corridor ledger");
+    }
+    out.refreshGamma = kRefreshGamma;
+    out.normalizationRelativeTolerance = kNormalizationTolerance;
+    out.traceKeyLevel = kRefreshedKeyLevel;
+    out.nonTraceKeyLevel = kRefreshedKeyLevel;
+    out.corridorQPrimeCount = 7;
+    out.corridorSpecialPrimeCount = 14;
+    out.requiredSparseHammingWeight = 40;
+
     std::size_t traceIndex = 0;
     for (std::int32_t amount = 1; amount < 128; amount *= 2) {
         out.traceKeys[traceIndex++] = {
@@ -428,9 +532,68 @@ MakeCanonicalOrdinaryRefreshPreflight(
     };
     out.endpointKeyDebtCount =
         static_cast<std::uint32_t>(out.endpointKeyDebts.size());
+
+    const auto keyLevelModel = [&](std::uint32_t keyLevel) {
+        GLRProductionAdapter::RefreshKeyLevelByteModel model;
+        model.keyLevel = keyLevel;
+        model.ringRPerKeyBytes =
+            glscheme::rns::glr_model_switch_key_bytes_at_level(
+                context.params, GlrRing::R, keyLevel);
+        model.ringRpPerKeyBytes =
+            glscheme::rns::glr_model_switch_key_bytes_at_level(
+                context.params, GlrRing::Rp, keyLevel);
+        model.ringRauxPerKeyBytes =
+            glscheme::rns::glr_model_switch_key_bytes_at_level(
+                context.params, GlrRing::Raux, keyLevel);
+        return model;
+    };
+    out.keyLevelModels = {
+        keyLevelModel(kRefreshedKeyLevel),
+        keyLevelModel(kTransformMaterialLevel),
+    };
+    out.keyLevelModelCount =
+        static_cast<std::uint32_t>(out.keyLevelModels.size());
+    constexpr std::uint64_t kMiB = 1024ULL * 1024ULL;
+    constexpr std::uint64_t kGiB = 1024ULL * kMiB;
+    const auto& q7Model = out.keyLevelModels[0];
+    const auto& q8Model = out.keyLevelModels[1];
+    if (q7Model.keyLevel != 18 ||
+        q7Model.ringRPerKeyBytes != 21ULL * kMiB ||
+        q7Model.ringRpPerKeyBytes != 2ULL * kGiB + 640ULL * kMiB ||
+        q7Model.ringRauxPerKeyBytes != 5ULL * kGiB + 256ULL * kMiB ||
+        q8Model.keyLevel != 17 ||
+        q8Model.ringRPerKeyBytes != 22ULL * kMiB ||
+        q8Model.ringRpPerKeyBytes != 2ULL * kGiB + 768ULL * kMiB ||
+        q8Model.ringRauxPerKeyBytes != 5ULL * kGiB + 512ULL * kMiB) {
+        throw GlrError(
+            "GLRProductionAdapter: level-aware Q7/Q8 key-size census "
+            "diverged from the one-active-digit canonical model");
+    }
+    out.traceRotationKeyResidentBytes = CheckedMul(
+        out.traceKeyCount, q7Model.ringRPerKeyBytes,
+        "summing canonical trace-rotation key bytes");
+    for (const GlrKskId& id : out.endpointKeyDebts) {
+        std::uint64_t bytes = 0;
+        switch (glscheme::rns::glr_ks_ring_for(id.direction)) {
+            case GlrRing::R:
+                bytes = q7Model.ringRPerKeyBytes;
+                break;
+            case GlrRing::Rp:
+                bytes = q7Model.ringRpPerKeyBytes;
+                break;
+            case GlrRing::Raux:
+                bytes = q7Model.ringRauxPerKeyBytes;
+                break;
+        }
+        out.listedNonTraceKeyDebtResidentBytes = CheckedAdd(
+            out.listedNonTraceKeyDebtResidentBytes, bytes,
+            "summing canonical listed non-trace key-debt bytes");
+    }
     out.availability =
         GLRProductionAdapter::OrdinaryRefreshAvailability::preflight_only;
     out.canonicalProfileBound = true;
+    out.reducedExposureCorridorRequired = true;
+    out.securityAuthorizationRequired = true;
     out.sparseKeyRequired = true;
     out.encryptedSelectorBankRequired = true;
     out.encryptedGadgetBankRequired = true;
@@ -459,15 +622,50 @@ void RequireCanonicalOrdinaryRefreshPreflight(
                      actual.endpointKeyDebts[i] ==
                          expected.endpointKeyDebts[i];
     }
+    bool keyModelsMatch =
+        actual.keyLevelModelCount == expected.keyLevelModelCount &&
+        actual.keyLevelModelCount == actual.keyLevelModels.size();
+    for (std::size_t i = 0; i < actual.keyLevelModels.size(); ++i) {
+        keyModelsMatch =
+            keyModelsMatch &&
+            actual.keyLevelModels[i].keyLevel ==
+                expected.keyLevelModels[i].keyLevel &&
+            actual.keyLevelModels[i].ringRPerKeyBytes ==
+                expected.keyLevelModels[i].ringRPerKeyBytes &&
+            actual.keyLevelModels[i].ringRpPerKeyBytes ==
+                expected.keyLevelModels[i].ringRpPerKeyBytes &&
+            actual.keyLevelModels[i].ringRauxPerKeyBytes ==
+                expected.keyLevelModels[i].ringRauxPerKeyBytes;
+    }
     if (!BindingTextEquals(actual.canonicalProfile,
                            expected.canonicalProfile) ||
         !BindingTextEquals(actual.parameterFingerprint,
                            expected.parameterFingerprint) ||
         actual.layout != expected.layout ||
         !NativeRefreshPreflightEquals(actual.native, expected.native) ||
-        !keysMatch || !debtsMatch ||
+        !NativeRefreshEndpointPreflightEquals(actual.endpoint,
+                                              expected.endpoint) ||
+        !keysMatch || !debtsMatch || !keyModelsMatch ||
+        actual.traceRotationKeyResidentBytes !=
+            expected.traceRotationKeyResidentBytes ||
+        actual.listedNonTraceKeyDebtResidentBytes !=
+            expected.listedNonTraceKeyDebtResidentBytes ||
+        actual.refreshGamma != expected.refreshGamma ||
+        actual.normalizationRelativeTolerance !=
+            expected.normalizationRelativeTolerance ||
+        actual.traceKeyLevel != expected.traceKeyLevel ||
+        actual.nonTraceKeyLevel != expected.nonTraceKeyLevel ||
+        actual.corridorQPrimeCount != expected.corridorQPrimeCount ||
+        actual.corridorSpecialPrimeCount !=
+            expected.corridorSpecialPrimeCount ||
+        actual.requiredSparseHammingWeight !=
+            expected.requiredSparseHammingWeight ||
         actual.availability != expected.availability ||
         actual.canonicalProfileBound != expected.canonicalProfileBound ||
+        actual.reducedExposureCorridorRequired !=
+            expected.reducedExposureCorridorRequired ||
+        actual.securityAuthorizationRequired !=
+            expected.securityAuthorizationRequired ||
         actual.sparseKeyRequired != expected.sparseKeyRequired ||
         actual.encryptedSelectorBankRequired !=
             expected.encryptedSelectorBankRequired ||

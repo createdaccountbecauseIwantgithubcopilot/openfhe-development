@@ -40,6 +40,8 @@ public:
     using NativeKeyProvider = glscheme::rns::GlrKskProvider;
     using NativeRefreshTracePreflight =
         glscheme::rns::GlrShipRefreshOnlyPackPreflight;
+    using NativeRefreshEndpointPreflight =
+        glscheme::rns::GlrShipRefreshOnlyEndpointPreflight;
 
     // Fixed-capacity binding text keeps the refresh preflight itself free of
     // heap-owning strings while still carrying the exact canonical name and
@@ -69,8 +71,19 @@ public:
         std::uint64_t applications = 0;
     };
 
+    // Exact native digit payload for one switch key of each ring at a numeric
+    // key level.  This uses GLScheme's active-level digit census (not the
+    // provisional full-chain dnum), so Q7/Q8 each correctly carry one digit.
+    struct RefreshKeyLevelByteModel {
+        std::uint32_t keyLevel = 0;
+        std::uint64_t ringRPerKeyBytes = 0;
+        std::uint64_t ringRpPerKeyBytes = 0;
+        std::uint64_t ringRauxPerKeyBytes = 0;
+    };
+
     static constexpr std::size_t kCanonicalRefreshTraceKeyCount = 15;
     static constexpr std::size_t kCanonicalRefreshEndpointKeyDebtCount = 5;
+    static constexpr std::size_t kCanonicalRefreshKeyLevelModelCount = 2;
 
     // Fixed-size, key/ciphertext-free ordinary-refresh census.  traceKeys are
     // exactly row_rotation:{1,2,4,8,16,32,64} followed by
@@ -78,22 +91,47 @@ public:
     // keys only, not a claim that production SHIP is executable.
     // endpointKeyDebts separately names primary_to_sparse,
     // sparse_to_primary, conjugation_to_sparse, the primary transform key,
-    // and the auxiliary transform key required by a full endpoint.
+    // and the auxiliary transform key required by a full endpoint.  endpoint
+    // binds the canonical gamma=64, input-delta, DFT=2^46 strict arithmetic
+    // ledger.  The explicit Q7+P14/h40 corridor fields are requirements for a
+    // future authenticated authorization, never readiness claims.
     struct OrdinaryRefreshPreflight {
         FixedProfileBindingText canonicalProfile;
         FixedProfileBindingText parameterFingerprint;
         glscheme::production::LayoutKind layout =
             glscheme::production::LayoutKind::gl128_257_n32_tensor;
         NativeRefreshTracePreflight native;
+        NativeRefreshEndpointPreflight endpoint;
         std::array<RefreshTraceKeyEntry,
                    kCanonicalRefreshTraceKeyCount> traceKeys{};
         std::uint32_t traceKeyCount = 0;
         std::array<KeyId,
                    kCanonicalRefreshEndpointKeyDebtCount> endpointKeyDebts{};
         std::uint32_t endpointKeyDebtCount = 0;
+        // Entries are level 18 (Q7) then level 17 (Q8).  The byte totals below
+        // cover only the 15 listed trace rotations and five listed non-trace
+        // debts; encrypted selector/gadget banks remain absent owner/provider
+        // seams and are deliberately not implied by these planning numbers.
+        std::array<RefreshKeyLevelByteModel,
+                   kCanonicalRefreshKeyLevelModelCount> keyLevelModels{};
+        std::uint32_t keyLevelModelCount = 0;
+        std::uint64_t traceRotationKeyResidentBytes = 0;
+        std::uint64_t listedNonTraceKeyDebtResidentBytes = 0;
+        double refreshGamma = 1.0;
+        double normalizationRelativeTolerance = 0.0;
+        // Numeric levels count dropped Q primes.  Every trace and non-trace
+        // endpoint KSK is generated on the refreshed level-18 Q7 basis; DFT
+        // material is authored at level 17 and aligned only by exact drop.
+        std::uint32_t traceKeyLevel = 0;
+        std::uint32_t nonTraceKeyLevel = 0;
+        std::uint32_t corridorQPrimeCount = 0;
+        std::uint32_t corridorSpecialPrimeCount = 0;
+        std::uint32_t requiredSparseHammingWeight = 0;
         OrdinaryRefreshAvailability availability =
             OrdinaryRefreshAvailability::preflight_only;
         bool canonicalProfileBound = false;
+        bool reducedExposureCorridorRequired = false;
+        bool securityAuthorizationRequired = false;
         bool sparseKeyRequired = false;
         bool encryptedSelectorBankRequired = false;
         bool encryptedGadgetBankRequired = false;
