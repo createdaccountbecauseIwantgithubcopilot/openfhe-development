@@ -532,6 +532,172 @@ void RequireNativeCipherPairCompatible(const GLCiphertext& lhs, const GLCipherte
     }
 }
 
+GLPlaintext TransposeLogicalPlaintext(const GLPlaintext& plaintext) {
+    const auto& geometry = plaintext.GetGeometry();
+    const auto n         = geometry.GetDimension();
+    std::vector<std::complex<double>> values(geometry.GetCellCount());
+    for (std::size_t row = 0; row < n; ++row) {
+        for (std::size_t column = 0; column < n; ++column) {
+            values[row * n + column] = plaintext.At(column, row);
+        }
+    }
+    return GLPlaintext(geometry, std::move(values));
+}
+
+/**
+ * Exact unit-i multiply on both components of one GL row ciphertext.
+ *
+ * Multiplies each ciphertext component by the monomial X^{ringDim/2}
+ * (component-wise negacyclic monomial multiply).  Every canonical CKKS slot
+ * root is zeta^{5^j} with 5^j = 1 (mod 4), so this scales every slot value by
+ * exactly +i in any power-of-two CKKS ring; in the exact ring 2n the monomial
+ * is literally the Gaussian unit i = T^n (the same unit the SHIP port
+ * multiplies by).  Monomial multiplication is exact: no key switch, no level
+ * or scale metadata change, works at any level.
+ */
+void MultiplyRowByUnitIInPlace(Ciphertext<DCRTPoly>& row) {
+    if (!row || row->GetElements().size() != 2) {
+        throw GLCiphertextError("exact GL unit-i multiplication requires a two-component row");
+    }
+    auto& elements    = row->GetElements();
+    const auto params = elements.front().GetParams();
+    if (!params || params->GetRingDimension() == 0 || (params->GetRingDimension() % 2) != 0) {
+        throw GLCiphertextError("exact GL unit-i multiplication requires an even ring dimension");
+    }
+    const auto monomial = NativeGaussianI(params, params->GetRingDimension() / 2);
+    for (auto& element : elements) {
+        element.SetFormat(Format::EVALUATION);
+        element *= monomial;
+    }
+}
+
+/** Exact multiply of one row by i^{power mod 4}: unit-i monomials plus exact negation. */
+void ApplyUnitIPowerInPlace(const CryptoContext<DCRTPoly>& context, Ciphertext<DCRTPoly>& row,
+                            uint64_t power) {
+    switch (power % 4) {
+        case 0:
+            return;
+        case 1:
+            MultiplyRowByUnitIInPlace(row);
+            return;
+        case 2:
+            // i^2 = -1 exactly: a plain framework negation, no monomial.
+            row = context->EvalNegate(row);
+            return;
+        default:
+            // i^3 = -i: one exact unit-i monomial multiply, then negate.
+            MultiplyRowByUnitIInPlace(row);
+            row = context->EvalNegate(row);
+            return;
+    }
+}
+
+/**
+ * Step 1 of the native GL transpose: the pure public coefficient relabeling
+ * p'(X,Y) = p(Y,X) on one R' component.
+ *
+ * Gaussian coefficient x of new row y' equals Gaussian coefficient y' of old
+ * row x; the T-lanes x and x+n move together, all degrees stay below n, so no
+ * wrap units appear.  This is data movement only - no arithmetic.
+ */
+std::vector<DCRTPoly> NativeTransposeComponentRows(const std::vector<DCRTPoly>& inputRows,
+                                                   std::size_t n) {
+    if (inputRows.size() != n || inputRows.empty()) {
+        throw GLDimensionError("native GL transpose requires exactly n component rows");
+    }
+    const auto params = inputRows.front().GetParams();
+    if (!params || params->GetRingDimension() != 2 * n) {
+        throw GLNativeModeError("native GL transpose requires DCRT ring dimension 2n");
+    }
+
+    std::vector<DCRTPoly> coefficientRows;
+    coefficientRows.reserve(n);
+    for (const auto& input : inputRows) {
+        auto coefficient = input;
+        coefficient.SetFormat(Format::COEFFICIENT);
+        coefficientRows.push_back(std::move(coefficient));
+    }
+
+    std::vector<DCRTPoly> outputRows;
+    outputRows.reserve(n);
+    for (std::size_t row = 0; row < n; ++row) {
+        outputRows.emplace_back(params, Format::COEFFICIENT, true);
+    }
+
+    for (std::size_t towerIndex = 0; towerIndex < inputRows.front().GetNumOfElements(); ++towerIndex) {
+        std::vector<NativePoly> outputTowers;
+        outputTowers.reserve(n);
+        for (std::size_t row = 0; row < n; ++row) {
+            outputTowers.push_back(outputRows[row].GetElementAtIndex(towerIndex));
+        }
+        for (std::size_t inputRow = 0; inputRow < n; ++inputRow) {
+            const auto& inputTower = coefficientRows[inputRow].GetElementAtIndex(towerIndex);
+            for (std::size_t coefficient = 0; coefficient < n; ++coefficient) {
+                outputTowers[coefficient][inputRow]     = inputTower[coefficient];
+                outputTowers[coefficient][inputRow + n] = inputTower[coefficient + n];
+            }
+        }
+        for (std::size_t row = 0; row < n; ++row) {
+            outputRows[row].SetElementAtIndex(towerIndex, std::move(outputTowers[row]));
+        }
+    }
+
+    for (auto& row : outputRows) {
+        row.SetFormat(Format::EVALUATION);
+    }
+    return outputRows;
+}
+
+/**
+ * Native GL transpose: coefficient relabeling of both components, then one
+ * BigSwitch with the third sliced family K_transpose = ksk_{s(Y)->s(X)}.
+ * Zero rescales; the CloneEmpty carries every level/scale metadata field.
+ */
+GLCiphertext EvaluateNativeTranspose(const CryptoContext<DCRTPoly>& context, const GLGeometry& geometry,
+                                     const GLCiphertext& ciphertext,
+                                     const std::vector<EvalKey<DCRTPoly>>& transposeKeyRows) {
+    const auto n = geometry.GetDimension();
+    std::vector<DCRTPoly> inputB;
+    std::vector<DCRTPoly> inputA;
+    inputB.reserve(n);
+    inputA.reserve(n);
+    for (const auto& row : ciphertext.GetRows()) {
+        inputB.push_back(row->GetElements()[0]);
+        inputA.push_back(row->GetElements()[1]);
+    }
+
+    auto permutedB = NativeTransposeComponentRows(inputB, n);
+    auto permutedA = NativeTransposeComponentRows(inputA, n);
+    auto switchedA = NativeBigSwitch(context, permutedA, transposeKeyRows, n);
+
+    std::vector<Ciphertext<DCRTPoly>> outputRows;
+    outputRows.reserve(n);
+    for (std::size_t row = 0; row < n; ++row) {
+        permutedB[row] += switchedA.b[row];
+        auto output = ciphertext.GetRows()[row]->CloneEmpty();
+        output->SetElements(
+            std::vector<DCRTPoly>{std::move(permutedB[row]), std::move(switchedA.a[row])});
+        outputRows.push_back(std::move(output));
+    }
+    return GLCiphertext(geometry, context, std::move(outputRows));
+}
+
+/** Rows of one aggregate must share level/scale metadata before they may mix. */
+void RequireUniformRowMetadata(const GLCiphertext& ciphertext, const char* operation) {
+    const auto& first = ciphertext.GetRows().front();
+    for (std::size_t row = 1; row < ciphertext.GetRows().size(); ++row) {
+        const auto& current = ciphertext.GetRows()[row];
+        if (current->GetLevel() != first->GetLevel() ||
+            current->GetNoiseScaleDeg() != first->GetNoiseScaleDeg() ||
+            current->GetScalingFactor() != first->GetScalingFactor() ||
+            current->GetElements().front().GetNumOfElements() !=
+                first->GetElements().front().GetNumOfElements()) {
+            throw GLCiphertextError(
+                RowMessage((std::string(operation) + " row metadata mismatch").c_str(), row));
+        }
+    }
+}
+
 std::vector<std::complex<double>> EvaluateYAxis(const GLGeometry& geometry,
                                                 const std::vector<std::complex<double>>& coefficients) {
     if (coefficients.size() != geometry.GetCellCount()) {
@@ -893,6 +1059,157 @@ void GLNativeEvalKey::Validate() const {
     }
 }
 
+GLRotationEvalKey::GLRotationEvalKey(GLGeometry geometry, CryptoContext<DCRTPoly> context,
+                                     std::string keyTag, std::set<uint32_t> rotationAmounts,
+                                     std::shared_ptr<std::map<uint32_t, EvalKey<DCRTPoly>>> automorphismKeys)
+    : m_geometry(std::move(geometry)),
+      m_context(std::move(context)),
+      m_keyTag(std::move(keyTag)),
+      m_rotationAmounts(std::move(rotationAmounts)),
+      m_automorphismKeys(std::move(automorphismKeys)) {
+    Validate();
+}
+
+const GLGeometry& GLRotationEvalKey::GetGeometry() const noexcept {
+    return m_geometry;
+}
+
+const CryptoContext<DCRTPoly>& GLRotationEvalKey::GetCryptoContext() const noexcept {
+    return m_context;
+}
+
+const std::string& GLRotationEvalKey::GetKeyTag() const noexcept {
+    return m_keyTag;
+}
+
+const std::set<uint32_t>& GLRotationEvalKey::GetRotationAmounts() const noexcept {
+    return m_rotationAmounts;
+}
+
+void GLRotationEvalKey::Validate() const {
+    if (!m_context) {
+        throw GLContextMismatchError("GL rotation evaluation key has no CryptoContext");
+    }
+    if (m_keyTag.empty()) {
+        throw GLKeyMismatchError("GL rotation evaluation key has an empty destination key tag");
+    }
+    if (m_rotationAmounts.empty() || !m_automorphismKeys || m_automorphismKeys->empty()) {
+        throw GLMissingEvaluationKeyError("GL rotation evaluation key holds no rotation key material");
+    }
+    const auto cyclotomicOrder = static_cast<uint32_t>(m_context->GetCyclotomicOrder());
+    for (const auto rotation : m_rotationAmounts) {
+        if (rotation == 0 || rotation >= m_geometry.GetDimension()) {
+            throw GLDimensionError("GL rotation evaluation key holds an out-of-range rotation amount");
+        }
+        const auto automorphismIndex =
+            m_context->GetScheme()->FindAutomorphismIndex(rotation, cyclotomicOrder);
+        const auto found = m_automorphismKeys->find(automorphismIndex);
+        if (found == m_automorphismKeys->end() || !found->second) {
+            throw GLMissingEvaluationKeyError(
+                "GL rotation evaluation key is missing a requested per-index key");
+        }
+        if (found->second->GetCryptoContext().get() != m_context.get()) {
+            throw GLContextMismatchError(
+                "GL rotation evaluation-key entry belongs to a different CryptoContext");
+        }
+        if (found->second->GetKeyTag() != m_keyTag) {
+            throw GLKeyMismatchError("GL rotation evaluation-key entry has a different destination key");
+        }
+    }
+}
+
+GLConjugationEvalKey::GLConjugationEvalKey(
+    GLGeometry geometry, CryptoContext<DCRTPoly> context, std::string keyTag,
+    std::shared_ptr<std::map<uint32_t, EvalKey<DCRTPoly>>> conjugationKeys)
+    : m_geometry(std::move(geometry)),
+      m_context(std::move(context)),
+      m_keyTag(std::move(keyTag)),
+      m_conjugationKeys(std::move(conjugationKeys)) {
+    Validate();
+}
+
+const GLGeometry& GLConjugationEvalKey::GetGeometry() const noexcept {
+    return m_geometry;
+}
+
+const CryptoContext<DCRTPoly>& GLConjugationEvalKey::GetCryptoContext() const noexcept {
+    return m_context;
+}
+
+const std::string& GLConjugationEvalKey::GetKeyTag() const noexcept {
+    return m_keyTag;
+}
+
+void GLConjugationEvalKey::Validate() const {
+    if (!m_context) {
+        throw GLContextMismatchError("GL conjugation evaluation key has no CryptoContext");
+    }
+    if (m_keyTag.empty()) {
+        throw GLKeyMismatchError("GL conjugation evaluation key has an empty destination key tag");
+    }
+    const auto conjugationIndex = static_cast<uint32_t>(m_context->GetCyclotomicOrder() - 1);
+    if (!m_conjugationKeys || m_conjugationKeys->find(conjugationIndex) == m_conjugationKeys->end() ||
+        !m_conjugationKeys->at(conjugationIndex)) {
+        throw GLMissingEvaluationKeyError(
+            "GL conjugation evaluation key is missing the conjugation automorphism key");
+    }
+    if (m_conjugationKeys->at(conjugationIndex)->GetCryptoContext().get() != m_context.get()) {
+        throw GLContextMismatchError(
+            "GL conjugation evaluation key belongs to a different CryptoContext");
+    }
+    if (m_conjugationKeys->at(conjugationIndex)->GetKeyTag() != m_keyTag) {
+        throw GLKeyMismatchError("GL conjugation evaluation key has a different destination key");
+    }
+}
+
+GLTransposeEvalKey::GLTransposeEvalKey(GLGeometry geometry, CryptoContext<DCRTPoly> context,
+                                       std::string keyTag,
+                                       std::vector<EvalKey<DCRTPoly>> transposeRows)
+    : m_geometry(std::move(geometry)),
+      m_context(std::move(context)),
+      m_keyTag(std::move(keyTag)),
+      m_transposeRows(std::move(transposeRows)) {
+    Validate();
+}
+
+const GLGeometry& GLTransposeEvalKey::GetGeometry() const noexcept {
+    return m_geometry;
+}
+
+const CryptoContext<DCRTPoly>& GLTransposeEvalKey::GetCryptoContext() const noexcept {
+    return m_context;
+}
+
+const std::string& GLTransposeEvalKey::GetKeyTag() const noexcept {
+    return m_keyTag;
+}
+
+void GLTransposeEvalKey::Validate() const {
+    if (!m_context) {
+        throw GLContextMismatchError("GL transpose evaluation key has no CryptoContext");
+    }
+    if (m_keyTag.empty()) {
+        throw GLKeyMismatchError("GL transpose evaluation key has an empty destination key tag");
+    }
+    const auto n = m_geometry.GetDimension();
+    if (m_transposeRows.size() != n) {
+        throw GLMissingEvaluationKeyError("GL transpose evaluation key requires the n-row K_transpose family");
+    }
+    for (std::size_t row = 0; row < n; ++row) {
+        if (!m_transposeRows[row]) {
+            throw GLMissingEvaluationKeyError(RowMessage("GL transpose evaluation key has a null row", row));
+        }
+        if (m_transposeRows[row]->GetCryptoContext().get() != m_context.get()) {
+            throw GLContextMismatchError(
+                RowMessage("GL transpose evaluation-key row belongs to a different CryptoContext", row));
+        }
+        if (m_transposeRows[row]->GetKeyTag() != m_keyTag) {
+            throw GLKeyMismatchError(
+                RowMessage("GL transpose evaluation-key row has a different destination key", row));
+        }
+    }
+}
+
 GLSchemelet::GLSchemelet(GLParameters parameters)
     : m_parameters(std::move(parameters)), m_geometry(m_parameters.GetGeometry()) {
     m_parameters.Validate();
@@ -1058,6 +1375,307 @@ GLCiphertext GLSchemelet::Add(const GLCiphertext& lhs, const GLCiphertext& rhs) 
         rows.push_back(std::move(sum));
     }
     return GLCiphertext(m_geometry, m_context, std::move(rows));
+}
+
+GLCiphertext GLSchemelet::Negate(const GLCiphertext& ciphertext) const {
+    ciphertext.Validate();
+    RequireSameGeometry(m_geometry, ciphertext.GetGeometry(), "GL ciphertext");
+    ValidateOwnedContext(ciphertext.GetCryptoContext(), "GL ciphertext");
+
+    std::vector<Ciphertext<DCRTPoly>> rows;
+    rows.reserve(m_geometry.GetRowCount());
+    for (std::size_t row = 0; row < m_geometry.GetRowCount(); ++row) {
+        auto negated = m_context->EvalNegate(ciphertext.GetRows()[row]);
+        if (!negated) {
+            throw GLCiphertextError(RowMessage("OpenFHE GL row negation returned null", row));
+        }
+        rows.push_back(std::move(negated));
+    }
+    return GLCiphertext(m_geometry, m_context, std::move(rows));
+}
+
+GLCiphertext GLSchemelet::Sub(const GLCiphertext& lhs, const GLCiphertext& rhs) const {
+    lhs.Validate();
+    rhs.Validate();
+    RequireSameGeometry(m_geometry, lhs.GetGeometry(), "left GL ciphertext");
+    RequireSameGeometry(m_geometry, rhs.GetGeometry(), "right GL ciphertext");
+    ValidateOwnedContext(lhs.GetCryptoContext(), "left GL ciphertext");
+    ValidateOwnedContext(rhs.GetCryptoContext(), "right GL ciphertext");
+    if (lhs.GetKeyTag() != rhs.GetKeyTag()) {
+        throw GLKeyMismatchError("GL subtraction requires every row to use the same shared key");
+    }
+
+    std::vector<Ciphertext<DCRTPoly>> rows;
+    rows.reserve(m_geometry.GetRowCount());
+    for (std::size_t row = 0; row < m_geometry.GetRowCount(); ++row) {
+        auto difference = m_context->EvalSub(lhs.GetRows()[row], rhs.GetRows()[row]);
+        if (!difference) {
+            throw GLCiphertextError(RowMessage("OpenFHE GL row subtraction returned null", row));
+        }
+        rows.push_back(std::move(difference));
+    }
+    return GLCiphertext(m_geometry, m_context, std::move(rows));
+}
+
+GLEncodedPlaintext GLSchemelet::EncodeTransposed(const GLPlaintext& plaintext) const {
+    RequireSameGeometry(m_geometry, plaintext.GetGeometry(), "GL plaintext");
+    // Remark 3.13: the sigma-transpose encoding satisfies
+    // Encode_T(M) = Encode(M^T); decoding must transpose accordingly.
+    return Encode(TransposeLogicalPlaintext(plaintext));
+}
+
+GLPlaintext GLSchemelet::DecodeTransposed(const GLEncodedPlaintext& plaintext) const {
+    return TransposeLogicalPlaintext(Decode(plaintext));
+}
+
+void GLSchemelet::EvalHadamardKeyGen(const PrivateKey<DCRTPoly>& privateKey) const {
+    ValidateKeyContext(privateKey, "EvalHadamardKeyGen");
+    // The Hadamard product relinearizes with the framework's own ordinary s^2
+    // EvalMult key (the paper's Switch_small).  OpenFHE keeps that key in its
+    // key-tag-indexed registry; EvalHadamard revalidates the entry per call
+    // and fails closed when it is missing.
+    m_context->EvalMultKeyGen(privateKey);
+}
+
+GLCiphertext GLSchemelet::EvalHadamard(const GLCiphertext& lhs, const GLCiphertext& rhs) const {
+    ValidateHadamardCircuit(lhs, rhs, "EvalHadamard");
+
+    const auto cryptoParameters =
+        std::dynamic_pointer_cast<CryptoParametersRNS>(m_context->GetCryptoParameters());
+    if (!cryptoParameters) {
+        throw GLContextMismatchError("EvalHadamard requires RNS crypto parameters");
+    }
+    if (lhs.GetRows().front()->GetElements().front().GetNumOfElements() <=
+        cryptoParameters->GetCompositeDegree()) {
+        throw GLDepthError("EvalHadamard requires one available CKKS level for its single rescale");
+    }
+
+    const auto n = m_geometry.GetDimension();
+    std::vector<Ciphertext<DCRTPoly>> outputRows;
+    outputRows.reserve(n);
+    for (std::size_t outputRow = 0; outputRow < n; ++outputRow) {
+        // Direct group: y1 + y2 = outputRow.
+        Ciphertext<DCRTPoly> direct;
+        for (std::size_t y1 = 0; y1 <= outputRow; ++y1) {
+            auto product = m_context->EvalMult(lhs.GetRows()[y1], rhs.GetRows()[outputRow - y1]);
+            if (!product) {
+                throw GLCiphertextError("OpenFHE returned null during a GL Hadamard row product");
+            }
+            if (direct) {
+                m_context->EvalAddInPlace(direct, product);
+            }
+            else {
+                direct = std::move(product);
+            }
+        }
+
+        // Wrap group: y1 + y2 = outputRow + n, folded in with Y^n = i via the
+        // exact unit-i monomial (empty for outputRow = n-1).
+        Ciphertext<DCRTPoly> wrap;
+        for (std::size_t y1 = outputRow + 1; y1 < n; ++y1) {
+            auto product = m_context->EvalMult(lhs.GetRows()[y1], rhs.GetRows()[outputRow + n - y1]);
+            if (!product) {
+                throw GLCiphertextError("OpenFHE returned null during a GL Hadamard wrap product");
+            }
+            if (wrap) {
+                m_context->EvalAddInPlace(wrap, product);
+            }
+            else {
+                wrap = std::move(product);
+            }
+        }
+
+        auto output = std::move(direct);
+        if (wrap) {
+            MultiplyRowByUnitIInPlace(wrap);
+            m_context->EvalAddInPlace(output, wrap);
+        }
+        // The degree-2 sums receive exactly one rescale; the automatic CKKS
+        // modes defer the public wrapper, so perform the same internal drop
+        // the composed native multiplication boundary performs.
+        m_context->GetScheme()->ModReduceInternalInPlace(output,
+                                                         cryptoParameters->GetCompositeDegree());
+        outputRows.push_back(std::move(output));
+    }
+    return GLCiphertext(m_geometry, m_context, std::move(outputRows));
+}
+
+GLRotationEvalKey GLSchemelet::EvalRowRotateKeyGen(
+    const PrivateKey<DCRTPoly>& privateKey, const std::vector<uint32_t>& rotationAmounts) const {
+    ValidateKeyContext(privateKey, "EvalRowRotateKeyGen");
+    if (rotationAmounts.empty()) {
+        throw GLDimensionError("EvalRowRotateKeyGen requires at least one rotation amount");
+    }
+
+    std::set<uint32_t> requested;
+    std::vector<int32_t> indexList;
+    for (const auto rotation : rotationAmounts) {
+        if (rotation == 0 || rotation >= m_geometry.GetDimension()) {
+            throw GLDimensionError("GL row-rotation key amounts must lie in [1, n-1]");
+        }
+        if (requested.insert(rotation).second) {
+            indexList.push_back(static_cast<int32_t>(rotation));
+        }
+    }
+
+    auto automorphismKeys = m_context->GetScheme()->EvalAtIndexKeyGen(privateKey, indexList);
+    if (!automorphismKeys || automorphismKeys->empty()) {
+        throw GLMissingEvaluationKeyError("OpenFHE failed to generate the GL row-rotation keys");
+    }
+    return GLRotationEvalKey(m_geometry, m_context, privateKey->GetKeyTag(), std::move(requested),
+                             std::move(automorphismKeys));
+}
+
+GLCiphertext GLSchemelet::EvalRowRotate(const GLCiphertext& ciphertext, uint32_t nu,
+                                        const GLRotationEvalKey& evaluationKey) const {
+    ciphertext.Validate();
+    RequireSameGeometry(m_geometry, ciphertext.GetGeometry(), "GL ciphertext");
+    ValidateOwnedContext(ciphertext.GetCryptoContext(), "GL ciphertext");
+    ValidateRotationEvaluationKey(evaluationKey, ciphertext.GetKeyTag(), "EvalRowRotate");
+    if (nu >= m_geometry.GetDimension()) {
+        throw GLDimensionError("GL row rotation amount must lie in [0, n-1]");
+    }
+
+    std::vector<Ciphertext<DCRTPoly>> rows;
+    rows.reserve(m_geometry.GetRowCount());
+    if (nu == 0) {
+        for (const auto& row : ciphertext.GetRows()) {
+            rows.push_back(row->Clone());
+        }
+        return GLCiphertext(m_geometry, m_context, std::move(rows));
+    }
+
+    if (evaluationKey.m_rotationAmounts.count(nu) == 0) {
+        throw GLMissingEvaluationKeyError(
+            "EvalRowRotate is missing the per-index key for the requested rotation amount");
+    }
+    for (std::size_t row = 0; row < m_geometry.GetRowCount(); ++row) {
+        auto rotated = m_context->GetScheme()->EvalAtIndex(ciphertext.GetRows()[row], nu,
+                                                           *evaluationKey.m_automorphismKeys);
+        if (!rotated) {
+            throw GLCiphertextError(RowMessage("OpenFHE GL row rotation returned null", row));
+        }
+        rows.push_back(std::move(rotated));
+    }
+    return GLCiphertext(m_geometry, m_context, std::move(rows));
+}
+
+GLCiphertext GLSchemelet::EvalColumnRotate(const GLCiphertext& ciphertext, uint32_t nu) const {
+    ciphertext.Validate();
+    RequireSameGeometry(m_geometry, ciphertext.GetGeometry(), "GL ciphertext");
+    ValidateOwnedContext(ciphertext.GetCryptoContext(), "GL ciphertext");
+    if (nu >= m_geometry.GetDimension()) {
+        throw GLDimensionError("GL column rotation amount must lie in [0, n-1]");
+    }
+
+    const auto n = m_geometry.GetDimension();
+    // The Y-axis is the GL codec's own axis: exponent arithmetic uses the
+    // native order 4n (Y^n = i) in transport rings too.
+    const auto nativeOrder = static_cast<uint64_t>(m_geometry.GetNativeCyclotomicOrder());
+    uint64_t alpha         = 1;
+    for (uint32_t step = 0; step < nu; ++step) {
+        alpha = (alpha * 5) % nativeOrder;
+    }
+
+    std::vector<Ciphertext<DCRTPoly>> rows(n);
+    for (std::size_t inputRow = 0; inputRow < n; ++inputRow) {
+        const uint64_t exponent  = alpha * static_cast<uint64_t>(inputRow);
+        const std::size_t target = static_cast<std::size_t>(exponent % n);
+        const uint64_t wraps     = exponent / n;
+
+        auto moved = ciphertext.GetRows()[inputRow]->Clone();
+        ApplyUnitIPowerInPlace(m_context, moved, wraps);
+        if (rows[target]) {
+            // 5^nu is odd and n is a power of two, so y -> (5^nu * y) mod n is
+            // a bijection; a collision means the aggregate was malformed.
+            throw GLCiphertextError("GL column rotation produced a row collision");
+        }
+        rows[target] = std::move(moved);
+    }
+    return GLCiphertext(m_geometry, m_context, std::move(rows));
+}
+
+GLConjugationEvalKey GLSchemelet::EvalConjugateKeyGen(const PrivateKey<DCRTPoly>& privateKey) const {
+    ValidateKeyContext(privateKey, "EvalConjugateKeyGen");
+    const auto conjugationIndex = static_cast<uint32_t>(m_context->GetCyclotomicOrder() - 1);
+    const auto generated =
+        m_context->GetScheme()->EvalAutomorphismKeyGen(privateKey, {conjugationIndex});
+    if (!generated || generated->find(conjugationIndex) == generated->end() ||
+        !generated->at(conjugationIndex)) {
+        throw GLMissingEvaluationKeyError("OpenFHE failed to generate the GL conjugation key");
+    }
+    auto conjugationKeys = std::make_shared<std::map<uint32_t, EvalKey<DCRTPoly>>>();
+    conjugationKeys->emplace(conjugationIndex, generated->at(conjugationIndex));
+    return GLConjugationEvalKey(m_geometry, m_context, privateKey->GetKeyTag(),
+                                std::move(conjugationKeys));
+}
+
+GLCiphertext GLSchemelet::EvalConjugate(const GLCiphertext& ciphertext,
+                                        const GLConjugationEvalKey& evaluationKey) const {
+    ciphertext.Validate();
+    RequireSameGeometry(m_geometry, ciphertext.GetGeometry(), "GL ciphertext");
+    ValidateOwnedContext(ciphertext.GetCryptoContext(), "GL ciphertext");
+    ValidateConjugationEvaluationKey(evaluationKey, ciphertext.GetKeyTag(), "EvalConjugate");
+
+    const auto n                = m_geometry.GetDimension();
+    const auto conjugationIndex = static_cast<uint32_t>(m_context->GetCyclotomicOrder() - 1);
+    std::vector<Ciphertext<DCRTPoly>> rows(n);
+    for (std::size_t inputRow = 0; inputRow < n; ++inputRow) {
+        auto conjugated = m_context->EvalAutomorphism(ciphertext.GetRows()[inputRow], conjugationIndex,
+                                                      *evaluationKey.m_conjugationKeys);
+        if (!conjugated) {
+            throw GLCiphertextError(RowMessage("OpenFHE GL row conjugation returned null", inputRow));
+        }
+        if (inputRow == 0) {
+            rows[0] = std::move(conjugated);
+        }
+        else {
+            // Y^{-y} = -i * Y^{n-y} for y = 1..n-1: one exact unit-i monomial
+            // multiply, then an exact negation (-(i*x) = (-i)*x).
+            MultiplyRowByUnitIInPlace(conjugated);
+            auto negated = m_context->EvalNegate(conjugated);
+            if (!negated) {
+                throw GLCiphertextError(RowMessage("OpenFHE GL conjugation negation returned null", inputRow));
+            }
+            rows[n - inputRow] = std::move(negated);
+        }
+    }
+    return GLCiphertext(m_geometry, m_context, std::move(rows));
+}
+
+GLTransposeEvalKey GLSchemelet::EvalTransposeNativeKeyGen(
+    const PrivateKey<DCRTPoly>& privateKey) const {
+    ValidateKeyContext(privateKey, "EvalTransposeNativeKeyGen");
+    if (!UsesExactNativeRing()) {
+        throw GLNativeModeError("EvalTransposeNativeKeyGen requires exact native ringDimension=2n");
+    }
+
+    const auto n = m_geometry.GetDimension();
+    auto secret = privateKey->GetPrivateElement();
+    secret.SetFormat(Format::EVALUATION);
+
+    std::vector<EvalKey<DCRTPoly>> transposeRows;
+    transposeRows.reserve(n);
+    for (std::size_t row = 0; row < n; ++row) {
+        // K_transpose row y switches the CONSTANT polynomial s_y (the y-th
+        // Gaussian coefficient of the primary secret) to s.  The source-key
+        // wrapper is iteration-local; KeySwitchGen returns destination-bound
+        // EvalKeys and no PrivateKeyImpl is stored in the bundle below.
+        auto transposeSource = GaussianConstantFromCoefficient(secret, row, n);
+        auto transposePrivate = std::make_shared<PrivateKeyImpl<DCRTPoly>>(m_context);
+        transposePrivate->SetPrivateElement(std::move(transposeSource));
+        transposeRows.push_back(m_context->KeySwitchGen(transposePrivate, privateKey));
+    }
+    return GLTransposeEvalKey(m_geometry, m_context, privateKey->GetKeyTag(),
+                              std::move(transposeRows));
+}
+
+GLCiphertext GLSchemelet::EvalTransposeNative(const GLCiphertext& ciphertext,
+                                              const GLTransposeEvalKey& evaluationKey) const {
+    ValidateNativeTrace(ciphertext, "EvalTransposeNative");
+    ValidateTransposeEvaluationKey(evaluationKey, ciphertext.GetKeyTag(), "EvalTransposeNative");
+    return EvaluateNativeTranspose(m_context, m_geometry, ciphertext,
+                                   evaluationKey.m_transposeRows);
 }
 
 GLCiphertext GLSchemelet::EvalCircledastPlainNative(const GLCiphertext& lhs,
@@ -1322,6 +1940,91 @@ void GLSchemelet::ValidateNativeEvaluationKey(const GLNativeEvalKey& evaluationK
     evaluationKey.Validate();
     RequireSameGeometry(m_geometry, evaluationKey.GetGeometry(), "native GL evaluation key");
     ValidateOwnedContext(evaluationKey.GetCryptoContext(), "native GL evaluation key");
+    if (evaluationKey.GetKeyTag() != keyTag) {
+        throw GLKeyMismatchError(std::string(operation) +
+                                 " evaluation key does not match the ciphertext key tag");
+    }
+}
+
+void GLSchemelet::ValidateHadamardCircuit(const GLCiphertext& lhs, const GLCiphertext& rhs,
+                                          const char* operation) const {
+    lhs.Validate();
+    rhs.Validate();
+    RequireSameGeometry(m_geometry, lhs.GetGeometry(), "left GL ciphertext");
+    RequireSameGeometry(m_geometry, rhs.GetGeometry(), "right GL ciphertext");
+    ValidateOwnedContext(lhs.GetCryptoContext(), "left GL ciphertext");
+    ValidateOwnedContext(rhs.GetCryptoContext(), "right GL ciphertext");
+    if (m_parameters.scalingTechnique != FIXEDAUTO && m_parameters.scalingTechnique != FLEXIBLEAUTO) {
+        throw GLReferenceCircuitError(std::string(operation) +
+                                      " supports only FIXEDAUTO or FLEXIBLEAUTO automatic rescaling");
+    }
+    if (lhs.GetKeyTag() != rhs.GetKeyTag()) {
+        throw GLKeyMismatchError(std::string(operation) +
+                                 " requires both operands under the same key");
+    }
+    // The Y-convolution mixes rows within and across operands, so every row
+    // of both aggregates must sit at one shared level and scale.
+    RequireUniformRowMetadata(lhs, operation);
+    RequireUniformRowMetadata(rhs, operation);
+    const auto& left  = lhs.GetRows().front();
+    const auto& right = rhs.GetRows().front();
+    if (left->GetLevel() != right->GetLevel() ||
+        left->GetNoiseScaleDeg() != right->GetNoiseScaleDeg() ||
+        left->GetScalingFactor() != right->GetScalingFactor() ||
+        left->GetElements().front().GetNumOfElements() !=
+            right->GetElements().front().GetNumOfElements()) {
+        throw GLCiphertextError(std::string(operation) +
+                                " requires operands at one shared CKKS level and scale");
+    }
+    if (left->GetNoiseScaleDeg() != 1) {
+        throw GLCiphertextError(std::string(operation) +
+                                " requires rescaled scale-degree-one operands");
+    }
+    ValidateHadamardEvaluationKey(lhs.GetKeyTag(), operation);
+}
+
+void GLSchemelet::ValidateHadamardEvaluationKey(const std::string& keyTag,
+                                                const char* operation) const {
+    const auto& allMultKeys = CryptoContextImpl<DCRTPoly>::GetAllEvalMultKeys();
+    const auto multIt       = allMultKeys.find(keyTag);
+    if (multIt == allMultKeys.end() || multIt->second.empty() || !multIt->second.front() ||
+        multIt->second.front()->GetCryptoContext().get() != m_context.get()) {
+        throw GLMissingEvaluationKeyError(
+            std::string(operation) +
+            " is missing the framework s^2 relinearization key; call EvalHadamardKeyGen");
+    }
+}
+
+void GLSchemelet::ValidateRotationEvaluationKey(const GLRotationEvalKey& evaluationKey,
+                                                const std::string& keyTag,
+                                                const char* operation) const {
+    evaluationKey.Validate();
+    RequireSameGeometry(m_geometry, evaluationKey.GetGeometry(), "GL rotation evaluation key");
+    ValidateOwnedContext(evaluationKey.GetCryptoContext(), "GL rotation evaluation key");
+    if (evaluationKey.GetKeyTag() != keyTag) {
+        throw GLKeyMismatchError(std::string(operation) +
+                                 " evaluation key does not match the ciphertext key tag");
+    }
+}
+
+void GLSchemelet::ValidateConjugationEvaluationKey(const GLConjugationEvalKey& evaluationKey,
+                                                   const std::string& keyTag,
+                                                   const char* operation) const {
+    evaluationKey.Validate();
+    RequireSameGeometry(m_geometry, evaluationKey.GetGeometry(), "GL conjugation evaluation key");
+    ValidateOwnedContext(evaluationKey.GetCryptoContext(), "GL conjugation evaluation key");
+    if (evaluationKey.GetKeyTag() != keyTag) {
+        throw GLKeyMismatchError(std::string(operation) +
+                                 " evaluation key does not match the ciphertext key tag");
+    }
+}
+
+void GLSchemelet::ValidateTransposeEvaluationKey(const GLTransposeEvalKey& evaluationKey,
+                                                 const std::string& keyTag,
+                                                 const char* operation) const {
+    evaluationKey.Validate();
+    RequireSameGeometry(m_geometry, evaluationKey.GetGeometry(), "GL transpose evaluation key");
+    ValidateOwnedContext(evaluationKey.GetCryptoContext(), "GL transpose evaluation key");
     if (evaluationKey.GetKeyTag() != keyTag) {
         throw GLKeyMismatchError(std::string(operation) +
                                  " evaluation key does not match the ciphertext key tag");

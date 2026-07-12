@@ -26,6 +26,9 @@
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <map>
+#include <memory>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -236,6 +239,96 @@ private:
 };
 
 /**
+ * Owned per-index GL row-rotation key material.
+ *
+ * Maps every requested GL row-rotation amount nu (1 <= nu < n) to the
+ * framework automorphism key for X -> X^{5^nu}, generated through the
+ * framework's own EvalAtIndexKeyGen path but kept in this owned object rather
+ * than the ambient global registry (the SHIP port's owned xForwardKeys map is
+ * the precedent).  It contains destination-bound OpenFHE EvalKeys only; no
+ * private-key element is retained.
+ */
+class GLRotationEvalKey final {
+public:
+    const GLGeometry& GetGeometry() const noexcept;
+    const CryptoContext<DCRTPoly>& GetCryptoContext() const noexcept;
+    const std::string& GetKeyTag() const noexcept;
+    const std::set<uint32_t>& GetRotationAmounts() const noexcept;
+    void Validate() const;
+
+private:
+    friend class GLSchemelet;
+
+    GLRotationEvalKey(GLGeometry geometry, CryptoContext<DCRTPoly> context, std::string keyTag,
+                      std::set<uint32_t> rotationAmounts,
+                      std::shared_ptr<std::map<uint32_t, EvalKey<DCRTPoly>>> automorphismKeys);
+
+    GLGeometry m_geometry;
+    CryptoContext<DCRTPoly> m_context;
+    std::string m_keyTag;
+    std::set<uint32_t> m_rotationAmounts;
+    std::shared_ptr<std::map<uint32_t, EvalKey<DCRTPoly>>> m_automorphismKeys;
+};
+
+/**
+ * Owned GL conjugation key material.
+ *
+ * Holds the framework conjugation automorphism key (automorphism index
+ * cyclotomicOrder-1, a Switch_small-class key switch), generated through the
+ * framework keygen path but owned here instead of the ambient registry.  It
+ * contains a destination-bound OpenFHE EvalKey only; no private-key element
+ * is retained.
+ */
+class GLConjugationEvalKey final {
+public:
+    const GLGeometry& GetGeometry() const noexcept;
+    const CryptoContext<DCRTPoly>& GetCryptoContext() const noexcept;
+    const std::string& GetKeyTag() const noexcept;
+    void Validate() const;
+
+private:
+    friend class GLSchemelet;
+
+    GLConjugationEvalKey(GLGeometry geometry, CryptoContext<DCRTPoly> context, std::string keyTag,
+                         std::shared_ptr<std::map<uint32_t, EvalKey<DCRTPoly>>> conjugationKeys);
+
+    GLGeometry m_geometry;
+    CryptoContext<DCRTPoly> m_context;
+    std::string m_keyTag;
+    std::shared_ptr<std::map<uint32_t, EvalKey<DCRTPoly>>> m_conjugationKeys;
+};
+
+/**
+ * The third GL sliced big key-switching family, K_transpose = ksk_{s(Y)->s(X)}.
+ *
+ * Row y encrypts the switch of the CONSTANT source polynomial s_y (the y-th
+ * Gaussian coefficient of the primary secret) to s(X), mirroring the two
+ * matmul families stored in GLNativeEvalKey.  One native transpose performs
+ * one BigSwitch (n^2 KeySwitchCore calls in this correctness representation).
+ * This object contains OpenFHE EvalKeys only; it never retains a private-key
+ * element.  Exact-ring (ringDimension=2n) HEStd_NotSet test material, not a
+ * security or performance claim.
+ */
+class GLTransposeEvalKey final {
+public:
+    const GLGeometry& GetGeometry() const noexcept;
+    const CryptoContext<DCRTPoly>& GetCryptoContext() const noexcept;
+    const std::string& GetKeyTag() const noexcept;
+    void Validate() const;
+
+private:
+    friend class GLSchemelet;
+
+    GLTransposeEvalKey(GLGeometry geometry, CryptoContext<DCRTPoly> context, std::string keyTag,
+                       std::vector<EvalKey<DCRTPoly>> transposeRows);
+
+    GLGeometry m_geometry;
+    CryptoContext<DCRTPoly> m_context;
+    std::string m_keyTag;
+    std::vector<EvalKey<DCRTPoly>> m_transposeRows;
+};
+
+/**
  * First honest OpenFHE vertical slice for W-free GL encoding and transport.
  *
  * The GL Y-axis sigma/sigma^{-1} pair is explicit.  CKKS packing is used
@@ -274,6 +367,121 @@ public:
     GLPlaintext Decrypt(const PrivateKey<DCRTPoly>& privateKey, const GLCiphertext& ciphertext) const;
 
     GLCiphertext Add(const GLCiphertext& lhs, const GLCiphertext& rhs) const;
+
+    /** Rowwise framework negation; decodes to -U.  Transport and exact modes. */
+    GLCiphertext Negate(const GLCiphertext& ciphertext) const;
+
+    /** Rowwise framework subtraction; decodes to U-V.  Transport and exact modes. */
+    GLCiphertext Sub(const GLCiphertext& lhs, const GLCiphertext& rhs) const;
+
+    /**
+     * Sigma-transpose (Remark 3.13) encode: Encode_T(M) = Encode(M^T).
+     *
+     * Under this encoding convention the plaintext-right circledast computes
+     * the LEFT product V^* U instead of U V^*; decode with DecodeTransposed.
+     * Valid in transport and exact modes (a pure encoding convention).
+     */
+    GLEncodedPlaintext EncodeTransposed(const GLPlaintext& plaintext) const;
+
+    /** Sigma-transpose (Remark 3.13) decode: the transpose of Decode. */
+    GLPlaintext DecodeTransposed(const GLEncodedPlaintext& plaintext) const;
+
+    /**
+     * Generate the GL Hadamard relinearization key (the framework's ordinary
+     * s^2 EvalMult key = the paper's Switch_small for the Hadamard product).
+     *
+     * This deliberately calls the framework's own EvalMultKeyGen: OpenFHE
+     * relinearization keys are registry-based via the key tag, and the GL
+     * Hadamard product uses exactly that framework Switch_small, so the
+     * ambient registry is the honest home for it (unlike the owned GL-specific
+     * sliced families).  EvalHadamard revalidates the registry entry and fails
+     * closed with GLMissingEvaluationKeyError when it is absent.
+     */
+    void EvalHadamardKeyGen(const PrivateKey<DCRTPoly>& privateKey) const;
+
+    /**
+     * GL Hadamard (entrywise) product; decodes to U o V and consumes 1 level.
+     *
+     * Y-convolution row form: out_r = sum_{y1+y2=r} row_{y1}*row_{y2}
+     * + i * sum_{y1+y2=r+n} row_{y1}*row_{y2}.  Every row-pair product is one
+     * framework ct x ct multiplication relinearized with the framework s^2
+     * key; the Y^n=i wrap group is folded in with the exact unit-i monomial
+     * X^{ringDim/2}; the degree-2 sums receive exactly one rescale.
+     *
+     * Despite operating on GL row content, this construction is
+     * representation-valid in transport rings too (hence no Native suffix):
+     * rows interact only through same-slot framework products and exact
+     * unit-i monomial multiplies, and X^{ringDim/2} scales every canonical
+     * CKKS slot by exactly +i in any power-of-two CKKS ring because each slot
+     * root is zeta^{5^j} with 5^j = 1 (mod 4).  Only FIXEDAUTO and
+     * FLEXIBLEAUTO are supported; operands must be rescaled (scale degree 1)
+     * aggregates at one shared level/scale.
+     */
+    GLCiphertext EvalHadamard(const GLCiphertext& lhs, const GLCiphertext& rhs) const;
+
+    /**
+     * Generate owned framework rotation keys for the requested GL row
+     * rotations (each amount in [1, n-1]).  No ambient registry is touched.
+     */
+    GLRotationEvalKey EvalRowRotateKeyGen(const PrivateKey<DCRTPoly>& privateKey,
+                                          const std::vector<uint32_t>& rotationAmounts) const;
+
+    /**
+     * GL row rotation by nu (X -> X^{5^nu}): per-row framework slot rotation
+     * by +nu with the owned key material.  0 levels; scale unchanged; decodes
+     * to (j,k) -> U[(j+nu) mod n, k].  Transport and exact modes.  A missing
+     * per-index key fails closed with GLMissingEvaluationKeyError; nu=0
+     * returns a validated copy without key material.
+     */
+    GLCiphertext EvalRowRotate(const GLCiphertext& ciphertext, uint32_t nu,
+                               const GLRotationEvalKey& evaluationKey) const;
+
+    /**
+     * GL column rotation by nu (Y -> Y^{5^nu}): keyless row permutation plus
+     * exact unit factors.  For every input row y with 5^nu * y = q*n + r the
+     * output row r is i^{q mod 4} times row y (unit-i monomial per factor of
+     * i, an exact negation where i^2 appears).  No key material, no key
+     * switch, 0 levels; decodes to (j,k) -> U[j, (k+nu) mod n].  Transport
+     * and exact modes.
+     */
+    GLCiphertext EvalColumnRotate(const GLCiphertext& ciphertext, uint32_t nu) const;
+
+    /**
+     * Generate the owned framework conjugation key (automorphism index
+     * cyclotomicOrder-1, Switch_small class).  No ambient registry is touched.
+     */
+    GLConjugationEvalKey EvalConjugateKeyGen(const PrivateKey<DCRTPoly>& privateKey) const;
+
+    /**
+     * GL conjugation; decodes to entrywise conj(U).  Per-row framework
+     * conjugation followed by the Y^{-1} row relabeling: output row 0 is
+     * conj(row 0) and output row n-y is (-i) * conj(row y) for y=1..n-1
+     * (one exact unit-i monomial multiply then an exact negation).  0 levels;
+     * scale unchanged.  Transport and exact modes (the conjugation
+     * automorphism exists in any power-of-two CKKS ring).
+     */
+    GLCiphertext EvalConjugate(const GLCiphertext& ciphertext,
+                               const GLConjugationEvalKey& evaluationKey) const;
+
+    /**
+     * Generate the third GL sliced big key family K_transpose =
+     * ksk_{s(Y)->s(X)} whose per-Y-coefficient source secrets are the
+     * constant polynomials s_y (the y-th Gaussian coefficient of the primary
+     * secret).  Exact-ring only.
+     */
+    GLTransposeEvalKey EvalTransposeNativeKeyGen(const PrivateKey<DCRTPoly>& privateKey) const;
+
+    /**
+     * Native GL transpose; decodes to U^T.  Step 1 is the pure public
+     * coefficient relabeling b'(X,Y)=b(Y,X), a'(X,Y)=a(Y,X) (Gaussian
+     * coefficient x of new row y' = Gaussian coefficient y' of old row x;
+     * both T-lanes move together and no wrap units appear).  Step 2 is one
+     * BigSwitch with K_transpose, switching the relation from s(Y) back to
+     * s(X).  0 rescales; level and scale unchanged.  Exact-ring only
+     * (GLNativeModeError otherwise).
+     */
+    GLCiphertext EvalTransposeNative(const GLCiphertext& ciphertext,
+                                     const GLTransposeEvalKey& evaluationKey) const;
 
     /**
      * Genuine W-free GL plaintext-right circledast in the native coefficient
@@ -351,6 +559,15 @@ private:
     void ValidateNativeTrace(const GLCiphertext& ciphertext, const char* operation) const;
     void ValidateNativeEvaluationKey(const GLNativeEvalKey& evaluationKey,
                                      const std::string& keyTag, const char* operation) const;
+    void ValidateHadamardCircuit(const GLCiphertext& lhs, const GLCiphertext& rhs,
+                                 const char* operation) const;
+    void ValidateHadamardEvaluationKey(const std::string& keyTag, const char* operation) const;
+    void ValidateRotationEvaluationKey(const GLRotationEvalKey& evaluationKey,
+                                       const std::string& keyTag, const char* operation) const;
+    void ValidateConjugationEvaluationKey(const GLConjugationEvalKey& evaluationKey,
+                                          const std::string& keyTag, const char* operation) const;
+    void ValidateTransposeEvaluationKey(const GLTransposeEvalKey& evaluationKey,
+                                        const std::string& keyTag, const char* operation) const;
 
     GLParameters m_parameters;
     GLGeometry m_geometry;
