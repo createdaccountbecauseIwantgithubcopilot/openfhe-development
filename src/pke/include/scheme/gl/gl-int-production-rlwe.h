@@ -18,6 +18,8 @@
 
 namespace lbcrypto {
 
+class GLIntProductionSwitchCore;
+
 inline constexpr std::size_t kGLIntProductionRLWEPlaneCount = 2;
 inline constexpr std::size_t kGLIntProductionMaxSecretTerms = 4;
 
@@ -55,6 +57,7 @@ public:
 
 private:
     friend class GLIntProductionRLWECore;
+    friend class GLIntProductionSwitchCore;
 
     struct Term {
         uint32_t x{0};
