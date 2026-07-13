@@ -15,6 +15,7 @@
 #include "glscheme/gl128_ciphertext_artifact.hpp"
 #include "glscheme/gl128_h64_bootstrap_research.hpp"
 #include "glscheme/gl128_h64_hidden_selector.hpp"
+#include "glscheme/gl128_h64_p257_complete_w_action.hpp"
 #include "glscheme/gl128_h64_p257_one_bit.hpp"
 #include "glscheme/gl128_h64_p257_one_bit_gpu.hpp"
 #include "glscheme/gl128_h64_p257_prefix_splice.hpp"
@@ -389,6 +390,28 @@ public:
         glscheme::rns::GlrH64P257RightMuxRotEvidence;
     using NativeGL128H64P257RightMuxRotResult =
         glscheme::rns::GlrH64P257RightMuxRotResult;
+    using NativeGL128H64P257FullPrefixMaskMaterial =
+        glscheme::rns::GlrH64P257FullPrefixMaskMaterial;
+    using NativeGL128H64P257SharedWActionKeyManifest =
+        glscheme::rns::GlrH64P257SharedWActionKeyManifest;
+    using NativeGL128H64P257SharedWActionKeyBinding =
+        glscheme::rns::GlrH64P257SharedWActionKeyBinding;
+    using NativeGL128H64P257SharedWActionKeySink =
+        glscheme::rns::GlrH64P257SharedWActionKeySink;
+    using NativeGL128H64P257SharedWActionKeySource =
+        glscheme::rns::GlrH64P257SharedWActionKeySource;
+    using NativeGL128H64P257SharedWActionKeyConsumer =
+        glscheme::rns::GlrH64P257SharedWActionKeyConsumer;
+    using NativeGL128H64P257SharedWActionKeyEvidence =
+        glscheme::rns::GlrH64P257SharedWActionKeyEvidence;
+    using NativeGL128H64P257CompleteWActionMaterial =
+        glscheme::rns::GlrH64P257CompleteWActionMaterial;
+    using NativeGL128H64P257CompleteWActionDeploymentSource =
+        glscheme::rns::GlrH64P257CompleteWActionDeploymentSource;
+    using NativeGL128H64P257CompleteWActionEvidence =
+        glscheme::rns::GlrH64P257CompleteWActionEvidence;
+    using NativeGL128H64P257CompleteWActionResult =
+        glscheme::rns::GlrH64P257CompleteWActionResult;
     using NativeGL128H64SelectedLeafFoldBinding =
         glscheme::rns::GlrH64SelectedLeafFoldBinding;
     using NativeGL128H64SelectedLeafRequest =
@@ -551,6 +574,78 @@ public:
         bool encryptedDenominatorExecuted = false;
         bool completeEightBitWActionExecuted = false;
         bool exactNoiseEvidencePresent = false;
+        bool productionSecurityAuthorized = false;
+        bool bootstrapDirectAdmitted = false;
+    };
+
+    // Typed deployment projection of core 2f0916c5.  A support-local prefix
+    // is bound to one exact ten-record private-cursor emission and the same
+    // support-independent eight-rotation/one-relinearization bundle.  Only
+    // support zero was value-executed by the core acceptance; support one was
+    // binding-only evidence that the cursor and shared bundle can advance.
+    struct NativeGL128H64P257CompleteWDeploymentCapabilities final {
+        std::string schema =
+            "openfhe.gl128_h64_p257_complete_w_deployment_capabilities.v1";
+        std::string nativeDeploymentCoreCommit =
+            "2f0916c5056a0c874f03513cdda6759d499f77f2";
+        std::string nativeCompleteWCoreCommit =
+            "927a72b3951c1261bafc69e366e072b512240f09";
+        std::string nativeSharedKeyCoreCommit =
+            "80ce8c52d75fe5f24ff9a817474f2dcfbd576fb9";
+        std::string nativeOwnerCursorCoreCommit =
+            "599dde94b91b10249eb6d222e008bf67b5b6b457";
+        std::string nativeMaterialSchema =
+            "glscheme.gl128_h64_p257_complete_w_action_material.v1";
+        std::string nativeEvidenceSchema =
+            "glscheme.gl128_h64_p257_complete_w_action_evidence.v1";
+        std::string nativeSharedKeyManifestSchema =
+            "glscheme.gl128_h64_p257_shared_w_action_keys.v1";
+        std::string nativeSharedKeyBindingSchema =
+            "glscheme.gl128_h64_p257_shared_w_action_key_binding.v1";
+        std::string parameterFingerprint =
+            "glrsha256:66a12778024471924327683b7f52e8df4dd038cb3f7f803a516b393e1363e6ab";
+        std::string supportCommitment =
+            "glr-ship-support-v1:n=128:phi=256:count=64:fnv64=16830100300970850058";
+        std::uint64_t xwCoordinatesPerRequest = 32768;
+        std::uint32_t controlsPerSupportChunk = 10;
+        std::uint32_t authenticatedWControls = 8;
+        std::uint32_t sharedRotationKeys = 8;
+        std::uint32_t sharedRelinearizationKeys = 1;
+        std::uint32_t actionKeyLevel = 0;
+        std::uint32_t actionKeySpecialPrimeCount = 13;
+        std::uint32_t cursorInitialIndex = 0;
+        std::uint32_t cursorAfterSupportZero = 10;
+        std::uint32_t cursorAfterSupportOne = 20;
+        std::uint32_t oldCursorRecordsLoadedOrVerified = 0;
+        std::uint32_t boundSupportCount = 2;
+        std::uint32_t valueExecutedSupportCount = 1;
+        std::uint32_t sharedActionKeyGenerationCalls = 1;
+        double supportZeroMaximumObservedValueError = 1.411125e-4;
+        double coreAcceptanceWallRuntimeSeconds = 190.54;
+        double coreAcceptancePeakRssMiB = 576.55;
+        bool sharedActionKeyGenerationExposed = true;
+        bool sharedActionKeyBindingExposed = true;
+        bool supportLocalPrefixGenerationExposed = true;
+        bool exactOwnerCursorChunkBindingExposed = true;
+        bool deploymentCpuValueDelegationExposed = true;
+        bool completeEightBitWActionExecuted = true;
+        bool encryptedTelescopingDenominatorExecuted = true;
+        bool coreSupportZeroValueExecutionObserved = true;
+        bool coreSupportOneBindingObserved = true;
+        bool coreSupportOneValueExecutionObserved = false;
+        bool cursorAdvancedWithoutOldRecordLoads = true;
+        bool sameSharedEightPlusOneBundleReused = true;
+        bool actionKeysRegeneratedForSupportOne = false;
+        bool frameworkNativeValueExecutionObserved = false;
+        bool hiddenFineXSelectionExecuted = false;
+        bool hiddenSignSelectionExecuted = false;
+        bool full64SupportFoldComposed = false;
+        bool fullAllYStcComposed = false;
+        bool exactEstimatorEvidencePresent = false;
+        bool exactNoiseEvidencePresent = false;
+        bool structuredSecurityCertificatePresent = false;
+        bool gpuExecutionExposed = false;
+        bool gpuH64BootstrapReady = false;
         bool productionSecurityAuthorized = false;
         bool bootstrapDirectAdmitted = false;
     };
@@ -1840,6 +1935,39 @@ public:
         std::uint64_t seed) const;
     NativeGL128H64P257RightMuxRotResult EvaluateH64P257RightMuxRotCpu(
         const NativeGL128H64P257RightMuxRotMaterial& material,
+        std::span<const NativeGL128H64P257OneBitRequest> requests) const;
+    NativeGL128H64P257CompleteWDeploymentCapabilities
+    GetH64P257CompleteWDeploymentCapabilities() const;
+    NativeGL128H64P257FullPrefixMaskMaterial
+    GenerateH64P257FullPrefixMaskMaterial(
+        const SparseSecretKey& sparseKey,
+        const NativeGL128H64HiddenSelectorOwnerSeed& ownerSeed,
+        std::uint32_t supportOrdinal, std::uint64_t seed) const;
+    NativeGL128H64P257SharedWActionKeyManifest
+    GenerateH64P257SharedWActionKeys(
+        const SparseSecretKey& sparseKey,
+        const NativeGL128H64P257SharedWActionKeySink& sink,
+        std::uint64_t seed) const;
+    NativeGL128H64P257SharedWActionKeyBinding
+    BindH64P257SharedWActionKeys(
+        const NativeGL128H64P257SharedWActionKeyManifest& manifest,
+        std::uint32_t supportOrdinal) const;
+    NativeGL128H64P257SharedWActionKeyEvidence
+    ConsumeH64P257SharedWActionKeys(
+        const NativeGL128H64P257SharedWActionKeyManifest& manifest,
+        const NativeGL128H64P257SharedWActionKeyBinding& binding,
+        const NativeGL128H64P257SharedWActionKeySource& source,
+        const NativeGL128H64P257SharedWActionKeyConsumer& consumer) const;
+    NativeGL128H64P257CompleteWActionMaterial
+    BindH64P257CompleteWDeploymentMaterial(
+        NativeGL128H64P257FullPrefixMaskMaterial prefixMask,
+        const NativeGL128H64HiddenSelectorOwnerCursorEmission& cursorChunk,
+        const NativeGL128H64P257SharedWActionKeyManifest& sharedActionKeys)
+        const;
+    NativeGL128H64P257CompleteWActionResult
+    EvaluateH64P257CompleteWDeploymentCpu(
+        const NativeGL128H64P257CompleteWActionMaterial& material,
+        const NativeGL128H64P257CompleteWActionDeploymentSource& source,
         std::span<const NativeGL128H64P257OneBitRequest> requests) const;
     NativeGL128H64SelectedLeafFoldCapabilities
     GetH64SelectedLeafFoldCapabilities() const;

@@ -221,6 +221,91 @@ int main() {
     Require(generateMuxRot != nullptr && executeMuxRot != nullptr,
             "OpenFHE canonical H64 right-MuxRot seam is absent");
 
+    const auto completeW =
+        adapter.GetH64P257CompleteWDeploymentCapabilities();
+    Require(completeW.schema ==
+                    "openfhe.gl128_h64_p257_complete_w_deployment_capabilities.v1" &&
+                completeW.nativeDeploymentCoreCommit ==
+                    "2f0916c5056a0c874f03513cdda6759d499f77f2" &&
+                completeW.nativeCompleteWCoreCommit ==
+                    "927a72b3951c1261bafc69e366e072b512240f09" &&
+                completeW.nativeSharedKeyCoreCommit ==
+                    "80ce8c52d75fe5f24ff9a817474f2dcfbd576fb9" &&
+                completeW.nativeOwnerCursorCoreCommit ==
+                    "599dde94b91b10249eb6d222e008bf67b5b6b457" &&
+                completeW.nativeMaterialSchema ==
+                    "glscheme.gl128_h64_p257_complete_w_action_material.v1" &&
+                completeW.nativeEvidenceSchema ==
+                    "glscheme.gl128_h64_p257_complete_w_action_evidence.v1" &&
+                completeW.nativeSharedKeyManifestSchema ==
+                    "glscheme.gl128_h64_p257_shared_w_action_keys.v1" &&
+                completeW.nativeSharedKeyBindingSchema ==
+                    "glscheme.gl128_h64_p257_shared_w_action_key_binding.v1" &&
+                completeW.parameterFingerprint ==
+                    "glrsha256:66a12778024471924327683b7f52e8df4dd038cb3f7f803a516b393e1363e6ab" &&
+                completeW.supportCommitment ==
+                    "glr-ship-support-v1:n=128:phi=256:count=64:fnv64=16830100300970850058" &&
+                completeW.xwCoordinatesPerRequest == 32768 &&
+                completeW.controlsPerSupportChunk == 10 &&
+                completeW.authenticatedWControls == 8 &&
+                completeW.sharedRotationKeys == 8 &&
+                completeW.sharedRelinearizationKeys == 1 &&
+                completeW.actionKeyLevel == 0 &&
+                completeW.actionKeySpecialPrimeCount == 13 &&
+                completeW.cursorInitialIndex == 0 &&
+                completeW.cursorAfterSupportZero == 10 &&
+                completeW.cursorAfterSupportOne == 20 &&
+                completeW.oldCursorRecordsLoadedOrVerified == 0 &&
+                completeW.boundSupportCount == 2 &&
+                completeW.valueExecutedSupportCount == 1 &&
+                completeW.sharedActionKeyGenerationCalls == 1 &&
+                completeW.supportZeroMaximumObservedValueError ==
+                    1.411125e-4 &&
+                completeW.coreAcceptanceWallRuntimeSeconds == 190.54 &&
+                completeW.coreAcceptancePeakRssMiB == 576.55 &&
+                completeW.sharedActionKeyGenerationExposed &&
+                completeW.sharedActionKeyBindingExposed &&
+                completeW.supportLocalPrefixGenerationExposed &&
+                completeW.exactOwnerCursorChunkBindingExposed &&
+                completeW.deploymentCpuValueDelegationExposed &&
+                completeW.completeEightBitWActionExecuted &&
+                completeW.encryptedTelescopingDenominatorExecuted &&
+                completeW.coreSupportZeroValueExecutionObserved &&
+                completeW.coreSupportOneBindingObserved &&
+                !completeW.coreSupportOneValueExecutionObserved &&
+                completeW.cursorAdvancedWithoutOldRecordLoads &&
+                completeW.sameSharedEightPlusOneBundleReused &&
+                !completeW.actionKeysRegeneratedForSupportOne &&
+                !completeW.frameworkNativeValueExecutionObserved &&
+                !completeW.hiddenFineXSelectionExecuted &&
+                !completeW.hiddenSignSelectionExecuted &&
+                !completeW.full64SupportFoldComposed &&
+                !completeW.fullAllYStcComposed &&
+                !completeW.exactEstimatorEvidencePresent &&
+                !completeW.exactNoiseEvidencePresent &&
+                !completeW.structuredSecurityCertificatePresent &&
+                !completeW.gpuExecutionExposed &&
+                !completeW.gpuH64BootstrapReady &&
+                !completeW.productionSecurityAuthorized &&
+                !completeW.bootstrapDirectAdmitted,
+            "OpenFHE complete H64 W deployment capability is malformed");
+    auto generateFullPrefix =
+        &Adapter::GenerateH64P257FullPrefixMaskMaterial;
+    auto generateSharedWKeys =
+        &Adapter::GenerateH64P257SharedWActionKeys;
+    auto bindSharedWKeys = &Adapter::BindH64P257SharedWActionKeys;
+    auto consumeSharedWKeys = &Adapter::ConsumeH64P257SharedWActionKeys;
+    auto bindCompleteW =
+        &Adapter::BindH64P257CompleteWDeploymentMaterial;
+    auto executeCompleteW =
+        &Adapter::EvaluateH64P257CompleteWDeploymentCpu;
+    Require(generateFullPrefix != nullptr &&
+                generateSharedWKeys != nullptr &&
+                bindSharedWKeys != nullptr &&
+                consumeSharedWKeys != nullptr && bindCompleteW != nullptr &&
+                executeCompleteW != nullptr,
+            "OpenFHE complete H64 W deployment seams are absent");
+
     const auto selectedFold =
         adapter.GetH64SelectedLeafFoldCapabilities();
     Require(selectedFold.schema ==

@@ -55,6 +55,24 @@ using OwnerCursorRef =
     Adapter::NativeGL128H64HiddenSelectorOwnerCursor&;
 using OwnerCursorSinkRef =
     const Adapter::NativeGL128H64HiddenSelectorOwnerCursorSink&;
+using OwnerCursorEmissionRef =
+    const Adapter::NativeGL128H64HiddenSelectorOwnerCursorEmission&;
+using SharedWKeySinkRef =
+    const Adapter::NativeGL128H64P257SharedWActionKeySink&;
+using SharedWKeyManifestRef =
+    const Adapter::NativeGL128H64P257SharedWActionKeyManifest&;
+using SharedWKeyBindingRef =
+    const Adapter::NativeGL128H64P257SharedWActionKeyBinding&;
+using SharedWKeySourceRef =
+    const Adapter::NativeGL128H64P257SharedWActionKeySource&;
+using SharedWKeyConsumerRef =
+    const Adapter::NativeGL128H64P257SharedWActionKeyConsumer&;
+using CompleteWMaterialRef =
+    const Adapter::NativeGL128H64P257CompleteWActionMaterial&;
+using CompleteWDeploymentSourceRef =
+    const Adapter::NativeGL128H64P257CompleteWActionDeploymentSource&;
+using CompleteWRequests =
+    std::span<const Adapter::NativeGL128H64P257OneBitRequest>;
 using NativeSwitchKeyRef = const Adapter::NativeSwitchKey&;
 using NativeKskRecordRef = const Adapter::NativeKskRecord&;
 
@@ -129,6 +147,61 @@ static_assert(std::is_same_v<
                                std::declval<OwnerSeedRef>(),
                                std::declval<OwnerCursorSinkRef>(), 10)),
               Adapter::NativeGL128H64HiddenSelectorOwnerCursorEmission>);
+static_assert(std::is_same_v<
+              decltype(std::declval<AdapterRef>()
+                           .GetH64P257CompleteWDeploymentCapabilities()),
+              Adapter::NativeGL128H64P257CompleteWDeploymentCapabilities>);
+static_assert(std::is_same_v<
+              decltype(std::declval<AdapterRef>()
+                           .GenerateH64P257FullPrefixMaskMaterial(
+                               std::declval<SparseKeyRef>(),
+                               std::declval<OwnerSeedRef>(), 0, 7)),
+              Adapter::NativeGL128H64P257FullPrefixMaskMaterial>);
+static_assert(std::is_same_v<
+              decltype(std::declval<AdapterRef>()
+                           .GenerateH64P257SharedWActionKeys(
+                               std::declval<SparseKeyRef>(),
+                               std::declval<SharedWKeySinkRef>(), 7)),
+              Adapter::NativeGL128H64P257SharedWActionKeyManifest>);
+static_assert(std::is_same_v<
+              decltype(std::declval<AdapterRef>()
+                           .BindH64P257SharedWActionKeys(
+                               std::declval<SharedWKeyManifestRef>(), 0)),
+              Adapter::NativeGL128H64P257SharedWActionKeyBinding>);
+static_assert(std::is_same_v<
+              decltype(std::declval<AdapterRef>()
+                           .ConsumeH64P257SharedWActionKeys(
+                               std::declval<SharedWKeyManifestRef>(),
+                               std::declval<SharedWKeyBindingRef>(),
+                               std::declval<SharedWKeySourceRef>(),
+                               std::declval<SharedWKeyConsumerRef>())),
+              Adapter::NativeGL128H64P257SharedWActionKeyEvidence>);
+static_assert(std::is_same_v<
+              decltype(std::declval<AdapterRef>()
+                           .BindH64P257CompleteWDeploymentMaterial(
+                               std::declval<Adapter::
+                                   NativeGL128H64P257FullPrefixMaskMaterial>(),
+                               std::declval<OwnerCursorEmissionRef>(),
+                               std::declval<SharedWKeyManifestRef>())),
+              Adapter::NativeGL128H64P257CompleteWActionMaterial>);
+static_assert(std::is_same_v<
+              decltype(std::declval<AdapterRef>()
+                           .EvaluateH64P257CompleteWDeploymentCpu(
+                               std::declval<CompleteWMaterialRef>(),
+                               std::declval<CompleteWDeploymentSourceRef>(),
+                               std::declval<CompleteWRequests>())),
+              Adapter::NativeGL128H64P257CompleteWActionResult>);
+static_assert(!std::is_convertible_v<
+              Adapter::NativeGL128H64P257CompleteWActionResult,
+              Adapter::NativeGL128BootstrapResult>);
+static_assert(Adapter::NativeGL128H64P257CompleteWActionEvidence::
+                  research_only);
+static_assert(!Adapter::NativeGL128H64P257CompleteWActionEvidence::
+                  exact_noise_evidence_present);
+static_assert(!Adapter::NativeGL128H64P257CompleteWActionEvidence::
+                  production_security_authorized);
+static_assert(!Adapter::NativeGL128H64P257CompleteWActionEvidence::
+                  bootstrap_direct_admitted);
 static_assert(std::is_same_v<
               decltype(std::declval<AdapterRef>()
                            .GetH64SelectedLeafH4GpuCapabilities()),

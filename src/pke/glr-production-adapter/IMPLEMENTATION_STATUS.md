@@ -1,5 +1,30 @@
 # GLR production-adapter implementation status
 
+## Complete p=257 eight-bit W deployment seam
+
+The adapter exposes the committed GLScheme deployment path from core revision
+`2f0916c5056a0c874f03513cdda6759d499f77f2`. The owner-facing surface generates
+one support-local full-prefix mask and one global support-independent bundle of
+eight L0/P13 sparse W-rotation keys plus one L0/P13 sparse relinearization key.
+`BindH64P257CompleteWDeploymentMaterial()` combines that prefix, an exact
+ten-record emission from the private owner cursor, and the shared bundle;
+`EvaluateH64P257CompleteWDeploymentCpu()` delegates the complete encrypted
+eight-bit numerator and telescoping-denominator action.
+
+The core acceptance generated the 8+1 action-key bundle exactly once. It
+advanced the same private cursor `0 -> 10 -> 20` while loading or reverifying
+zero old records, value-executed support 0 across all 32,768 X/W coordinates,
+then bound support 1 to the same bundle without regenerating keys. Support 0's
+maximum observed value error was `1.411125e-4`; the complete acceptance took
+190.54 seconds at 576.55 MiB peak RSS. Support 1 was binding-only and was not
+value-executed.
+
+These measurements belong to the GLScheme core acceptance, not an
+OpenFHE-native ciphertext run. The typed receipt keeps hidden fine-X and sign
+selection, the hidden 64-support fold, all-Y/StC, formal estimator/noise and
+structured-security certificates, GPU execution/readiness, production
+authorization, and bootstrap-direct admission false.
+
 ## H64 selected-leaf P14 fold
 
 The adapter exposes `GetH64SelectedLeafFoldCapabilities()` and

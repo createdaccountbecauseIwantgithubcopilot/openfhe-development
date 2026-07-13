@@ -2863,6 +2863,145 @@ GLRProductionAdapter::EvaluateH64P257RightMuxRotCpu(
         m_context, material, requests);
 }
 
+GLRProductionAdapter::NativeGL128H64P257CompleteWDeploymentCapabilities
+GLRProductionAdapter::GetH64P257CompleteWDeploymentCapabilities() const {
+    (void)glscheme::rns::glr_gl128_validate_context(m_context);
+    NativeGL128H64P257CompleteWDeploymentCapabilities capabilities;
+    const auto plan = PlanH64HiddenSelector();
+    if (capabilities.schema !=
+            "openfhe.gl128_h64_p257_complete_w_deployment_capabilities.v1" ||
+        capabilities.nativeDeploymentCoreCommit !=
+            "2f0916c5056a0c874f03513cdda6759d499f77f2" ||
+        capabilities.nativeCompleteWCoreCommit !=
+            "927a72b3951c1261bafc69e366e072b512240f09" ||
+        capabilities.nativeSharedKeyCoreCommit !=
+            "80ce8c52d75fe5f24ff9a817474f2dcfbd576fb9" ||
+        capabilities.nativeOwnerCursorCoreCommit !=
+            "599dde94b91b10249eb6d222e008bf67b5b6b457" ||
+        capabilities.nativeMaterialSchema !=
+            "glscheme.gl128_h64_p257_complete_w_action_material.v1" ||
+        capabilities.nativeEvidenceSchema !=
+            "glscheme.gl128_h64_p257_complete_w_action_evidence.v1" ||
+        capabilities.nativeSharedKeyManifestSchema !=
+            "glscheme.gl128_h64_p257_shared_w_action_keys.v1" ||
+        capabilities.nativeSharedKeyBindingSchema !=
+            "glscheme.gl128_h64_p257_shared_w_action_key_binding.v1" ||
+        plan.profile.parameter_fingerprint !=
+            capabilities.parameterFingerprint ||
+        plan.profile.support_commitment != capabilities.supportCommitment ||
+        capabilities.xwCoordinatesPerRequest != 32768 ||
+        capabilities.controlsPerSupportChunk != 10 ||
+        capabilities.authenticatedWControls != 8 ||
+        capabilities.sharedRotationKeys != 8 ||
+        capabilities.sharedRelinearizationKeys != 1 ||
+        capabilities.actionKeyLevel != 0 ||
+        capabilities.actionKeySpecialPrimeCount != 13 ||
+        capabilities.cursorInitialIndex != 0 ||
+        capabilities.cursorAfterSupportZero != 10 ||
+        capabilities.cursorAfterSupportOne != 20 ||
+        capabilities.oldCursorRecordsLoadedOrVerified != 0 ||
+        capabilities.boundSupportCount != 2 ||
+        capabilities.valueExecutedSupportCount != 1 ||
+        capabilities.sharedActionKeyGenerationCalls != 1 ||
+        capabilities.supportZeroMaximumObservedValueError != 1.411125e-4 ||
+        capabilities.coreAcceptanceWallRuntimeSeconds != 190.54 ||
+        capabilities.coreAcceptancePeakRssMiB != 576.55 ||
+        !capabilities.sharedActionKeyGenerationExposed ||
+        !capabilities.sharedActionKeyBindingExposed ||
+        !capabilities.supportLocalPrefixGenerationExposed ||
+        !capabilities.exactOwnerCursorChunkBindingExposed ||
+        !capabilities.deploymentCpuValueDelegationExposed ||
+        !capabilities.completeEightBitWActionExecuted ||
+        !capabilities.encryptedTelescopingDenominatorExecuted ||
+        !capabilities.coreSupportZeroValueExecutionObserved ||
+        !capabilities.coreSupportOneBindingObserved ||
+        capabilities.coreSupportOneValueExecutionObserved ||
+        !capabilities.cursorAdvancedWithoutOldRecordLoads ||
+        !capabilities.sameSharedEightPlusOneBundleReused ||
+        capabilities.actionKeysRegeneratedForSupportOne ||
+        capabilities.frameworkNativeValueExecutionObserved ||
+        capabilities.hiddenFineXSelectionExecuted ||
+        capabilities.hiddenSignSelectionExecuted ||
+        capabilities.full64SupportFoldComposed ||
+        capabilities.fullAllYStcComposed ||
+        capabilities.exactEstimatorEvidencePresent ||
+        capabilities.exactNoiseEvidencePresent ||
+        capabilities.structuredSecurityCertificatePresent ||
+        capabilities.gpuExecutionExposed ||
+        capabilities.gpuH64BootstrapReady ||
+        capabilities.productionSecurityAuthorized ||
+        capabilities.bootstrapDirectAdmitted) {
+        throw GlrError(
+            "GLRProductionAdapter: complete H64 W deployment capability is "
+            "malformed or overstates execution/security admission");
+    }
+    return capabilities;
+}
+
+GLRProductionAdapter::NativeGL128H64P257FullPrefixMaskMaterial
+GLRProductionAdapter::GenerateH64P257FullPrefixMaskMaterial(
+    const SparseSecretKey& sparseKey,
+    const NativeGL128H64HiddenSelectorOwnerSeed& ownerSeed,
+    std::uint32_t supportOrdinal, std::uint64_t seed) const {
+    (void)GetH64P257CompleteWDeploymentCapabilities();
+    GlrRngOwner rng = MakeRng(seed);
+    return glscheme::rns::glr_generate_h64_p257_full_prefix_mask_material(
+        m_context, sparseKey, ownerSeed, *rng, supportOrdinal);
+}
+
+GLRProductionAdapter::NativeGL128H64P257SharedWActionKeyManifest
+GLRProductionAdapter::GenerateH64P257SharedWActionKeys(
+    const SparseSecretKey& sparseKey,
+    const NativeGL128H64P257SharedWActionKeySink& sink,
+    std::uint64_t seed) const {
+    (void)GetH64P257CompleteWDeploymentCapabilities();
+    GlrRngOwner rng = MakeRng(seed);
+    return glscheme::rns::glr_generate_h64_p257_shared_w_action_keys(
+        m_context, sparseKey, *rng, sink);
+}
+
+GLRProductionAdapter::NativeGL128H64P257SharedWActionKeyBinding
+GLRProductionAdapter::BindH64P257SharedWActionKeys(
+    const NativeGL128H64P257SharedWActionKeyManifest& manifest,
+    std::uint32_t supportOrdinal) const {
+    (void)GetH64P257CompleteWDeploymentCapabilities();
+    return glscheme::rns::glr_bind_h64_p257_shared_w_action_keys(
+        manifest, supportOrdinal);
+}
+
+GLRProductionAdapter::NativeGL128H64P257SharedWActionKeyEvidence
+GLRProductionAdapter::ConsumeH64P257SharedWActionKeys(
+    const NativeGL128H64P257SharedWActionKeyManifest& manifest,
+    const NativeGL128H64P257SharedWActionKeyBinding& binding,
+    const NativeGL128H64P257SharedWActionKeySource& source,
+    const NativeGL128H64P257SharedWActionKeyConsumer& consumer) const {
+    (void)GetH64P257CompleteWDeploymentCapabilities();
+    return glscheme::rns::glr_consume_h64_p257_shared_w_action_keys(
+        m_context, manifest, binding, source, consumer);
+}
+
+GLRProductionAdapter::NativeGL128H64P257CompleteWActionMaterial
+GLRProductionAdapter::BindH64P257CompleteWDeploymentMaterial(
+    NativeGL128H64P257FullPrefixMaskMaterial prefixMask,
+    const NativeGL128H64HiddenSelectorOwnerCursorEmission& cursorChunk,
+    const NativeGL128H64P257SharedWActionKeyManifest& sharedActionKeys) const {
+    (void)GetH64P257CompleteWDeploymentCapabilities();
+    return glscheme::rns::
+        glr_bind_h64_p257_complete_w_action_deployment_material(
+            m_context, std::move(prefixMask), cursorChunk,
+            sharedActionKeys);
+}
+
+GLRProductionAdapter::NativeGL128H64P257CompleteWActionResult
+GLRProductionAdapter::EvaluateH64P257CompleteWDeploymentCpu(
+    const NativeGL128H64P257CompleteWActionMaterial& material,
+    const NativeGL128H64P257CompleteWActionDeploymentSource& source,
+    std::span<const NativeGL128H64P257OneBitRequest> requests) const {
+    (void)GetH64P257CompleteWDeploymentCapabilities();
+    return glscheme::rns::glr_h64_p257_complete_w_action_deployment_cpu(
+        m_context, material, source, requests);
+}
+
 GLRProductionAdapter::NativeGL128H64SelectedLeafFoldCapabilities
 GLRProductionAdapter::GetH64SelectedLeafFoldCapabilities() const {
     (void)glscheme::rns::glr_gl128_validate_context(m_context);
