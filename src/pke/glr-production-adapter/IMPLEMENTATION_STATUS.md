@@ -69,3 +69,24 @@ not to OpenFHE-native ciphertexts. The remaining 60 leaves, conjugation and
 sparse-to-primary returns, hidden controls, all-Y/StC, formal noise and
 structured-security certificates, GPU bootstrap readiness, production
 authorization, and bootstrap-direct admission remain false.
+
+## H64 selected-leaf 64 GPU tree
+
+Core revision `cef5ac76b72b9c4b6da2e6d14519172305002739`
+extends the resident selected-leaf executor through all 64 already-selected
+leaves. `EvaluateH64SelectedLeaf64GpuTree()` delegates the exact six-frontier
+P14 schedule: 63 products, relinearizations, and logical paired rescales across
+`L2:32`, `L4:16`, `L6:8`, `L8:4`, `L10:2`, and `L12:1`, producing an
+authoritative `DeviceDirty` sparse L14 root.
+
+The core owner acceptance decrypts all 32,768 coordinates with maximum error
+`4.340e-10`. Aggregate input upload is 1,543,503,872 bytes (1,472 MiB), owner
+readback is 11,534,336 bytes (11 MiB), and the 63 resident nodes transfer zero
+ciphertext values over PCIe. Internal/wall runtime is 34.71/34.92 seconds at
+604.52 MiB peak RSS.
+
+This completes only the selected-leaf product tree. It does not execute hidden
+controls, conjugation-add, sparse-to-primary return, all-Y/StC, or an
+OpenFHE-native ciphertext value path. Formal noise and structured-security
+certificates, GPU bootstrap readiness, production authorization, and
+bootstrap-direct admission remain false.

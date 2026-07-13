@@ -398,6 +398,72 @@ int main() {
     Require(executeGpuH4 != nullptr,
             "OpenFHE H64 h4 GPU frontier seam is absent");
 
+    const auto gpu64 =
+        adapter.GetH64SelectedLeaf64GpuCapabilities();
+    Require(gpu64.schema ==
+                    "openfhe.gl128_h64_selected_leaf_64_gpu_capabilities.v1" &&
+                gpu64.nativeCoreCommit ==
+                    "cef5ac76b72b9c4b6da2e6d14519172305002739" &&
+                gpu64.nativeEvidenceSchema ==
+                    "glscheme.gl128_h64_selected_leaf_gpu_frontier_evidence.v1" &&
+                gpu64.parameterFingerprint ==
+                    "glrsha256:66a12778024471924327683b7f52e8df4dd038cb3f7f803a516b393e1363e6ab" &&
+                gpu64.supportCommitment ==
+                    "glr-ship-support-v1:n=128:phi=256:count=64:fnv64=16830100300970850058" &&
+                gpu64.selectedLeafCount == 64 &&
+                gpu64.xwCoordinatesPerLeaf == 32768 &&
+                gpu64.treeDepth == 6 && gpu64.leafLevel == 2 &&
+                gpu64.rootLevel == 14 &&
+                gpu64.frontierInputLevels ==
+                    std::array<std::uint32_t, 6>{2, 4, 6, 8, 10, 12} &&
+                gpu64.frontierProductCounts ==
+                    std::array<std::uint32_t, 6>{32, 16, 8, 4, 2, 1} &&
+                gpu64.treeProductNodes == 63 &&
+                gpu64.treeRelinearizations == 63 &&
+                gpu64.treePairedRescales == 63 &&
+                gpu64.physicalQPrimeDrops == 126 &&
+                gpu64.fullP14SpecialPrimeSentinel == 0 &&
+                gpu64.effectiveSpecialPrimeCount == 14 &&
+                gpu64.inputLeafBoundaryH2DBytes == 1543503872 &&
+                gpu64.ownerReadbackD2HBytes == 11534336 &&
+                gpu64.stageCiphertextValueH2DBytes == 0 &&
+                gpu64.stageCiphertextValueD2HBytes == 0 &&
+                gpu64.decryptedCoordinateCount == 32768 &&
+                gpu64.maximumObservedValueError == 4.340e-10 &&
+                gpu64.internalRuntimeSeconds == 34.71 &&
+                gpu64.wallRuntimeSeconds == 34.92 &&
+                gpu64.peakRssMiB == 604.52 &&
+                gpu64.deviceConditional &&
+                gpu64.gpuDeviceAvailable ==
+                    glscheme::rns::glr_device_ks_available() &&
+                gpu64.gpuCallableExposed &&
+                gpu64.coreCudaValueExecutionObserved &&
+                !gpu64.openfheNativeValueExecutionObserved &&
+                gpu64.randomizedNontransparentSparseLeaves &&
+                gpu64.exactP14SparseRelinearizationExecuted &&
+                gpu64.exactN32PairedRescalesExecuted &&
+                gpu64.exactSixFrontierL2ToL14Schedule &&
+                gpu64.complete64SelectedLeafProductTreeExecuted &&
+                gpu64.exactInputUploadOnce &&
+                gpu64.noStageCiphertextValuePcie &&
+                gpu64.outputDeviceDirty && gpu64.outputAuthoritative &&
+                gpu64.allCoordinatesOwnerDecrypted &&
+                !gpu64.hiddenControlSelectionExecuted &&
+                !gpu64.complete64SupportHiddenControlFold &&
+                !gpu64.conjugationReturnExecuted &&
+                !gpu64.sparseToPrimaryReturnExecuted &&
+                !gpu64.fullAllYStcComposed &&
+                !gpu64.exactNoiseCertificatePresent &&
+                !gpu64.structuredSecurityCertificatePresent &&
+                !gpu64.gpuH64BootstrapReady &&
+                !gpu64.productionSecurityAuthorized &&
+                !gpu64.bootstrapDirectAdmitted,
+            "OpenFHE H64 selected-leaf 64 GPU capability is malformed");
+    auto executeGpu64 =
+        &Adapter::EvaluateH64SelectedLeaf64GpuTree;
+    Require(executeGpu64 != nullptr,
+            "OpenFHE H64 selected-leaf 64 GPU seam is absent");
+
     const auto structuredAudit = adapter.AuditH64StructuredSecurity();
     const auto structuredCapabilities =
         adapter.GetH64StructuredSecurityCapabilities();

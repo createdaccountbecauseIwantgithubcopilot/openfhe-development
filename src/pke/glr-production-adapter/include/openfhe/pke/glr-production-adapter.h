@@ -727,6 +727,73 @@ public:
         bool bootstrapDirectAdmitted = false;
     };
 
+    // Append-only projection of core cef5ac76's complete 64-selected-leaf
+    // resident CUDA product tree.  It reaches a DeviceDirty sparse L14 root,
+    // but deliberately stops before conjugation and sparse-to-primary return.
+    // "Complete" here qualifies only the already-selected product tree; it
+    // does not qualify hidden selection or a bootstrap.
+    struct NativeGL128H64SelectedLeaf64GpuCapabilities final {
+        std::string schema =
+            "openfhe.gl128_h64_selected_leaf_64_gpu_capabilities.v1";
+        std::string nativeCoreCommit =
+            "cef5ac76b72b9c4b6da2e6d14519172305002739";
+        std::string nativeEvidenceSchema =
+            "glscheme.gl128_h64_selected_leaf_gpu_frontier_evidence.v1";
+        std::string parameterFingerprint =
+            "glrsha256:66a12778024471924327683b7f52e8df4dd038cb3f7f803a516b393e1363e6ab";
+        std::string supportCommitment =
+            "glr-ship-support-v1:n=128:phi=256:count=64:fnv64=16830100300970850058";
+        std::uint32_t selectedLeafCount = 64;
+        std::uint32_t xwCoordinatesPerLeaf = 32768;
+        std::uint32_t treeDepth = 6;
+        std::uint32_t leafLevel = 2;
+        std::uint32_t rootLevel = 14;
+        std::array<std::uint32_t, 6> frontierInputLevels{
+            2, 4, 6, 8, 10, 12};
+        std::array<std::uint32_t, 6> frontierProductCounts{
+            32, 16, 8, 4, 2, 1};
+        std::uint32_t treeProductNodes = 63;
+        std::uint32_t treeRelinearizations = 63;
+        std::uint32_t treePairedRescales = 63;
+        std::uint32_t physicalQPrimeDrops = 126;
+        std::uint32_t fullP14SpecialPrimeSentinel = 0;
+        std::uint32_t effectiveSpecialPrimeCount = 14;
+        std::uint64_t inputLeafBoundaryH2DBytes = 1543503872;
+        std::uint64_t ownerReadbackD2HBytes = 11534336;
+        std::uint64_t stageCiphertextValueH2DBytes = 0;
+        std::uint64_t stageCiphertextValueD2HBytes = 0;
+        std::uint32_t decryptedCoordinateCount = 32768;
+        double maximumObservedValueError = 4.340e-10;
+        double internalRuntimeSeconds = 34.71;
+        double wallRuntimeSeconds = 34.92;
+        double peakRssMiB = 604.52;
+        bool deviceConditional = true;
+        bool gpuDeviceAvailable = false;
+        bool gpuCallableExposed = true;
+        bool coreCudaValueExecutionObserved = true;
+        bool openfheNativeValueExecutionObserved = false;
+        bool randomizedNontransparentSparseLeaves = true;
+        bool exactP14SparseRelinearizationExecuted = true;
+        bool exactN32PairedRescalesExecuted = true;
+        bool exactSixFrontierL2ToL14Schedule = true;
+        bool complete64SelectedLeafProductTreeExecuted = true;
+        bool exactInputUploadOnce = true;
+        bool noStageCiphertextValuePcie = true;
+        bool outputDeviceDirty = true;
+        bool outputAuthoritative = true;
+        bool allCoordinatesOwnerDecrypted = true;
+        bool hiddenControlSelectionExecuted = false;
+        bool complete64SupportHiddenControlFold = false;
+        bool conjugationReturnExecuted = false;
+        bool sparseToPrimaryReturnExecuted = false;
+        bool fullAllYStcComposed = false;
+        bool exactNoiseCertificatePresent = false;
+        bool structuredSecurityCertificatePresent = false;
+        bool gpuH64BootstrapReady = false;
+        bool productionSecurityAuthorized = false;
+        bool bootstrapDirectAdmitted = false;
+    };
+
     // Executable CPU anchor for one canonical encrypted W-index bit.  This
     // is deliberately a distinct capability from the metadata-only complete
     // logarithmic plan: it covers the full 32,768-coordinate grid and the
@@ -1709,6 +1776,14 @@ public:
     GetH64SelectedLeafH4GpuCapabilities() const;
     NativeGL128H64SelectedLeafGpuFrontierResult
     EvaluateH64SelectedLeafH4GpuFrontier(
+        const NativeGL128H64SelectedLeafFoldBinding& inputBinding,
+        const NativeGL128H64SelectedLeafProvider& selectedLeaves,
+        const NativeSwitchKey& sparseRelinearizationKey,
+        const NativeKskRecord& expectedRelinearizationRecord) const;
+    NativeGL128H64SelectedLeaf64GpuCapabilities
+    GetH64SelectedLeaf64GpuCapabilities() const;
+    NativeGL128H64SelectedLeafGpuFrontierResult
+    EvaluateH64SelectedLeaf64GpuTree(
         const NativeGL128H64SelectedLeafFoldBinding& inputBinding,
         const NativeGL128H64SelectedLeafProvider& selectedLeaves,
         const NativeSwitchKey& sparseRelinearizationKey,

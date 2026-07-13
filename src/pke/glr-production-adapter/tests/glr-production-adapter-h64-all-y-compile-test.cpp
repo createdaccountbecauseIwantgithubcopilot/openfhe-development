@@ -144,6 +144,18 @@ static_assert(std::is_same_v<
 static_assert(!std::is_convertible_v<
               Adapter::NativeGL128H64SelectedLeafGpuFrontierResult,
               Adapter::NativeGL128BootstrapResult>);
+static_assert(std::is_same_v<
+              decltype(std::declval<AdapterRef>()
+                           .GetH64SelectedLeaf64GpuCapabilities()),
+              Adapter::NativeGL128H64SelectedLeaf64GpuCapabilities>);
+static_assert(std::is_same_v<
+              decltype(std::declval<AdapterRef>()
+                           .EvaluateH64SelectedLeaf64GpuTree(
+                               std::declval<SelectedLeafBindingRef>(),
+                               std::declval<SelectedLeafProviderRef>(),
+                               std::declval<NativeSwitchKeyRef>(),
+                               std::declval<NativeKskRecordRef>())),
+              Adapter::NativeGL128H64SelectedLeafGpuFrontierResult>);
 static_assert(Adapter::NativeGL128H64OwnerRootProductEvidence::owner_only);
 static_assert(!Adapter::NativeGL128H64OwnerRootProductEvidence::
                   evaluator_callable);
