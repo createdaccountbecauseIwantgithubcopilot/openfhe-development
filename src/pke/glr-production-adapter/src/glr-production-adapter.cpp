@@ -3120,6 +3120,79 @@ GLRProductionAdapter::EvaluateH64SelectedLeaf64GpuTree(
         sparseRelinearizationKey, expectedRelinearizationRecord);
 }
 
+GLRProductionAdapter::NativeGL128H64SelectedLeaf64GpuReturnCapabilities
+GLRProductionAdapter::GetH64SelectedLeaf64GpuReturnCapabilities() const {
+    (void)glscheme::rns::glr_gl128_validate_context(m_context);
+    NativeGL128H64SelectedLeaf64GpuReturnCapabilities capabilities;
+    const auto plan = PlanH64HiddenSelector();
+    if (capabilities.schema !=
+            "openfhe.gl128_h64_selected_leaf_64_gpu_return_capabilities.v1" ||
+        capabilities.nativeCoreCommit !=
+            "ddf77625ae1cc4de1183223e761c4d9df0b32411" ||
+        capabilities.nativeEvidenceSchema !=
+            "glscheme.gl128_h64_selected_leaf_gpu_return_evidence.v1" ||
+        plan.profile.parameter_fingerprint !=
+            capabilities.parameterFingerprint ||
+        plan.profile.support_commitment != capabilities.supportCommitment ||
+        capabilities.inputLevel != 14 || capabilities.outputLevel != 14 ||
+        capabilities.fullP14SpecialPrimeSentinel != 0 ||
+        capabilities.effectiveSpecialPrimeCount != 14 ||
+        capabilities.laneSwapAutomorphisms != 1 ||
+        capabilities.conjugationToSparseSwitches != 1 ||
+        capabilities.residentComponentAdds != 2 ||
+        capabilities.sparseToPrimarySwitches != 1 ||
+        capabilities.stageCiphertextValueH2DBytes != 0 ||
+        capabilities.stageCiphertextValueD2HBytes != 0 ||
+        capabilities.decryptedCoordinateCount != 32768 ||
+        capabilities.maximumObservedValueError != 8.666e-10 ||
+        capabilities.endToEndInternalRuntimeSeconds != 31.77 ||
+        capabilities.endToEndWallRuntimeSeconds != 31.95 ||
+        capabilities.peakRssMiB != 604.87 ||
+        !capabilities.deviceConditional ||
+        !capabilities.gpuCallableExposed ||
+        !capabilities.coreCudaValueExecutionObserved ||
+        capabilities.openfheNativeValueExecutionObserved ||
+        !capabilities.authenticatedFullP14ReturnSchedule ||
+        !capabilities.selectedLeafSparseL14RootConsumed ||
+        !capabilities.residentLaneSwapExecuted ||
+        !capabilities.conjugationReturnExecuted ||
+        !capabilities.sparseRealAddExecuted ||
+        !capabilities.sparseToPrimaryReturnExecuted ||
+        !capabilities.noStageCiphertextValuePcie ||
+        !capabilities.outputDeviceDirty ||
+        !capabilities.outputAuthoritative ||
+        !capabilities.allCoordinatesOwnerDecrypted ||
+        capabilities.hiddenControlSelectionExecuted ||
+        capabilities.full64SupportHiddenControlFold ||
+        capabilities.fullAllYStcComposed ||
+        capabilities.exactNoiseCertificatePresent ||
+        capabilities.structuredSecurityCertificatePresent ||
+        capabilities.gpuH64BootstrapReady ||
+        capabilities.productionSecurityAuthorized ||
+        capabilities.bootstrapDirectAdmitted) {
+        throw GlrError(
+            "GLRProductionAdapter: H64 selected-leaf 64 GPU return "
+            "capability is malformed or overstates framework/security "
+            "admission");
+    }
+    capabilities.gpuDeviceAvailable =
+        glscheme::rns::glr_device_ks_available();
+    return capabilities;
+}
+
+GLRProductionAdapter::NativeGL128H64SelectedLeafGpuReturnResult
+GLRProductionAdapter::EvaluateH64SelectedLeaf64GpuReturn(
+    const NativeGL128H64SelectedLeafFoldBinding& inputBinding,
+    Ciphertext sparseRoot,
+    const NativeSwitchKey& conjugationToSparseKey,
+    const NativeSwitchKey& sparseToPrimaryKey,
+    const NativeGL128H64SparseFoldKskBinding& sparseFoldKeys) const {
+    (void)GetH64SelectedLeaf64GpuReturnCapabilities();
+    return glscheme::rns::glr_gl128_h64_selected_leaf_return_gpu(
+        m_context, inputBinding, std::move(sparseRoot),
+        conjugationToSparseKey, sparseToPrimaryKey, sparseFoldKeys);
+}
+
 GLRProductionAdapter::NativeGL128H64StructuredSecurityAudit
 GLRProductionAdapter::AuditH64StructuredSecurity() const {
     const auto transcript =

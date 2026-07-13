@@ -90,3 +90,23 @@ controls, conjugation-add, sparse-to-primary return, all-Y/StC, or an
 OpenFHE-native ciphertext value path. Formal noise and structured-security
 certificates, GPU bootstrap readiness, production authorization, and
 bootstrap-direct admission remain false.
+
+## H64 selected-leaf resident GPU return
+
+Core revision `ddf77625ae1cc4de1183223e761c4d9df0b32411` continues the
+already-selected sparse L14 tree root without a ciphertext-value transfer.
+`EvaluateH64SelectedLeaf64GpuReturn()` delegates the resident lane-swap,
+full-P14 conjugation-to-sparse switch, two component additions forming
+`2*Re(root)`, and full-P14 sparse-to-primary switch. The result remains an
+authoritative `DeviceDirty` primary L14 ciphertext.
+
+The combined core tree/return acceptance decrypts all 32,768 primary slots
+with maximum error `8.666e-10`. Both switches report all 14 special primes,
+the return stage transfers zero ciphertext-value bytes in either direction,
+and the combined run takes 31.77/31.95 seconds internal/wall at 604.87 MiB
+peak RSS. The P13 return-binding negative rejects.
+
+These are core CUDA measurements, not an OpenFHE-native value rerun. Hidden
+controls, the hidden 64-support fold, all-Y/StC, formal composed-noise and
+structured-security certificates, GPU bootstrap readiness, production
+authorization, and bootstrap-direct admission remain false.

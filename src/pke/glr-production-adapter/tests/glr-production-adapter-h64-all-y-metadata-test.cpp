@@ -464,6 +464,64 @@ int main() {
     Require(executeGpu64 != nullptr,
             "OpenFHE H64 selected-leaf 64 GPU seam is absent");
 
+    const auto gpu64Return =
+        adapter.GetH64SelectedLeaf64GpuReturnCapabilities();
+    Require(
+        gpu64Return.schema ==
+                "openfhe.gl128_h64_selected_leaf_64_gpu_return_capabilities.v1" &&
+            gpu64Return.nativeCoreCommit ==
+                "ddf77625ae1cc4de1183223e761c4d9df0b32411" &&
+            gpu64Return.nativeEvidenceSchema ==
+                "glscheme.gl128_h64_selected_leaf_gpu_return_evidence.v1" &&
+            gpu64Return.parameterFingerprint ==
+                "glrsha256:66a12778024471924327683b7f52e8df4dd038cb3f7f803a516b393e1363e6ab" &&
+            gpu64Return.supportCommitment ==
+                "glr-ship-support-v1:n=128:phi=256:count=64:fnv64=16830100300970850058" &&
+            gpu64Return.inputLevel == 14 &&
+            gpu64Return.outputLevel == 14 &&
+            gpu64Return.fullP14SpecialPrimeSentinel == 0 &&
+            gpu64Return.effectiveSpecialPrimeCount == 14 &&
+            gpu64Return.laneSwapAutomorphisms == 1 &&
+            gpu64Return.conjugationToSparseSwitches == 1 &&
+            gpu64Return.residentComponentAdds == 2 &&
+            gpu64Return.sparseToPrimarySwitches == 1 &&
+            gpu64Return.stageCiphertextValueH2DBytes == 0 &&
+            gpu64Return.stageCiphertextValueD2HBytes == 0 &&
+            gpu64Return.decryptedCoordinateCount == 32768 &&
+            gpu64Return.maximumObservedValueError == 8.666e-10 &&
+            gpu64Return.endToEndInternalRuntimeSeconds == 31.77 &&
+            gpu64Return.endToEndWallRuntimeSeconds == 31.95 &&
+            gpu64Return.peakRssMiB == 604.87 &&
+            gpu64Return.deviceConditional &&
+            gpu64Return.gpuDeviceAvailable ==
+                glscheme::rns::glr_device_ks_available() &&
+            gpu64Return.gpuCallableExposed &&
+            gpu64Return.coreCudaValueExecutionObserved &&
+            !gpu64Return.openfheNativeValueExecutionObserved &&
+            gpu64Return.authenticatedFullP14ReturnSchedule &&
+            gpu64Return.selectedLeafSparseL14RootConsumed &&
+            gpu64Return.residentLaneSwapExecuted &&
+            gpu64Return.conjugationReturnExecuted &&
+            gpu64Return.sparseRealAddExecuted &&
+            gpu64Return.sparseToPrimaryReturnExecuted &&
+            gpu64Return.noStageCiphertextValuePcie &&
+            gpu64Return.outputDeviceDirty &&
+            gpu64Return.outputAuthoritative &&
+            gpu64Return.allCoordinatesOwnerDecrypted &&
+            !gpu64Return.hiddenControlSelectionExecuted &&
+            !gpu64Return.full64SupportHiddenControlFold &&
+            !gpu64Return.fullAllYStcComposed &&
+            !gpu64Return.exactNoiseCertificatePresent &&
+            !gpu64Return.structuredSecurityCertificatePresent &&
+            !gpu64Return.gpuH64BootstrapReady &&
+            !gpu64Return.productionSecurityAuthorized &&
+            !gpu64Return.bootstrapDirectAdmitted,
+        "OpenFHE H64 selected-leaf 64 GPU return capability is malformed");
+    auto executeGpu64Return =
+        &Adapter::EvaluateH64SelectedLeaf64GpuReturn;
+    Require(executeGpu64Return != nullptr,
+            "OpenFHE H64 selected-leaf 64 GPU return seam is absent");
+
     const auto structuredAudit = adapter.AuditH64StructuredSecurity();
     const auto structuredCapabilities =
         adapter.GetH64StructuredSecurityCapabilities();

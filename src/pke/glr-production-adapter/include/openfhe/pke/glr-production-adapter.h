@@ -22,6 +22,7 @@
 #include "glscheme/gl128_h64_root_product_oracle.hpp"
 #include "glscheme/gl128_h64_selected_leaf_fold.hpp"
 #include "glscheme/gl128_h64_selected_leaf_fold_gpu.hpp"
+#include "glscheme/gl128_h64_selected_leaf_return_gpu.hpp"
 #include "glscheme/gl128_h64_structured_security_audit.hpp"
 #include "glscheme/gl128_h64_w_action_plan.hpp"
 #include "glscheme/glr_device_ks.hpp"
@@ -410,6 +411,10 @@ public:
         glscheme::rns::GlrH64SelectedLeafGpuFrontierEvidence;
     using NativeGL128H64SelectedLeafGpuFrontierResult =
         glscheme::rns::GlrH64SelectedLeafGpuFrontierResult;
+    using NativeGL128H64SelectedLeafGpuReturnEvidence =
+        glscheme::rns::GlrH64SelectedLeafGpuReturnEvidence;
+    using NativeGL128H64SelectedLeafGpuReturnResult =
+        glscheme::rns::GlrH64SelectedLeafGpuReturnResult;
     using NativeGL128H64CheckedEstimatorTranscript =
         glscheme::rns::GlrH64CheckedEstimatorTranscript;
     using NativeGL128H64StructuredSecurityAudit =
@@ -794,6 +799,61 @@ public:
         bool bootstrapDirectAdmitted = false;
     };
 
+    // Append-only projection of core ddf77625's resident return from the
+    // already-selected sparse L14 root.  The exact lane-swap/conjugation
+    // switch, two-component real add, and sparse-to-primary switch remain on
+    // device.  This does not imply hidden-control or all-Y execution.
+    struct NativeGL128H64SelectedLeaf64GpuReturnCapabilities final {
+        std::string schema =
+            "openfhe.gl128_h64_selected_leaf_64_gpu_return_capabilities.v1";
+        std::string nativeCoreCommit =
+            "ddf77625ae1cc4de1183223e761c4d9df0b32411";
+        std::string nativeEvidenceSchema =
+            "glscheme.gl128_h64_selected_leaf_gpu_return_evidence.v1";
+        std::string parameterFingerprint =
+            "glrsha256:66a12778024471924327683b7f52e8df4dd038cb3f7f803a516b393e1363e6ab";
+        std::string supportCommitment =
+            "glr-ship-support-v1:n=128:phi=256:count=64:fnv64=16830100300970850058";
+        std::uint32_t inputLevel = 14;
+        std::uint32_t outputLevel = 14;
+        std::uint32_t fullP14SpecialPrimeSentinel = 0;
+        std::uint32_t effectiveSpecialPrimeCount = 14;
+        std::uint32_t laneSwapAutomorphisms = 1;
+        std::uint32_t conjugationToSparseSwitches = 1;
+        std::uint32_t residentComponentAdds = 2;
+        std::uint32_t sparseToPrimarySwitches = 1;
+        std::uint64_t stageCiphertextValueH2DBytes = 0;
+        std::uint64_t stageCiphertextValueD2HBytes = 0;
+        std::uint32_t decryptedCoordinateCount = 32768;
+        double maximumObservedValueError = 8.666e-10;
+        double endToEndInternalRuntimeSeconds = 31.77;
+        double endToEndWallRuntimeSeconds = 31.95;
+        double peakRssMiB = 604.87;
+        bool deviceConditional = true;
+        bool gpuDeviceAvailable = false;
+        bool gpuCallableExposed = true;
+        bool coreCudaValueExecutionObserved = true;
+        bool openfheNativeValueExecutionObserved = false;
+        bool authenticatedFullP14ReturnSchedule = true;
+        bool selectedLeafSparseL14RootConsumed = true;
+        bool residentLaneSwapExecuted = true;
+        bool conjugationReturnExecuted = true;
+        bool sparseRealAddExecuted = true;
+        bool sparseToPrimaryReturnExecuted = true;
+        bool noStageCiphertextValuePcie = true;
+        bool outputDeviceDirty = true;
+        bool outputAuthoritative = true;
+        bool allCoordinatesOwnerDecrypted = true;
+        bool hiddenControlSelectionExecuted = false;
+        bool full64SupportHiddenControlFold = false;
+        bool fullAllYStcComposed = false;
+        bool exactNoiseCertificatePresent = false;
+        bool structuredSecurityCertificatePresent = false;
+        bool gpuH64BootstrapReady = false;
+        bool productionSecurityAuthorized = false;
+        bool bootstrapDirectAdmitted = false;
+    };
+
     // Executable CPU anchor for one canonical encrypted W-index bit.  This
     // is deliberately a distinct capability from the metadata-only complete
     // logarithmic plan: it covers the full 32,768-coordinate grid and the
@@ -918,6 +978,24 @@ public:
                       gpu_h64_bootstrap_ready);
     static_assert(!std::is_convertible_v<
                   NativeGL128H64SelectedLeafGpuFrontierResult,
+                  NativeGL128BootstrapResult>);
+    static_assert(NativeGL128H64SelectedLeafGpuReturnEvidence::research_only);
+    static_assert(!NativeGL128H64SelectedLeafGpuReturnEvidence::
+                      hidden_control_selection_executed);
+    static_assert(!NativeGL128H64SelectedLeafGpuReturnEvidence::
+                      full_all_y_stc_composed);
+    static_assert(!NativeGL128H64SelectedLeafGpuReturnEvidence::
+                      exact_noise_certificate_present);
+    static_assert(!NativeGL128H64SelectedLeafGpuReturnEvidence::
+                      structured_security_certificate_present);
+    static_assert(!NativeGL128H64SelectedLeafGpuReturnEvidence::
+                      production_security_authorized);
+    static_assert(!NativeGL128H64SelectedLeafGpuReturnEvidence::
+                      bootstrap_direct_admitted);
+    static_assert(!NativeGL128H64SelectedLeafGpuReturnEvidence::
+                      gpu_h64_bootstrap_ready);
+    static_assert(!std::is_convertible_v<
+                  NativeGL128H64SelectedLeafGpuReturnResult,
                   NativeGL128BootstrapResult>);
     static_assert(!std::is_convertible_v<
                   NativeGL128H64P257OneBitResult,
@@ -1788,6 +1866,15 @@ public:
         const NativeGL128H64SelectedLeafProvider& selectedLeaves,
         const NativeSwitchKey& sparseRelinearizationKey,
         const NativeKskRecord& expectedRelinearizationRecord) const;
+    NativeGL128H64SelectedLeaf64GpuReturnCapabilities
+    GetH64SelectedLeaf64GpuReturnCapabilities() const;
+    NativeGL128H64SelectedLeafGpuReturnResult
+    EvaluateH64SelectedLeaf64GpuReturn(
+        const NativeGL128H64SelectedLeafFoldBinding& inputBinding,
+        Ciphertext sparseRoot,
+        const NativeSwitchKey& conjugationToSparseKey,
+        const NativeSwitchKey& sparseToPrimaryKey,
+        const NativeGL128H64SparseFoldKskBinding& sparseFoldKeys) const;
     NativeGL128H64StructuredSecurityAudit
     AuditH64StructuredSecurity() const;
     NativeGL128H64StructuredSecurityCapabilities
