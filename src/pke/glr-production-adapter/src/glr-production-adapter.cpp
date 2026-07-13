@@ -3002,6 +3002,177 @@ GLRProductionAdapter::EvaluateH64P257CompleteWDeploymentCpu(
         m_context, material, source, requests);
 }
 
+GLRProductionAdapter::NativeGL128H64P257CompleteWGpuCapabilities
+GLRProductionAdapter::GetH64P257CompleteWGpuCapabilities() const {
+    (void)glscheme::rns::glr_gl128_validate_context(m_context);
+    NativeGL128H64P257CompleteWGpuCapabilities capabilities;
+    const auto plan = PlanH64HiddenSelector();
+    if (capabilities.schema !=
+            "openfhe.gl128_h64_p257_complete_w_gpu_capabilities.v1" ||
+        capabilities.nativeCoreCommit !=
+            "71d4252a1b3e807751c5495b65494ffab62bf2bc" ||
+        capabilities.nativeEvidenceSchema !=
+            "glscheme.gl128_h64_p257_complete_w_gpu_evidence.v1" ||
+        plan.profile.parameter_fingerprint !=
+            capabilities.parameterFingerprint ||
+        plan.profile.support_commitment != capabilities.supportCommitment ||
+        capabilities.xwCoordinatesPerRequest != 32768 ||
+        capabilities.authenticatedWControls != 8 ||
+        capabilities.distinctEncryptedWBits != 8 ||
+        capabilities.keyedWAutomorphisms != 16 ||
+        capabilities.cmuxOperations != 8 ||
+        capabilities.ciphertextProducts != 1 ||
+        capabilities.sparseRelinearizations != 1 ||
+        capabilities.inputLevel != 0 || capabilities.outputLevel != 2 ||
+        capabilities.effectiveSpecialPrimeCount != 13 ||
+        !capabilities.deviceConditional ||
+        !capabilities.gpuCallableExposed ||
+        !capabilities.preparedOperandGpuCallableExposed ||
+        !capabilities.coreCudaValueExecutionObserved ||
+        capabilities.openfheNativeValueExecutionObserved ||
+        !capabilities.exactBoundaryUploadOnce ||
+        !capabilities.noStageCiphertextValuePcie ||
+        !capabilities.completeEightBitWActionExecuted ||
+        !capabilities.outputDeviceDirty ||
+        !capabilities.outputAuthoritative ||
+        capabilities.hiddenFineXSelectionExecuted ||
+        capabilities.hiddenSignSelectionExecuted ||
+        capabilities.stationaryBFactorComposed ||
+        capabilities.completeBranchPhase ||
+        capabilities.full64SupportFoldComposed ||
+        capabilities.fullAllYStcComposed ||
+        capabilities.exactNoiseEvidencePresent ||
+        capabilities.structuredSecurityCertificatePresent ||
+        capabilities.gpuH64BootstrapReady ||
+        capabilities.productionSecurityAuthorized ||
+        capabilities.bootstrapDirectAdmitted) {
+        throw GlrError(
+            "GLRProductionAdapter: resident complete-W GPU capability is "
+            "malformed or overstates hidden/full64/security admission");
+    }
+    capabilities.gpuDeviceAvailable =
+        glscheme::rns::glr_device_ks_available();
+    return capabilities;
+}
+
+GLRProductionAdapter::NativeGL128H64P257CompleteWGpuResult
+GLRProductionAdapter::EvaluateH64P257CompleteWDeploymentGpu(
+    const NativeGL128H64P257CompleteWActionMaterial& material,
+    const NativeGL128H64P257CompleteWActionDeploymentSource& source,
+    const NativeGL128H64P257OneBitRequest& request) const {
+    (void)GetH64P257CompleteWGpuCapabilities();
+    return glscheme::rns::glr_h64_p257_complete_w_action_deployment_gpu(
+        m_context, material, source, request);
+}
+
+GLRProductionAdapter::NativeGL128H64P257CompleteWGpuResult
+GLRProductionAdapter::EvaluateH64P257PreparedCompleteWDeploymentGpu(
+    const NativeGL128H64P257CompleteWActionMaterial& material,
+    const NativeGL128H64P257CompleteWActionDeploymentSource& source,
+    Ciphertext prefixSplicedNumerator,
+    Ciphertext telescopingDenominatorContribution) const {
+    (void)GetH64P257CompleteWGpuCapabilities();
+    return glscheme::rns::
+        glr_h64_p257_complete_w_action_apply_prepared_deployment_gpu(
+            m_context, material, source, std::move(prefixSplicedNumerator),
+            std::move(telescopingDenominatorContribution));
+}
+
+GLRProductionAdapter::NativeGL128H64P257HiddenLeafCapabilities
+GLRProductionAdapter::GetH64P257HiddenLeafCapabilities() const {
+    (void)glscheme::rns::glr_gl128_validate_context(m_context);
+    NativeGL128H64P257HiddenLeafCapabilities capabilities;
+    const auto plan = PlanH64HiddenSelector();
+    if (capabilities.schema !=
+            "openfhe.gl128_h64_p257_hidden_leaf_capabilities.v1" ||
+        capabilities.nativeCoreCommit !=
+            "dd48b5c888eba7e2404cf7ac5d476cc0ee11b68e" ||
+        capabilities.nativeMaterialSchema !=
+            "glscheme.gl128_h64_p257_hidden_leaf_material.v1" ||
+        capabilities.nativePreWEvidenceSchema !=
+            "glscheme.gl128_h64_p257_hidden_pre_w_operands_evidence.v1" ||
+        capabilities.nativeLeafEvidenceSchema !=
+            "glscheme.gl128_h64_p257_hidden_leaf_evidence.v1" ||
+        plan.profile.parameter_fingerprint !=
+            capabilities.parameterFingerprint ||
+        plan.profile.support_commitment != capabilities.supportCommitment ||
+        capabilities.xwCoordinatesPerLeaf != 32768 ||
+        capabilities.controlsPerSupportChunk != 10 ||
+        capabilities.publicPrefixOperandSchedules != 4 ||
+        capabilities.preWHiddenCmuxOperations != 6 ||
+        capabilities.authenticatedWControls != 8 ||
+        capabilities.leafInputLevel != 0 ||
+        capabilities.leafOutputLevel != 2 ||
+        capabilities.controlSpecialPrimeCount != 13 ||
+        !capabilities.materialBindingExposed ||
+        !capabilities.preWCpuDelegationExposed ||
+        !capabilities.optimizedLeafCpuDelegationExposed ||
+        !capabilities.selectedFoldBindingExposed ||
+        !capabilities.coreOptimizedCpuValueExecutionObserved ||
+        capabilities.openfheNativeValueExecutionObserved ||
+        !capabilities.preWHiddenSelectionHoisted ||
+        !capabilities.sameIndependentOracleAsBoundedReference ||
+        capabilities.boundedReferenceCiphertextRerun ||
+        !capabilities.hiddenFineXSelectionExecuted ||
+        !capabilities.hiddenSignSelectionExecuted ||
+        !capabilities.completeEightBitWActionExecuted ||
+        !capabilities.nontransparentSparseL2LeafReturned ||
+        capabilities.stationaryBFactorComposed ||
+        capabilities.completeBranchPhase ||
+        capabilities.full64SupportHiddenControlFold ||
+        capabilities.fullAllYStcComposed ||
+        capabilities.exactEstimatorEvidencePresent ||
+        capabilities.exactNoiseEvidencePresent ||
+        capabilities.structuredSecurityCertificatePresent ||
+        capabilities.productionSecurityAuthorized ||
+        capabilities.bootstrapDirectAdmitted) {
+        throw GlrError(
+            "GLRProductionAdapter: optimized hidden-leaf capability is "
+            "malformed or overstates branch/full64/security admission");
+    }
+    return capabilities;
+}
+
+GLRProductionAdapter::NativeGL128H64P257HiddenLeafMaterial
+GLRProductionAdapter::BindH64P257HiddenLeafMaterial(
+    NativeGL128H64P257FullPrefixMaskMaterial prefixMask,
+    const NativeGL128H64HiddenSelectorOwnerCursorEmission& cursorChunk,
+    const NativeGL128H64P257SharedWActionKeyManifest& sharedActionKeys) const {
+    (void)GetH64P257HiddenLeafCapabilities();
+    return glscheme::rns::glr_bind_h64_p257_hidden_leaf_material(
+        m_context, std::move(prefixMask), cursorChunk, sharedActionKeys);
+}
+
+GLRProductionAdapter::NativeGL128H64P257HiddenPreWOperandsResult
+GLRProductionAdapter::EvaluateH64P257HiddenPreWOperandsCpu(
+    const NativeGL128H64P257HiddenLeafMaterial& material,
+    const NativeGL128H64P257HiddenLeafSource& source,
+    const NativeGL128H64P257HiddenLeafRequest& request) const {
+    (void)GetH64P257HiddenLeafCapabilities();
+    return glscheme::rns::glr_h64_p257_hidden_pre_w_operands_cpu(
+        m_context, material, source, request);
+}
+
+GLRProductionAdapter::NativeGL128H64P257HiddenLeafResult
+GLRProductionAdapter::EvaluateH64P257HiddenLeafOptimizedCpu(
+    const NativeGL128H64P257HiddenLeafMaterial& material,
+    const NativeGL128H64P257HiddenLeafSource& source,
+    const NativeGL128H64P257HiddenLeafRequest& request) const {
+    (void)GetH64P257HiddenLeafCapabilities();
+    return glscheme::rns::glr_h64_p257_hidden_leaf_optimized_cpu(
+        m_context, material, source, request);
+}
+
+GLRProductionAdapter::NativeGL128H64SelectedSparseLeaf
+GLRProductionAdapter::BindH64P257HiddenLeafToFoldRequest(
+    const NativeGL128H64P257HiddenLeafMaterial& material,
+    NativeGL128H64P257HiddenLeafResult result,
+    const NativeGL128H64SelectedLeafRequest& request) const {
+    (void)GetH64P257HiddenLeafCapabilities();
+    return glscheme::rns::glr_bind_h64_p257_hidden_leaf_to_fold_request(
+        material, std::move(result), request);
+}
+
 GLRProductionAdapter::NativeGL128H64SelectedLeafFoldCapabilities
 GLRProductionAdapter::GetH64SelectedLeafFoldCapabilities() const {
     (void)glscheme::rns::glr_gl128_validate_context(m_context);
@@ -3257,6 +3428,204 @@ GLRProductionAdapter::EvaluateH64SelectedLeaf64GpuTree(
     return glscheme::rns::glr_gl128_h64_selected_leaf_fold_gpu_frontier(
         m_context, inputBinding, 64, selectedLeaves,
         sparseRelinearizationKey, expectedRelinearizationRecord);
+}
+
+GLRProductionAdapter::NativeGL128H64ResidentSelectedLeafGpuCapabilities
+GLRProductionAdapter::GetH64ResidentSelectedLeafGpuCapabilities() const {
+    (void)glscheme::rns::glr_gl128_validate_context(m_context);
+    NativeGL128H64ResidentSelectedLeafGpuCapabilities capabilities;
+    const auto plan = PlanH64HiddenSelector();
+    if (capabilities.schema !=
+            "openfhe.gl128_h64_resident_selected_leaf_gpu_capabilities.v1" ||
+        capabilities.nativeCoreCommit !=
+            "8fdcbc2fe3b8d58f5dcd0cc5071560c793f87432" ||
+        capabilities.nativeEvidenceSchema !=
+            "glscheme.gl128_h64_selected_leaf_gpu_frontier_evidence.v1" ||
+        capabilities.nativeReceiptSchema !=
+            "glscheme.gl128_h64_resident_selected_leaf_receipt.v1" ||
+        plan.profile.parameter_fingerprint !=
+            capabilities.parameterFingerprint ||
+        plan.profile.support_commitment != capabilities.supportCommitment ||
+        capabilities.h2LeafCount != 2 || capabilities.h4LeafCount != 4 ||
+        capabilities.full64LeafCount != 64 ||
+        capabilities.leafLevel != 2 || capabilities.h4RootLevel != 6 ||
+        capabilities.full64RootLevel != 14 ||
+        !capabilities.deviceConditional ||
+        !capabilities.residentH2CallableExposed ||
+        !capabilities.residentH4CallableExposed ||
+        !capabilities.residentFull64CallableExposed ||
+        !capabilities.coreResidentH4ValueExecutionObserved ||
+        capabilities.residentFull64ValueExecutionObserved ||
+        capabilities.openfheNativeValueExecutionObserved ||
+        !capabilities.strictDeviceDirtyInputLeaves ||
+        !capabilities.authoritativeLeafReceiptsRequired ||
+        !capabilities.inputLeafOwnershipTransferred ||
+        !capabilities.zeroInputLeafCiphertextH2D ||
+        !capabilities.noStageCiphertextValuePcie ||
+        capabilities.hiddenControlSelectionExecuted ||
+        capabilities.stationaryBFactorComposed ||
+        capabilities.completeBranchPhase ||
+        capabilities.full64SupportHiddenControlFold ||
+        capabilities.fullAllYStcComposed ||
+        capabilities.exactNoiseCertificatePresent ||
+        capabilities.structuredSecurityCertificatePresent ||
+        capabilities.gpuH64BootstrapReady ||
+        capabilities.productionSecurityAuthorized ||
+        capabilities.bootstrapDirectAdmitted) {
+        throw GlrError(
+            "GLRProductionAdapter: resident selected-leaf GPU capability "
+            "is malformed or overstates full64/security admission");
+    }
+    capabilities.gpuDeviceAvailable =
+        glscheme::rns::glr_device_ks_available();
+    return capabilities;
+}
+
+GLRProductionAdapter::NativeGL128H64SelectedLeafGpuFrontierResult
+GLRProductionAdapter::EvaluateH64ResidentSelectedLeafH2GpuFrontier(
+    const NativeGL128H64SelectedLeafFoldBinding& inputBinding,
+    const NativeGL128H64ResidentSelectedLeafProvider& selectedLeaves,
+    const NativeSwitchKey& sparseRelinearizationKey,
+    const NativeKskRecord& expectedRelinearizationRecord) const {
+    (void)GetH64ResidentSelectedLeafGpuCapabilities();
+    return glscheme::rns::
+        glr_gl128_h64_selected_leaf_fold_gpu_resident_frontier(
+            m_context, inputBinding, 2, selectedLeaves,
+            sparseRelinearizationKey, expectedRelinearizationRecord);
+}
+
+GLRProductionAdapter::NativeGL128H64SelectedLeafGpuFrontierResult
+GLRProductionAdapter::EvaluateH64ResidentSelectedLeafH4GpuFrontier(
+    const NativeGL128H64SelectedLeafFoldBinding& inputBinding,
+    const NativeGL128H64ResidentSelectedLeafProvider& selectedLeaves,
+    const NativeSwitchKey& sparseRelinearizationKey,
+    const NativeKskRecord& expectedRelinearizationRecord) const {
+    (void)GetH64ResidentSelectedLeafGpuCapabilities();
+    return glscheme::rns::
+        glr_gl128_h64_selected_leaf_fold_gpu_resident_frontier(
+            m_context, inputBinding, 4, selectedLeaves,
+            sparseRelinearizationKey, expectedRelinearizationRecord);
+}
+
+GLRProductionAdapter::NativeGL128H64SelectedLeafGpuFrontierResult
+GLRProductionAdapter::EvaluateH64ResidentSelectedLeaf64GpuTree(
+    const NativeGL128H64SelectedLeafFoldBinding& inputBinding,
+    const NativeGL128H64ResidentSelectedLeafProvider& selectedLeaves,
+    const NativeSwitchKey& sparseRelinearizationKey,
+    const NativeKskRecord& expectedRelinearizationRecord) const {
+    (void)GetH64ResidentSelectedLeafGpuCapabilities();
+    return glscheme::rns::
+        glr_gl128_h64_selected_leaf_fold_gpu_resident_full64(
+            m_context, inputBinding, selectedLeaves,
+            sparseRelinearizationKey, expectedRelinearizationRecord);
+}
+
+GLRProductionAdapter::NativeGL128H64P257HiddenLeafStreamGpuCapabilities
+GLRProductionAdapter::GetH64P257HiddenLeafStreamGpuCapabilities() const {
+    (void)glscheme::rns::glr_gl128_validate_context(m_context);
+    NativeGL128H64P257HiddenLeafStreamGpuCapabilities capabilities;
+    const auto plan = PlanH64HiddenSelector();
+    if (capabilities.schema !=
+            "openfhe.gl128_h64_p257_hidden_leaf_stream_gpu_capabilities.v1" ||
+        capabilities.nativeH4CoreCommit !=
+            "baa27c4f015fae1e52ae81aa6cdd997e240b4a2b" ||
+        capabilities.nativeStreamCoreCommit !=
+            "cbb9e9de06eda3a0de0c7bf6e85b3511fbc4948b" ||
+        capabilities.nativeOwnerSeedCoreCommit !=
+            "609df4dd5bfeeb20c4b15f1a8a43046c8091316c" ||
+        capabilities.nativeEvidenceSchema !=
+            "glscheme.gl128_h64_p257_hidden_leaf_stream_gpu_evidence.v1" ||
+        plan.profile.parameter_fingerprint !=
+            capabilities.parameterFingerprint ||
+        plan.profile.support_commitment != capabilities.supportCommitment ||
+        capabilities.h2LeafCount != 2 || capabilities.h4LeafCount != 4 ||
+        capabilities.full64LeafCount != 64 ||
+        capabilities.controlsPerSupportChunk != 10 ||
+        capabilities.boundedH4CursorChunks != 4 ||
+        capabilities.boundedH4CursorRecords != 40 ||
+        !capabilities.deviceConditional ||
+        !capabilities.hiddenH2CallableExposed ||
+        !capabilities.hiddenH4CallableExposed ||
+        !capabilities.hiddenFull64CallableExposed ||
+        !capabilities.coreBoundedH4CompositionValueExecutionObserved ||
+        capabilities.nativeStreamWrapperValueExecutionObserved ||
+        capabilities.full64ValueExecutionObserved ||
+        capabilities.openfheNativeValueExecutionObserved ||
+        !capabilities.evaluatorSecretFree ||
+        !capabilities.maxLiveOneSupportDeployment ||
+        !capabilities.supportLocalPrefixMaterialJit ||
+        !capabilities.oneSharedActionKeyBundleRequired ||
+        !capabilities.ownerSeedCommitmentReceiptExposed ||
+        !capabilities.oneOwnerSeedCommitmentRequired ||
+        !capabilities.optimizedPreWHiddenSelectionExecuted ||
+        !capabilities.completeEightBitWActionExecuted ||
+        !capabilities.authoritativeDeviceDirtyL2Leaves ||
+        !capabilities.zeroReturnedLeafToFoldPcie ||
+        !capabilities.residentP14FrontierExecutedInBoundedH4 ||
+        capabilities.full64SupportHiddenControlFold ||
+        capabilities.stationaryBFactorComposed ||
+        capabilities.completeBranchPhase ||
+        capabilities.fullAllYStcComposed ||
+        capabilities.exactNoiseCertificatePresent ||
+        capabilities.structuredSecurityCertificatePresent ||
+        capabilities.gpuH64BootstrapReady ||
+        capabilities.productionSecurityAuthorized ||
+        capabilities.bootstrapDirectAdmitted) {
+        throw GlrError(
+            "GLRProductionAdapter: hidden-leaf GPU stream capability is "
+            "malformed or overstates full64/branch/security admission");
+    }
+    capabilities.gpuDeviceAvailable =
+        glscheme::rns::glr_device_ks_available();
+    return capabilities;
+}
+
+GLRProductionAdapter::NativeGL128H64P257HiddenLeafStreamGpuResult
+GLRProductionAdapter::EvaluateH64P257HiddenLeafStreamH2Gpu(
+    const NativeGL128H64SelectedLeafFoldBinding& foldBinding,
+    std::span<const NativeGL128H64P257PhaseCoefficient>
+        unshiftedPhaseCoefficients,
+    std::uint32_t branch,
+    const NativeGL128H64P257HiddenSupportDeploymentProvider& deployments,
+    const NativeSwitchKey& p14SparseRelinearizationKey,
+    const NativeKskRecord& expectedP14RelinearizationRecord) const {
+    (void)GetH64P257HiddenLeafStreamGpuCapabilities();
+    return glscheme::rns::glr_h64_p257_hidden_leaf_stream_gpu_frontier(
+        m_context, foldBinding, 2, unshiftedPhaseCoefficients, branch,
+        deployments, p14SparseRelinearizationKey,
+        expectedP14RelinearizationRecord);
+}
+
+GLRProductionAdapter::NativeGL128H64P257HiddenLeafStreamGpuResult
+GLRProductionAdapter::EvaluateH64P257HiddenLeafStreamH4Gpu(
+    const NativeGL128H64SelectedLeafFoldBinding& foldBinding,
+    std::span<const NativeGL128H64P257PhaseCoefficient>
+        unshiftedPhaseCoefficients,
+    std::uint32_t branch,
+    const NativeGL128H64P257HiddenSupportDeploymentProvider& deployments,
+    const NativeSwitchKey& p14SparseRelinearizationKey,
+    const NativeKskRecord& expectedP14RelinearizationRecord) const {
+    (void)GetH64P257HiddenLeafStreamGpuCapabilities();
+    return glscheme::rns::glr_h64_p257_hidden_leaf_stream_gpu_frontier(
+        m_context, foldBinding, 4, unshiftedPhaseCoefficients, branch,
+        deployments, p14SparseRelinearizationKey,
+        expectedP14RelinearizationRecord);
+}
+
+GLRProductionAdapter::NativeGL128H64P257HiddenLeafStreamGpuResult
+GLRProductionAdapter::EvaluateH64P257HiddenLeafStreamFull64Gpu(
+    const NativeGL128H64SelectedLeafFoldBinding& foldBinding,
+    std::span<const NativeGL128H64P257PhaseCoefficient>
+        unshiftedPhaseCoefficients,
+    std::uint32_t branch,
+    const NativeGL128H64P257HiddenSupportDeploymentProvider& deployments,
+    const NativeSwitchKey& p14SparseRelinearizationKey,
+    const NativeKskRecord& expectedP14RelinearizationRecord) const {
+    (void)GetH64P257HiddenLeafStreamGpuCapabilities();
+    return glscheme::rns::glr_h64_p257_hidden_leaf_stream_gpu_full64(
+        m_context, foldBinding, unshiftedPhaseCoefficients, branch,
+        deployments, p14SparseRelinearizationKey,
+        expectedP14RelinearizationRecord);
 }
 
 GLRProductionAdapter::NativeGL128H64SelectedLeaf64GpuReturnCapabilities

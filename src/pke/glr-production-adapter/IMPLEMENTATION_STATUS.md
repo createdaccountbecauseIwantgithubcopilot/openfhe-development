@@ -135,3 +135,58 @@ These are core CUDA measurements, not an OpenFHE-native value rerun. Hidden
 controls, the hidden 64-support fold, all-Y/StC, formal composed-noise and
 structured-security certificates, GPU bootstrap readiness, production
 authorization, and bootstrap-direct admission remain false.
+
+## Resident complete-W and optimized hidden-leaf seams
+
+Core revision `71d4252a1b3e807751c5495b65494ffab62bf2bc` moves one
+complete p=257 eight-bit W action onto the resident GPU. The adapter exposes
+both the public-boundary entry point and the composable prepared-operand entry
+point. The two sparse L0 operands upload once; eight encrypted W controls,
+sixteen numerator/broadcast automorphisms, eight CMuxes, the final product,
+full-P13 relinearization, and the paired L0-to-L2 rescale execute without a
+stage ciphertext-value PCIe transfer. The result remains authoritative and
+`DeviceDirty`. The core CUDA acceptance covered all 32,768 X/W coordinates;
+the OpenFHE focused tests pin only metadata and signatures.
+
+Core revision `dd48b5c888eba7e2404cf7ac5d476cc0ee11b68e` hoists hidden
+fine-X and sign selection ahead of the shared W work. The adapter can bind one
+ten-record owner-cursor chunk into hidden-leaf material, return the selected
+pre-W numerator/telescope pair, execute the optimized CPU leaf, and attach the
+result to an exact selected-fold request. This produces one hidden sparse L2
+leaf only. The stationary-B factor, complete branch phase, hidden full64 fold,
+all-Y/StC, exact noise and structured-security certificates, production
+authorization, and bootstrap-direct admission remain false.
+
+## Resident selected-leaf and hidden support streams
+
+Core revision `8fdcbc2fe3b8d58f5dcd0cc5071560c793f87432` adds a move-only
+resident selected-leaf provider. Each lease must return the exact requested
+ordinal as an authoritative `DeviceDirty` L2 leaf with a request-bound receipt;
+ownership transfers into the frontier with zero leaf ciphertext upload or
+readback. The adapter exposes fixed h2 and h4 resident frontiers plus the
+native fixed-full64 schedule. The h4 resident-input composition was
+value-executed by the core acceptance. The resident full64 entry point is
+callable but has not been value-run, so its value-executed flag stays false.
+
+Core revisions `baa27c4f015fae1e52ae81aa6cdd997e240b4a2b` and
+`cbb9e9de06eda3a0de0c7bf6e85b3511fbc4948b` compose optimized hidden
+support production directly into that resident frontier and expose typed h2,
+h4, and full64 delegates. The bounded h4 composition consumed four sequential
+ten-record cursor chunks, retained at most one public support deployment, and
+transferred each authoritative L2 leaf directly to the P14 fold. The reusable
+stream wrapper and its full64 schedule are callable, but neither is reported
+as an OpenFHE-native value run; full64 value execution remains explicitly
+false.
+
+Revision `609df4dd5bfeeb20c4b15f1a8a43046c8091316c` extends the native
+stream evidence with `owner_seed_commitment` and
+`one_owner_seed_commitment_bound`. Every support deployment must carry the
+same nonempty owner-seed commitment, and the stream fails closed if it changes.
+The adapter exposes that native receipt type and pins the default receipt to
+empty/false. No owner secret is retained by the evaluator.
+
+Across these new seams, stationary-B composition, complete-branch execution,
+all-Y composition, exact noise certification, structured-security
+certification, GPU bootstrap readiness, production authorization, and direct
+bootstrap admission remain false. No focused OpenFHE test performs a long
+ciphertext-value run.
