@@ -303,6 +303,12 @@ public:
         glscheme::rns::GlrH64HiddenSelectorRecordSink;
     using NativeGL128H64HiddenSelectorGenerationResult =
         glscheme::rns::GlrH64HiddenSelectorGenerationResult;
+    using NativeGL128H64HiddenSelectorOwnerCursorSink =
+        glscheme::rns::GlrH64HiddenSelectorOwnerCursorSink;
+    using NativeGL128H64HiddenSelectorOwnerCursorEmission =
+        glscheme::rns::GlrH64HiddenSelectorOwnerCursorEmission;
+    using NativeGL128H64HiddenSelectorOwnerCursor =
+        glscheme::rns::GlrH64HiddenSelectorOwnerCursor;
     using NativeGL128H64HiddenSelectorLeaseCallbacks =
         glscheme::rns::GlrH64HiddenSelectorLeaseCallbacks;
     using NativeGL128H64HiddenSelectorProvider =
@@ -600,6 +606,56 @@ public:
         bool bootstrapDirectAdmitted = false;
     };
 
+    // Owner-only, write-only projection of the private-checkpoint H64
+    // material cursor introduced by GLScheme core 599dde94.  The bounded
+    // acceptance emits the first support's ten records and proves exactly-once
+    // progression without loading old records.  It is not evidence that all
+    // 640 controls, a complete material bank, or the hidden fold executed.
+    struct NativeGL128H64HiddenSelectorOwnerCursorCapabilities final {
+        std::string schema =
+            "openfhe.gl128_h64_hidden_selector_owner_cursor_capabilities.v1";
+        std::string nativeCoreCommit =
+            "599dde94b91b10249eb6d222e008bf67b5b6b457";
+        std::string parameterFingerprint =
+            "glrsha256:66a12778024471924327683b7f52e8df4dd038cb3f7f803a516b393e1363e6ab";
+        std::string supportCommitment =
+            "glr-ship-support-v1:n=128:phi=256:count=64:fnv64=16830100300970850058";
+        std::uint32_t sparseSupportCount = 64;
+        std::uint32_t controlsPerSupport = 10;
+        std::uint32_t canonicalControlRecordCount = 640;
+        std::uint32_t materialKeyLevel = 0;
+        std::uint32_t materialSpecialPrimeCount = 13;
+        std::uint32_t minimumRecordsPerEmission = 1;
+        std::uint32_t maximumRecordsPerEmission = 10;
+        std::uint32_t boundedAcceptanceRecordsEmitted = 10;
+        std::array<std::uint32_t, 2> boundedAcceptanceChunkPattern{1, 9};
+        std::uint32_t recordsLoadedOrVerifiedPerEmission = 0;
+        std::uint32_t peakLiveFullPairs = 1;
+        std::uint32_t peakLiveCompactRecords = 1;
+        bool ownerOnly = true;
+        bool moveOnlyCursor = true;
+        bool storeOnlySink = true;
+        bool loadCallbackExposed = false;
+        bool privateLibraryCheckpointState = true;
+        bool privateCheckpointUnforgeableByPublicApi = true;
+        bool callerCheckpointInjectionExposed = false;
+        bool poisonedPersistenceRetryRejected = true;
+        bool exactlyOnceChunkProgressionExecuted = true;
+        bool legacyRecordZeroByteParity = true;
+        bool boundedFirstSupportGenerationExecuted = true;
+        bool canonical640RecordExecutionCompleted = false;
+        bool completeManifestProduced = false;
+        bool fullMaterialBankMaterialized = false;
+        bool full64SupportHiddenControlFold = false;
+        bool fullAllYStcComposed = false;
+        bool exactEstimatorEvidencePresent = false;
+        bool exactNoiseEvidencePresent = false;
+        bool structuredSecurityCertificatePresent = false;
+        bool gpuExecutionExposed = false;
+        bool productionSecurityAuthorized = false;
+        bool bootstrapDirectAdmitted = false;
+    };
+
     // Executable CPU anchor for one canonical encrypted W-index bit.  This
     // is deliberately a distinct capability from the metadata-only complete
     // logarithmic plan: it covers the full 32,768-coordinate grid and the
@@ -693,6 +749,17 @@ public:
     static_assert(!std::is_convertible_v<
                   NativeGL128H64SelectedLeafFoldResult,
                   NativeGL128BootstrapResult>);
+    static_assert(!std::is_copy_constructible_v<
+                  NativeGL128H64HiddenSelectorOwnerCursor>);
+    static_assert(!std::is_copy_assignable_v<
+                  NativeGL128H64HiddenSelectorOwnerCursor>);
+    static_assert(std::is_nothrow_move_constructible_v<
+                  NativeGL128H64HiddenSelectorOwnerCursor>);
+    static_assert(std::is_nothrow_move_assignable_v<
+                  NativeGL128H64HiddenSelectorOwnerCursor>);
+    static_assert(!std::is_convertible_v<
+                  NativeGL128H64HiddenSelectorOwnerCursor,
+                  NativeGL128H64HiddenSelectorCheckpoint>);
     static_assert(!std::is_convertible_v<
                   NativeGL128H64P257OneBitResult,
                   NativeGL128BootstrapResult>);
@@ -1566,6 +1633,20 @@ public:
         const NativeGL128H64HiddenSelectorCheckpoint* resumeCheckpoint =
             nullptr,
         std::size_t maxRecordsThisCall = 0) const;
+    NativeGL128H64HiddenSelectorOwnerCursorCapabilities
+    GetH64HiddenSelectorOwnerCursorCapabilities() const;
+    NativeGL128H64HiddenSelectorOwnerCursor
+    CreateH64HiddenSelectorOwnerCursor(
+        const SparseSecretKey& sparseKey,
+        const NativeGL128H64HiddenSelectorOwnerSeed& ownerSeed) const;
+    NativeGL128H64HiddenSelectorOwnerCursorEmission
+    EmitNextH64HiddenSelectorOwnerCursorChunk(
+        NativeGL128H64HiddenSelectorOwnerCursor& cursor,
+        const SparseSecretKey& sparseKey,
+        const NativeGL128H64HiddenSelectorOwnerSeed& ownerSeed,
+        const NativeGL128H64HiddenSelectorOwnerCursorSink& sink,
+        std::size_t recordsToEmit =
+            glscheme::rns::kGl128H64ControlsPerSupport) const;
     std::unique_ptr<NativeGL128H64HiddenSelectorProvider>
     OpenH64HiddenSelectorProvider(
         NativeGL128H64HiddenSelectorManifest manifest,

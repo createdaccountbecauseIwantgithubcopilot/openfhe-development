@@ -23,3 +23,26 @@ This seam starts after selection. Hidden encrypted controls, the complete
 hidden 64-support fold, all-Y/StC value composition, a formal composed-noise
 certificate, structured-security certification, GPU execution, production
 authorization, and `BootstrapDirect` admission remain false.
+
+## H64 private owner material cursor
+
+GLScheme core revision `599dde94b91b10249eb6d222e008bf67b5b6b457`
+adds a move-only owner cursor, exposed here through
+`CreateH64HiddenSelectorOwnerCursor()` and
+`EmitNextH64HiddenSelectorOwnerCursorChunk()`. Its sink is write-only: there is
+no old-record load callback. The library retains a private authenticated
+checkpoint and accepts one to ten new records per transaction. If persistence
+throws after an ambiguous write, the cursor is poisoned and rejects retrying
+that index.
+
+The bounded core acceptance emitted the first support's ten records in `1/9`
+chunks, independently matched record zero, loaded or reverified zero previous
+records, and kept at most one full pair and one compact record live. The typed
+receipt binds those facts to the canonical 64 supports, 10 controls per
+support, and 640-record total schedule.
+
+This is not a claim that all 640 records executed. No complete manifest or
+full in-memory material bank was produced, and the complete hidden fold,
+all-Y/StC value path, exact estimator/noise evidence, structured security, GPU
+execution, production authorization, and bootstrap-direct admission remain
+false.

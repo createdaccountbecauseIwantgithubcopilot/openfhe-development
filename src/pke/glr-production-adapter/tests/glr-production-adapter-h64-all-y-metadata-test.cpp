@@ -281,6 +281,58 @@ int main() {
     Require(executeSelectedFold != nullptr,
             "OpenFHE H64 selected-leaf fold delegation seam is absent");
 
+    const auto ownerCursor =
+        adapter.GetH64HiddenSelectorOwnerCursorCapabilities();
+    Require(ownerCursor.schema ==
+                    "openfhe.gl128_h64_hidden_selector_owner_cursor_capabilities.v1" &&
+                ownerCursor.nativeCoreCommit ==
+                    "599dde94b91b10249eb6d222e008bf67b5b6b457" &&
+                ownerCursor.parameterFingerprint ==
+                    "glrsha256:66a12778024471924327683b7f52e8df4dd038cb3f7f803a516b393e1363e6ab" &&
+                ownerCursor.supportCommitment ==
+                    "glr-ship-support-v1:n=128:phi=256:count=64:fnv64=16830100300970850058" &&
+                ownerCursor.sparseSupportCount == 64 &&
+                ownerCursor.controlsPerSupport == 10 &&
+                ownerCursor.canonicalControlRecordCount == 640 &&
+                ownerCursor.materialKeyLevel == 0 &&
+                ownerCursor.materialSpecialPrimeCount == 13 &&
+                ownerCursor.minimumRecordsPerEmission == 1 &&
+                ownerCursor.maximumRecordsPerEmission == 10 &&
+                ownerCursor.boundedAcceptanceRecordsEmitted == 10 &&
+                ownerCursor.boundedAcceptanceChunkPattern ==
+                    std::array<std::uint32_t, 2>{1, 9} &&
+                ownerCursor.recordsLoadedOrVerifiedPerEmission == 0 &&
+                ownerCursor.peakLiveFullPairs == 1 &&
+                ownerCursor.peakLiveCompactRecords == 1 &&
+                ownerCursor.ownerOnly && ownerCursor.moveOnlyCursor &&
+                ownerCursor.storeOnlySink &&
+                !ownerCursor.loadCallbackExposed &&
+                ownerCursor.privateLibraryCheckpointState &&
+                ownerCursor.privateCheckpointUnforgeableByPublicApi &&
+                !ownerCursor.callerCheckpointInjectionExposed &&
+                ownerCursor.poisonedPersistenceRetryRejected &&
+                ownerCursor.exactlyOnceChunkProgressionExecuted &&
+                ownerCursor.legacyRecordZeroByteParity &&
+                ownerCursor.boundedFirstSupportGenerationExecuted &&
+                !ownerCursor.canonical640RecordExecutionCompleted &&
+                !ownerCursor.completeManifestProduced &&
+                !ownerCursor.fullMaterialBankMaterialized &&
+                !ownerCursor.full64SupportHiddenControlFold &&
+                !ownerCursor.fullAllYStcComposed &&
+                !ownerCursor.exactEstimatorEvidencePresent &&
+                !ownerCursor.exactNoiseEvidencePresent &&
+                !ownerCursor.structuredSecurityCertificatePresent &&
+                !ownerCursor.gpuExecutionExposed &&
+                !ownerCursor.productionSecurityAuthorized &&
+                !ownerCursor.bootstrapDirectAdmitted,
+            "OpenFHE H64 owner cursor capability is malformed");
+    auto createOwnerCursor =
+        &Adapter::CreateH64HiddenSelectorOwnerCursor;
+    auto emitOwnerCursor =
+        &Adapter::EmitNextH64HiddenSelectorOwnerCursorChunk;
+    Require(createOwnerCursor != nullptr && emitOwnerCursor != nullptr,
+            "OpenFHE H64 owner cursor material seam is absent");
+
     const auto structuredAudit = adapter.AuditH64StructuredSecurity();
     const auto structuredCapabilities =
         adapter.GetH64StructuredSecurityCapabilities();

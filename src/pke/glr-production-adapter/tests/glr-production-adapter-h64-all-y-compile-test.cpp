@@ -48,6 +48,13 @@ using SelectedLeafProviderRef =
     const Adapter::NativeGL128H64SelectedLeafProvider&;
 using SelectedLeafCheckpointRef =
     const Adapter::NativeGL128H64SelectedLeafFoldCheckpointVisitor&;
+using SparseKeyRef = const Adapter::SparseSecretKey&;
+using OwnerSeedRef =
+    const Adapter::NativeGL128H64HiddenSelectorOwnerSeed&;
+using OwnerCursorRef =
+    Adapter::NativeGL128H64HiddenSelectorOwnerCursor&;
+using OwnerCursorSinkRef =
+    const Adapter::NativeGL128H64HiddenSelectorOwnerCursorSink&;
 
 static_assert(std::is_same_v<
               decltype(std::declval<AdapterRef>().PlanH64AllYPublicSources(
@@ -94,6 +101,32 @@ static_assert(std::is_same_v<
 static_assert(!std::is_convertible_v<
               Adapter::NativeGL128H64SelectedLeafFoldResult,
               Adapter::NativeGL128BootstrapResult>);
+static_assert(!std::is_copy_constructible_v<
+              Adapter::NativeGL128H64HiddenSelectorOwnerCursor>);
+static_assert(!std::is_copy_assignable_v<
+              Adapter::NativeGL128H64HiddenSelectorOwnerCursor>);
+static_assert(std::is_nothrow_move_constructible_v<
+              Adapter::NativeGL128H64HiddenSelectorOwnerCursor>);
+static_assert(std::is_nothrow_move_assignable_v<
+              Adapter::NativeGL128H64HiddenSelectorOwnerCursor>);
+static_assert(std::is_same_v<
+              decltype(std::declval<AdapterRef>()
+                           .GetH64HiddenSelectorOwnerCursorCapabilities()),
+              Adapter::NativeGL128H64HiddenSelectorOwnerCursorCapabilities>);
+static_assert(std::is_same_v<
+              decltype(std::declval<AdapterRef>()
+                           .CreateH64HiddenSelectorOwnerCursor(
+                               std::declval<SparseKeyRef>(),
+                               std::declval<OwnerSeedRef>())),
+              Adapter::NativeGL128H64HiddenSelectorOwnerCursor>);
+static_assert(std::is_same_v<
+              decltype(std::declval<AdapterRef>()
+                           .EmitNextH64HiddenSelectorOwnerCursorChunk(
+                               std::declval<OwnerCursorRef>(),
+                               std::declval<SparseKeyRef>(),
+                               std::declval<OwnerSeedRef>(),
+                               std::declval<OwnerCursorSinkRef>(), 10)),
+              Adapter::NativeGL128H64HiddenSelectorOwnerCursorEmission>);
 static_assert(Adapter::NativeGL128H64OwnerRootProductEvidence::owner_only);
 static_assert(!Adapter::NativeGL128H64OwnerRootProductEvidence::
                   evaluator_callable);

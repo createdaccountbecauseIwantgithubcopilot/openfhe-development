@@ -3033,6 +3033,83 @@ GLRProductionAdapter::GenerateH64HiddenSelectorMaterial(
         maxRecordsThisCall);
 }
 
+GLRProductionAdapter::NativeGL128H64HiddenSelectorOwnerCursorCapabilities
+GLRProductionAdapter::GetH64HiddenSelectorOwnerCursorCapabilities() const {
+    (void)glscheme::rns::glr_gl128_validate_context(m_context);
+    NativeGL128H64HiddenSelectorOwnerCursorCapabilities capabilities;
+    const auto plan = PlanH64HiddenSelector();
+    if (capabilities.schema !=
+            "openfhe.gl128_h64_hidden_selector_owner_cursor_capabilities.v1" ||
+        capabilities.nativeCoreCommit !=
+            "599dde94b91b10249eb6d222e008bf67b5b6b457" ||
+        plan.profile.parameter_fingerprint !=
+            capabilities.parameterFingerprint ||
+        plan.profile.support_commitment != capabilities.supportCommitment ||
+        plan.profile.sparse_hamming_weight !=
+            capabilities.sparseSupportCount ||
+        plan.storage.controls_per_support !=
+            capabilities.controlsPerSupport ||
+        plan.storage.control_record_count !=
+            capabilities.canonicalControlRecordCount ||
+        plan.storage.key_level != capabilities.materialKeyLevel ||
+        plan.storage.active_special_primes !=
+            capabilities.materialSpecialPrimeCount ||
+        capabilities.minimumRecordsPerEmission != 1 ||
+        capabilities.maximumRecordsPerEmission != 10 ||
+        capabilities.boundedAcceptanceRecordsEmitted != 10 ||
+        capabilities.boundedAcceptanceChunkPattern !=
+            std::array<std::uint32_t, 2>{1, 9} ||
+        capabilities.recordsLoadedOrVerifiedPerEmission != 0 ||
+        capabilities.peakLiveFullPairs != 1 ||
+        capabilities.peakLiveCompactRecords != 1 ||
+        !capabilities.ownerOnly || !capabilities.moveOnlyCursor ||
+        !capabilities.storeOnlySink || capabilities.loadCallbackExposed ||
+        !capabilities.privateLibraryCheckpointState ||
+        !capabilities.privateCheckpointUnforgeableByPublicApi ||
+        capabilities.callerCheckpointInjectionExposed ||
+        !capabilities.poisonedPersistenceRetryRejected ||
+        !capabilities.exactlyOnceChunkProgressionExecuted ||
+        !capabilities.legacyRecordZeroByteParity ||
+        !capabilities.boundedFirstSupportGenerationExecuted ||
+        capabilities.canonical640RecordExecutionCompleted ||
+        capabilities.completeManifestProduced ||
+        capabilities.fullMaterialBankMaterialized ||
+        capabilities.full64SupportHiddenControlFold ||
+        capabilities.fullAllYStcComposed ||
+        capabilities.exactEstimatorEvidencePresent ||
+        capabilities.exactNoiseEvidencePresent ||
+        capabilities.structuredSecurityCertificatePresent ||
+        capabilities.gpuExecutionExposed ||
+        capabilities.productionSecurityAuthorized ||
+        capabilities.bootstrapDirectAdmitted) {
+        throw GlrError(
+            "GLRProductionAdapter: H64 owner cursor capability is malformed "
+            "or overstates complete execution/security admission");
+    }
+    return capabilities;
+}
+
+GLRProductionAdapter::NativeGL128H64HiddenSelectorOwnerCursor
+GLRProductionAdapter::CreateH64HiddenSelectorOwnerCursor(
+    const SparseSecretKey& sparseKey,
+    const NativeGL128H64HiddenSelectorOwnerSeed& ownerSeed) const {
+    (void)GetH64HiddenSelectorOwnerCursorCapabilities();
+    return NativeGL128H64HiddenSelectorOwnerCursor(
+        m_context, sparseKey, ownerSeed);
+}
+
+GLRProductionAdapter::NativeGL128H64HiddenSelectorOwnerCursorEmission
+GLRProductionAdapter::EmitNextH64HiddenSelectorOwnerCursorChunk(
+    NativeGL128H64HiddenSelectorOwnerCursor& cursor,
+    const SparseSecretKey& sparseKey,
+    const NativeGL128H64HiddenSelectorOwnerSeed& ownerSeed,
+    const NativeGL128H64HiddenSelectorOwnerCursorSink& sink,
+    std::size_t recordsToEmit) const {
+    (void)GetH64HiddenSelectorOwnerCursorCapabilities();
+    return cursor.emit_next(
+        m_context, sparseKey, ownerSeed, sink, recordsToEmit);
+}
+
 std::unique_ptr<
     GLRProductionAdapter::NativeGL128H64HiddenSelectorProvider>
 GLRProductionAdapter::OpenH64HiddenSelectorProvider(
