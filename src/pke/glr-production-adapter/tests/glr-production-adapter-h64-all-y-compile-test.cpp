@@ -55,6 +55,8 @@ using OwnerCursorRef =
     Adapter::NativeGL128H64HiddenSelectorOwnerCursor&;
 using OwnerCursorSinkRef =
     const Adapter::NativeGL128H64HiddenSelectorOwnerCursorSink&;
+using NativeSwitchKeyRef = const Adapter::NativeSwitchKey&;
+using NativeKskRecordRef = const Adapter::NativeKskRecord&;
 
 static_assert(std::is_same_v<
               decltype(std::declval<AdapterRef>().PlanH64AllYPublicSources(
@@ -127,6 +129,21 @@ static_assert(std::is_same_v<
                                std::declval<OwnerSeedRef>(),
                                std::declval<OwnerCursorSinkRef>(), 10)),
               Adapter::NativeGL128H64HiddenSelectorOwnerCursorEmission>);
+static_assert(std::is_same_v<
+              decltype(std::declval<AdapterRef>()
+                           .GetH64SelectedLeafH4GpuCapabilities()),
+              Adapter::NativeGL128H64SelectedLeafH4GpuCapabilities>);
+static_assert(std::is_same_v<
+              decltype(std::declval<AdapterRef>()
+                           .EvaluateH64SelectedLeafH4GpuFrontier(
+                               std::declval<SelectedLeafBindingRef>(),
+                               std::declval<SelectedLeafProviderRef>(),
+                               std::declval<NativeSwitchKeyRef>(),
+                               std::declval<NativeKskRecordRef>())),
+              Adapter::NativeGL128H64SelectedLeafGpuFrontierResult>);
+static_assert(!std::is_convertible_v<
+              Adapter::NativeGL128H64SelectedLeafGpuFrontierResult,
+              Adapter::NativeGL128BootstrapResult>);
 static_assert(Adapter::NativeGL128H64OwnerRootProductEvidence::owner_only);
 static_assert(!Adapter::NativeGL128H64OwnerRootProductEvidence::
                   evaluator_callable);

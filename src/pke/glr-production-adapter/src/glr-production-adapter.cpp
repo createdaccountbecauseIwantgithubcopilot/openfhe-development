@@ -2957,6 +2957,87 @@ GLRProductionAdapter::EvaluateH64SelectedLeafFoldCpu(
         sparseFoldKeys, checkpoint);
 }
 
+GLRProductionAdapter::NativeGL128H64SelectedLeafH4GpuCapabilities
+GLRProductionAdapter::GetH64SelectedLeafH4GpuCapabilities() const {
+    (void)glscheme::rns::glr_gl128_validate_context(m_context);
+    NativeGL128H64SelectedLeafH4GpuCapabilities capabilities;
+    const auto plan = PlanH64HiddenSelector();
+    if (capabilities.schema !=
+            "openfhe.gl128_h64_selected_leaf_h4_gpu_capabilities.v1" ||
+        capabilities.nativeCoreCommit !=
+            "f9324e8a73f8ca98e0bc4e334890e0e83a84f3e1" ||
+        capabilities.nativeEvidenceSchema !=
+            "glscheme.gl128_h64_selected_leaf_gpu_frontier_evidence.v1" ||
+        plan.profile.parameter_fingerprint !=
+            capabilities.parameterFingerprint ||
+        plan.profile.support_commitment != capabilities.supportCommitment ||
+        capabilities.selectedLeafCount != 4 ||
+        capabilities.xwCoordinatesPerLeaf != 32768 ||
+        capabilities.treeDepth != 2 || capabilities.leafLevel != 2 ||
+        capabilities.rootLevel != 6 ||
+        capabilities.frontierInputLevels !=
+            std::array<std::uint32_t, 2>{2, 4} ||
+        capabilities.frontierProductCounts !=
+            std::array<std::uint32_t, 2>{2, 1} ||
+        capabilities.treeProductNodes != 3 ||
+        capabilities.treeRelinearizations != 3 ||
+        capabilities.treePairedRescales != 3 ||
+        capabilities.physicalQPrimeDrops != 6 ||
+        capabilities.fullP14SpecialPrimeSentinel != 0 ||
+        capabilities.effectiveSpecialPrimeCount != 14 ||
+        capabilities.inputLeafBoundaryH2DBytes != 96468992 ||
+        capabilities.ownerReadbackD2HBytes != 19922944 ||
+        capabilities.stageCiphertextValueH2DBytes != 0 ||
+        capabilities.stageCiphertextValueD2HBytes != 0 ||
+        capabilities.decryptedCoordinateCount != 32768 ||
+        capabilities.maximumObservedValueError != 1.086e-10 ||
+        capabilities.internalRuntimeSeconds != 5.81 ||
+        capabilities.wallRuntimeSeconds != 6.00 ||
+        capabilities.peakRssMiB != 595.46 ||
+        !capabilities.deviceConditional ||
+        !capabilities.gpuCallableExposed ||
+        !capabilities.coreCudaValueExecutionObserved ||
+        capabilities.openfheNativeValueExecutionObserved ||
+        !capabilities.randomizedNontransparentSparseLeaves ||
+        !capabilities.exactP14SparseRelinearizationExecuted ||
+        !capabilities.exactN32PairedRescalesExecuted ||
+        !capabilities.exactInputUploadOnce ||
+        !capabilities.noStageCiphertextValuePcie ||
+        !capabilities.outputDeviceDirty ||
+        !capabilities.outputAuthoritative ||
+        !capabilities.exactCpuCiphertextByteParity ||
+        !capabilities.allCoordinatesOwnerDecrypted ||
+        capabilities.hiddenControlSelectionExecuted ||
+        capabilities.complete64SupportFoldExecuted ||
+        capabilities.conjugationReturnExecuted ||
+        capabilities.sparseToPrimaryReturnExecuted ||
+        capabilities.fullAllYStcComposed ||
+        capabilities.exactNoiseCertificatePresent ||
+        capabilities.structuredSecurityCertificatePresent ||
+        capabilities.gpuH64BootstrapReady ||
+        capabilities.productionSecurityAuthorized ||
+        capabilities.bootstrapDirectAdmitted) {
+        throw GlrError(
+            "GLRProductionAdapter: H64 h4 GPU frontier capability is "
+            "malformed or overstates framework/security admission");
+    }
+    capabilities.gpuDeviceAvailable =
+        glscheme::rns::glr_device_ks_available();
+    return capabilities;
+}
+
+GLRProductionAdapter::NativeGL128H64SelectedLeafGpuFrontierResult
+GLRProductionAdapter::EvaluateH64SelectedLeafH4GpuFrontier(
+    const NativeGL128H64SelectedLeafFoldBinding& inputBinding,
+    const NativeGL128H64SelectedLeafProvider& selectedLeaves,
+    const NativeSwitchKey& sparseRelinearizationKey,
+    const NativeKskRecord& expectedRelinearizationRecord) const {
+    (void)GetH64SelectedLeafH4GpuCapabilities();
+    return glscheme::rns::glr_gl128_h64_selected_leaf_fold_gpu_frontier(
+        m_context, inputBinding, 4, selectedLeaves,
+        sparseRelinearizationKey, expectedRelinearizationRecord);
+}
+
 GLRProductionAdapter::NativeGL128H64StructuredSecurityAudit
 GLRProductionAdapter::AuditH64StructuredSecurity() const {
     const auto transcript =

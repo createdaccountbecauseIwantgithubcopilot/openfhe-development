@@ -21,6 +21,7 @@
 #include "glscheme/gl128_h64_p257_right_muxrot.hpp"
 #include "glscheme/gl128_h64_root_product_oracle.hpp"
 #include "glscheme/gl128_h64_selected_leaf_fold.hpp"
+#include "glscheme/gl128_h64_selected_leaf_fold_gpu.hpp"
 #include "glscheme/gl128_h64_structured_security_audit.hpp"
 #include "glscheme/gl128_h64_w_action_plan.hpp"
 #include "glscheme/glr_device_ks.hpp"
@@ -61,6 +62,8 @@ public:
     using Ciphertext = glscheme::rns::GlrCiphertext;
     using SparseSecretKey = glscheme::rns::GlrSparseSecretKey;
     using KeyId = glscheme::rns::GlrKskId;
+    using NativeSwitchKey = glscheme::rns::GlrSwitchKey;
+    using NativeKskRecord = glscheme::rns::GlrKskRecord;
     using KeyRing = glscheme::rns::GlrRing;
     using KeyManifest = glscheme::rns::GlrKskManifest;
     using NativeKeyProvider = glscheme::rns::GlrKskProvider;
@@ -403,6 +406,10 @@ public:
         glscheme::rns::GlrH64SelectedLeafFoldCheckpoint;
     using NativeGL128H64SelectedLeafFoldCheckpointVisitor =
         glscheme::rns::GlrH64SelectedLeafFoldCheckpointVisitor;
+    using NativeGL128H64SelectedLeafGpuFrontierEvidence =
+        glscheme::rns::GlrH64SelectedLeafGpuFrontierEvidence;
+    using NativeGL128H64SelectedLeafGpuFrontierResult =
+        glscheme::rns::GlrH64SelectedLeafGpuFrontierResult;
     using NativeGL128H64CheckedEstimatorTranscript =
         glscheme::rns::GlrH64CheckedEstimatorTranscript;
     using NativeGL128H64StructuredSecurityAudit =
@@ -656,6 +663,70 @@ public:
         bool bootstrapDirectAdmitted = false;
     };
 
+    // Device-conditional projection of core f9324e8a's bounded h4 CUDA
+    // selected-leaf frontier.  Four already-selected randomized sparse L2
+    // leaves execute three full-P14 product/relinearization/paired-rescale
+    // nodes and return a DeviceDirty sparse L6 root.  The measurements below
+    // are the core owner acceptance, not an OpenFHE-native ciphertext run.
+    struct NativeGL128H64SelectedLeafH4GpuCapabilities final {
+        std::string schema =
+            "openfhe.gl128_h64_selected_leaf_h4_gpu_capabilities.v1";
+        std::string nativeCoreCommit =
+            "f9324e8a73f8ca98e0bc4e334890e0e83a84f3e1";
+        std::string nativeEvidenceSchema =
+            "glscheme.gl128_h64_selected_leaf_gpu_frontier_evidence.v1";
+        std::string parameterFingerprint =
+            "glrsha256:66a12778024471924327683b7f52e8df4dd038cb3f7f803a516b393e1363e6ab";
+        std::string supportCommitment =
+            "glr-ship-support-v1:n=128:phi=256:count=64:fnv64=16830100300970850058";
+        std::uint32_t selectedLeafCount = 4;
+        std::uint32_t xwCoordinatesPerLeaf = 32768;
+        std::uint32_t treeDepth = 2;
+        std::uint32_t leafLevel = 2;
+        std::uint32_t rootLevel = 6;
+        std::array<std::uint32_t, 2> frontierInputLevels{2, 4};
+        std::array<std::uint32_t, 2> frontierProductCounts{2, 1};
+        std::uint32_t treeProductNodes = 3;
+        std::uint32_t treeRelinearizations = 3;
+        std::uint32_t treePairedRescales = 3;
+        std::uint32_t physicalQPrimeDrops = 6;
+        std::uint32_t fullP14SpecialPrimeSentinel = 0;
+        std::uint32_t effectiveSpecialPrimeCount = 14;
+        std::uint64_t inputLeafBoundaryH2DBytes = 96468992;
+        std::uint64_t ownerReadbackD2HBytes = 19922944;
+        std::uint64_t stageCiphertextValueH2DBytes = 0;
+        std::uint64_t stageCiphertextValueD2HBytes = 0;
+        std::uint32_t decryptedCoordinateCount = 32768;
+        double maximumObservedValueError = 1.086e-10;
+        double internalRuntimeSeconds = 5.81;
+        double wallRuntimeSeconds = 6.00;
+        double peakRssMiB = 595.46;
+        bool deviceConditional = true;
+        bool gpuDeviceAvailable = false;
+        bool gpuCallableExposed = true;
+        bool coreCudaValueExecutionObserved = true;
+        bool openfheNativeValueExecutionObserved = false;
+        bool randomizedNontransparentSparseLeaves = true;
+        bool exactP14SparseRelinearizationExecuted = true;
+        bool exactN32PairedRescalesExecuted = true;
+        bool exactInputUploadOnce = true;
+        bool noStageCiphertextValuePcie = true;
+        bool outputDeviceDirty = true;
+        bool outputAuthoritative = true;
+        bool exactCpuCiphertextByteParity = true;
+        bool allCoordinatesOwnerDecrypted = true;
+        bool hiddenControlSelectionExecuted = false;
+        bool complete64SupportFoldExecuted = false;
+        bool conjugationReturnExecuted = false;
+        bool sparseToPrimaryReturnExecuted = false;
+        bool fullAllYStcComposed = false;
+        bool exactNoiseCertificatePresent = false;
+        bool structuredSecurityCertificatePresent = false;
+        bool gpuH64BootstrapReady = false;
+        bool productionSecurityAuthorized = false;
+        bool bootstrapDirectAdmitted = false;
+    };
+
     // Executable CPU anchor for one canonical encrypted W-index bit.  This
     // is deliberately a distinct capability from the metadata-only complete
     // logarithmic plan: it covers the full 32,768-coordinate grid and the
@@ -760,6 +831,27 @@ public:
     static_assert(!std::is_convertible_v<
                   NativeGL128H64HiddenSelectorOwnerCursor,
                   NativeGL128H64HiddenSelectorCheckpoint>);
+    static_assert(NativeGL128H64SelectedLeafGpuFrontierEvidence::
+                      research_only);
+    static_assert(!NativeGL128H64SelectedLeafGpuFrontierEvidence::
+                      hidden_control_selection_executed);
+    static_assert(!NativeGL128H64SelectedLeafGpuFrontierEvidence::
+                      conjugation_return_executed);
+    static_assert(!NativeGL128H64SelectedLeafGpuFrontierEvidence::
+                      sparse_to_primary_return_executed);
+    static_assert(!NativeGL128H64SelectedLeafGpuFrontierEvidence::
+                      exact_noise_certificate_present);
+    static_assert(!NativeGL128H64SelectedLeafGpuFrontierEvidence::
+                      structured_security_certificate_present);
+    static_assert(!NativeGL128H64SelectedLeafGpuFrontierEvidence::
+                      production_security_authorized);
+    static_assert(!NativeGL128H64SelectedLeafGpuFrontierEvidence::
+                      bootstrap_direct_admitted);
+    static_assert(!NativeGL128H64SelectedLeafGpuFrontierEvidence::
+                      gpu_h64_bootstrap_ready);
+    static_assert(!std::is_convertible_v<
+                  NativeGL128H64SelectedLeafGpuFrontierResult,
+                  NativeGL128BootstrapResult>);
     static_assert(!std::is_convertible_v<
                   NativeGL128H64P257OneBitResult,
                   NativeGL128BootstrapResult>);
@@ -1613,6 +1705,14 @@ public:
         const NativeGL128H64SparseFoldKskBinding& sparseFoldKeys,
         const NativeGL128H64SelectedLeafFoldCheckpointVisitor& checkpoint =
             {}) const;
+    NativeGL128H64SelectedLeafH4GpuCapabilities
+    GetH64SelectedLeafH4GpuCapabilities() const;
+    NativeGL128H64SelectedLeafGpuFrontierResult
+    EvaluateH64SelectedLeafH4GpuFrontier(
+        const NativeGL128H64SelectedLeafFoldBinding& inputBinding,
+        const NativeGL128H64SelectedLeafProvider& selectedLeaves,
+        const NativeSwitchKey& sparseRelinearizationKey,
+        const NativeKskRecord& expectedRelinearizationRecord) const;
     NativeGL128H64StructuredSecurityAudit
     AuditH64StructuredSecurity() const;
     NativeGL128H64StructuredSecurityCapabilities

@@ -46,3 +46,26 @@ full in-memory material bank was produced, and the complete hidden fold,
 all-Y/StC value path, exact estimator/noise evidence, structured security, GPU
 execution, production authorization, and bootstrap-direct admission remain
 false.
+
+## H64 selected-leaf h4 GPU frontier
+
+The device-conditional `EvaluateH64SelectedLeafH4GpuFrontier()` seam delegates
+GLScheme core revision `f9324e8a73f8ca98e0bc4e334890e0e83a84f3e1`.
+Four already-selected randomized sparse L2 leaves cross the input boundary
+once, then execute two L2 products and one L4 product with the full-P14
+relinearization key. The result remains authoritative and `DeviceDirty` at L6.
+Callers must explicitly perform owner readback and unregister both component
+spans before destroying the host object, as required by the core contract.
+
+The core acceptance reports exact CPU ciphertext-byte parity and decrypts all
+32,768 coordinates with maximum error `1.086e-10`. Input upload is 96,468,992
+bytes (92 MiB), explicit owner readback is 19,922,944 bytes (19 MiB), and all
+three resident product/relinearization/rescale nodes transfer zero ciphertext
+values over PCIe. The measured internal/wall runtimes are 5.81/6.00 seconds at
+595.46 MiB peak RSS.
+
+This receipt attributes value execution only to the GLScheme CUDA acceptance,
+not to OpenFHE-native ciphertexts. The remaining 60 leaves, conjugation and
+sparse-to-primary returns, hidden controls, all-Y/StC, formal noise and
+structured-security certificates, GPU bootstrap readiness, production
+authorization, and bootstrap-direct admission remain false.
