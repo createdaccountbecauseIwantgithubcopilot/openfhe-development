@@ -2863,6 +2863,100 @@ GLRProductionAdapter::EvaluateH64P257RightMuxRotCpu(
         m_context, material, requests);
 }
 
+GLRProductionAdapter::NativeGL128H64SelectedLeafFoldCapabilities
+GLRProductionAdapter::GetH64SelectedLeafFoldCapabilities() const {
+    (void)glscheme::rns::glr_gl128_validate_context(m_context);
+    NativeGL128H64SelectedLeafFoldCapabilities capabilities;
+    const auto plan = PlanH64HiddenSelector();
+    const auto l2Key =
+        glscheme::rns::glr_model_seeded_switch_key_storage_at_level(
+            m_context.params, GlrRing::R, capabilities.leafLevel,
+            capabilities.fullP14SpecialPrimeSentinel);
+    const auto l14Key =
+        glscheme::rns::glr_model_seeded_switch_key_storage_at_level(
+            m_context.params, GlrRing::R, capabilities.rootLevel,
+            capabilities.fullP14SpecialPrimeSentinel);
+    const std::uint64_t compactThreeKeyBytes = CheckedAdd(
+        l2Key.compact_material_bytes,
+        CheckedMul(2, l14Key.compact_material_bytes,
+                   "modeling selected-leaf P14 return keys"),
+        "modeling selected-leaf P14 three-key schedule");
+    if (capabilities.schema !=
+            "openfhe.gl128_h64_selected_leaf_fold_capabilities.v1" ||
+        capabilities.nativeCoreCommit !=
+            "3f2675b1514f6535e63164074bf079bc8ecc7f36" ||
+        capabilities.nativeBindingSchema !=
+            "glscheme.gl128_h64_selected_leaf_fold_binding.v1" ||
+        capabilities.nativeEvidenceSchema !=
+            "glscheme.gl128_h64_selected_leaf_fold_evidence.v1" ||
+        plan.profile.parameter_fingerprint !=
+            capabilities.parameterFingerprint ||
+        plan.profile.support_commitment != capabilities.supportCommitment ||
+        plan.profile.matrix_order != capabilities.matrixOrder ||
+        plan.profile.matrix_count != capabilities.matrixCount ||
+        capabilities.xwCoordinatesPerLeaf != 32768 ||
+        plan.profile.sparse_hamming_weight !=
+            capabilities.selectedLeafCount ||
+        plan.direct_leaf_rescale_level != capabilities.leafLevel ||
+        plan.direct_h64_root_level != capabilities.rootLevel ||
+        capabilities.outputLevel != capabilities.rootLevel ||
+        capabilities.frontierProductCounts !=
+            std::array<std::uint32_t, 6>{32, 16, 8, 4, 2, 1} ||
+        plan.sparse_tree_product_nodes != capabilities.treeProductNodes ||
+        capabilities.treeRelinearizations != 63 ||
+        capabilities.treePairedRescales != 63 ||
+        capabilities.physicalQPrimeDrops != 126 ||
+        capabilities.conjugationToSparseSwitches != 1 ||
+        capabilities.sparseToPrimarySwitches != 1 ||
+        capabilities.sparseRelinKeyLeases != 1 ||
+        capabilities.fullP14SpecialPrimeSentinel != 0 ||
+        plan.sparse_tree_frontier_input_levels !=
+            std::vector<std::uint32_t>(
+                capabilities.frontierInputLevels.begin(),
+                capabilities.frontierInputLevels.end()) ||
+        m_context.params.p_special.size() !=
+            capabilities.effectiveSpecialPrimeCount ||
+        compactThreeKeyBytes != capabilities.compactThreeKeyBytes ||
+        capabilities.peakLiveLeafLeases != 1 ||
+        capabilities.peakLiveSparseTreeFrontierCiphertexts != 7 ||
+        capabilities.peakLiveEvaluationKeys != 1 ||
+        !capabilities.cpuValueDelegationExposed ||
+        !capabilities.coreOwnerAcceptanceValueExecuted ||
+        capabilities.frameworkNativeValuePassExecuted ||
+        !capabilities.randomizedNontransparentSparseLeavesRequired ||
+        !capabilities.synchronousOneLeafProviderRequired ||
+        !capabilities.fullP14FoldScheduleRequired ||
+        capabilities.underprovisionedP13Accepted ||
+        capabilities.restrictedP1Accepted ||
+        capabilities.hiddenControlSelectionExecuted ||
+        capabilities.full64SupportHiddenControlFold ||
+        capabilities.fullAllYStcComposed ||
+        capabilities.exactEstimatorEvidencePresent ||
+        capabilities.formalComposedNoiseCertificatePresent ||
+        capabilities.structuredSecurityCertificatePresent ||
+        capabilities.gpuValueExecutionExposed ||
+        capabilities.productionSecurityAuthorized ||
+        capabilities.bootstrapDirectAdmitted) {
+        throw GlrError(
+            "GLRProductionAdapter: selected-leaf P14 fold capability is "
+            "malformed or overstates framework/security admission");
+    }
+    return capabilities;
+}
+
+GLRProductionAdapter::NativeGL128H64SelectedLeafFoldResult
+GLRProductionAdapter::EvaluateH64SelectedLeafFoldCpu(
+    const NativeGL128H64SelectedLeafFoldBinding& inputBinding,
+    const NativeGL128H64SelectedLeafProvider& selectedLeaves,
+    const NativeKeyProvider& evaluationKeys,
+    const NativeGL128H64SparseFoldKskBinding& sparseFoldKeys,
+    const NativeGL128H64SelectedLeafFoldCheckpointVisitor& checkpoint) const {
+    (void)GetH64SelectedLeafFoldCapabilities();
+    return glscheme::rns::glr_gl128_h64_selected_leaf_fold_cpu(
+        m_context, inputBinding, selectedLeaves, evaluationKeys,
+        sparseFoldKeys, checkpoint);
+}
+
 GLRProductionAdapter::NativeGL128H64StructuredSecurityAudit
 GLRProductionAdapter::AuditH64StructuredSecurity() const {
     const auto transcript =

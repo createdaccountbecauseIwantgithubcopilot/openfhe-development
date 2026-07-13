@@ -221,6 +221,66 @@ int main() {
     Require(generateMuxRot != nullptr && executeMuxRot != nullptr,
             "OpenFHE canonical H64 right-MuxRot seam is absent");
 
+    const auto selectedFold =
+        adapter.GetH64SelectedLeafFoldCapabilities();
+    Require(selectedFold.schema ==
+                    "openfhe.gl128_h64_selected_leaf_fold_capabilities.v1" &&
+                selectedFold.nativeCoreCommit ==
+                    "3f2675b1514f6535e63164074bf079bc8ecc7f36" &&
+                selectedFold.nativeBindingSchema ==
+                    "glscheme.gl128_h64_selected_leaf_fold_binding.v1" &&
+                selectedFold.nativeEvidenceSchema ==
+                    "glscheme.gl128_h64_selected_leaf_fold_evidence.v1" &&
+                selectedFold.parameterFingerprint ==
+                    "glrsha256:66a12778024471924327683b7f52e8df4dd038cb3f7f803a516b393e1363e6ab" &&
+                selectedFold.supportCommitment ==
+                    "glr-ship-support-v1:n=128:phi=256:count=64:fnv64=16830100300970850058" &&
+                selectedFold.matrixOrder == 128 &&
+                selectedFold.matrixCount == 256 &&
+                selectedFold.xwCoordinatesPerLeaf == 32768 &&
+                selectedFold.selectedLeafCount == 64 &&
+                selectedFold.leafLevel == 2 &&
+                selectedFold.rootLevel == 14 &&
+                selectedFold.outputLevel == 14 &&
+                selectedFold.frontierInputLevels ==
+                    std::array<std::uint32_t, 6>{2, 4, 6, 8, 10, 12} &&
+                selectedFold.frontierProductCounts ==
+                    std::array<std::uint32_t, 6>{32, 16, 8, 4, 2, 1} &&
+                selectedFold.treeProductNodes == 63 &&
+                selectedFold.treeRelinearizations == 63 &&
+                selectedFold.treePairedRescales == 63 &&
+                selectedFold.physicalQPrimeDrops == 126 &&
+                selectedFold.conjugationToSparseSwitches == 1 &&
+                selectedFold.sparseToPrimarySwitches == 1 &&
+                selectedFold.sparseRelinKeyLeases == 1 &&
+                selectedFold.fullP14SpecialPrimeSentinel == 0 &&
+                selectedFold.effectiveSpecialPrimeCount == 14 &&
+                selectedFold.compactThreeKeyBytes == 32505952 &&
+                selectedFold.peakLiveLeafLeases == 1 &&
+                selectedFold.peakLiveSparseTreeFrontierCiphertexts == 7 &&
+                selectedFold.peakLiveEvaluationKeys == 1 &&
+                selectedFold.cpuValueDelegationExposed &&
+                selectedFold.coreOwnerAcceptanceValueExecuted &&
+                !selectedFold.frameworkNativeValuePassExecuted &&
+                selectedFold.randomizedNontransparentSparseLeavesRequired &&
+                selectedFold.synchronousOneLeafProviderRequired &&
+                selectedFold.fullP14FoldScheduleRequired &&
+                !selectedFold.underprovisionedP13Accepted &&
+                !selectedFold.restrictedP1Accepted &&
+                !selectedFold.hiddenControlSelectionExecuted &&
+                !selectedFold.full64SupportHiddenControlFold &&
+                !selectedFold.fullAllYStcComposed &&
+                !selectedFold.exactEstimatorEvidencePresent &&
+                !selectedFold.formalComposedNoiseCertificatePresent &&
+                !selectedFold.structuredSecurityCertificatePresent &&
+                !selectedFold.gpuValueExecutionExposed &&
+                !selectedFold.productionSecurityAuthorized &&
+                !selectedFold.bootstrapDirectAdmitted,
+            "OpenFHE H64 selected-leaf fold capability is malformed");
+    auto executeSelectedFold = &Adapter::EvaluateH64SelectedLeafFoldCpu;
+    Require(executeSelectedFold != nullptr,
+            "OpenFHE H64 selected-leaf fold delegation seam is absent");
+
     const auto structuredAudit = adapter.AuditH64StructuredSecurity();
     const auto structuredCapabilities =
         adapter.GetH64StructuredSecurityCapabilities();

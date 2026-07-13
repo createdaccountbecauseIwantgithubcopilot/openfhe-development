@@ -42,6 +42,12 @@ using FoldBindingRef =
     const Adapter::NativeGL128H64SparseFoldKskBinding&;
 using DftSessionRef =
     const Adapter::NativeValidatedDftPlaintextProviderSession&;
+using SelectedLeafBindingRef =
+    const Adapter::NativeGL128H64SelectedLeafFoldBinding&;
+using SelectedLeafProviderRef =
+    const Adapter::NativeGL128H64SelectedLeafProvider&;
+using SelectedLeafCheckpointRef =
+    const Adapter::NativeGL128H64SelectedLeafFoldCheckpointVisitor&;
 
 static_assert(std::is_same_v<
               decltype(std::declval<AdapterRef>().PlanH64AllYPublicSources(
@@ -72,6 +78,22 @@ static_assert(std::is_same_v<
               decltype(std::declval<AdapterRef>()
                            .GetH64StructuredSecurityCapabilities()),
               Adapter::NativeGL128H64StructuredSecurityCapabilities>);
+static_assert(std::is_same_v<
+              decltype(std::declval<AdapterRef>()
+                           .GetH64SelectedLeafFoldCapabilities()),
+              Adapter::NativeGL128H64SelectedLeafFoldCapabilities>);
+static_assert(std::is_same_v<
+              decltype(std::declval<AdapterRef>()
+                           .EvaluateH64SelectedLeafFoldCpu(
+                               std::declval<SelectedLeafBindingRef>(),
+                               std::declval<SelectedLeafProviderRef>(),
+                               std::declval<KeyProviderRef>(),
+                               std::declval<FoldBindingRef>(),
+                               std::declval<SelectedLeafCheckpointRef>())),
+              Adapter::NativeGL128H64SelectedLeafFoldResult>);
+static_assert(!std::is_convertible_v<
+              Adapter::NativeGL128H64SelectedLeafFoldResult,
+              Adapter::NativeGL128BootstrapResult>);
 static_assert(Adapter::NativeGL128H64OwnerRootProductEvidence::owner_only);
 static_assert(!Adapter::NativeGL128H64OwnerRootProductEvidence::
                   evaluator_callable);

@@ -20,6 +20,7 @@
 #include "glscheme/gl128_h64_p257_prefix_splice.hpp"
 #include "glscheme/gl128_h64_p257_right_muxrot.hpp"
 #include "glscheme/gl128_h64_root_product_oracle.hpp"
+#include "glscheme/gl128_h64_selected_leaf_fold.hpp"
 #include "glscheme/gl128_h64_structured_security_audit.hpp"
 #include "glscheme/gl128_h64_w_action_plan.hpp"
 #include "glscheme/glr_device_ks.hpp"
@@ -378,6 +379,24 @@ public:
         glscheme::rns::GlrH64P257RightMuxRotEvidence;
     using NativeGL128H64P257RightMuxRotResult =
         glscheme::rns::GlrH64P257RightMuxRotResult;
+    using NativeGL128H64SelectedLeafFoldBinding =
+        glscheme::rns::GlrH64SelectedLeafFoldBinding;
+    using NativeGL128H64SelectedLeafRequest =
+        glscheme::rns::GlrH64SelectedLeafRequest;
+    using NativeGL128H64SelectedSparseLeaf =
+        glscheme::rns::GlrH64SelectedSparseLeaf;
+    using NativeGL128H64SelectedLeafVisitor =
+        glscheme::rns::GlrH64SelectedLeafVisitor;
+    using NativeGL128H64SelectedLeafProvider =
+        glscheme::rns::GlrH64SelectedLeafProvider;
+    using NativeGL128H64SelectedLeafFoldEvidence =
+        glscheme::rns::GlrH64SelectedLeafFoldEvidence;
+    using NativeGL128H64SelectedLeafFoldResult =
+        glscheme::rns::GlrH64SelectedLeafFoldResult;
+    using NativeGL128H64SelectedLeafFoldCheckpoint =
+        glscheme::rns::GlrH64SelectedLeafFoldCheckpoint;
+    using NativeGL128H64SelectedLeafFoldCheckpointVisitor =
+        glscheme::rns::GlrH64SelectedLeafFoldCheckpointVisitor;
     using NativeGL128H64CheckedEstimatorTranscript =
         glscheme::rns::GlrH64CheckedEstimatorTranscript;
     using NativeGL128H64StructuredSecurityAudit =
@@ -518,6 +537,69 @@ public:
         bool bootstrapDirectAdmitted = false;
     };
 
+    // Typed projection of the first value-executed, complete H64 product
+    // fold.  GLScheme core revision 3f2675b1 accepts exactly 64 already
+    // selected randomized sparse-key leaves at L2, executes the full P14
+    // six-frontier tree and real/primary return at L14, and reports its own
+    // evidence.  This adapter delegates that exact CPU seam; it does not
+    // claim that OpenFHE-native ciphertexts, hidden controls, all Y rows, or
+    // a production refresh have executed.
+    struct NativeGL128H64SelectedLeafFoldCapabilities final {
+        std::string schema =
+            "openfhe.gl128_h64_selected_leaf_fold_capabilities.v1";
+        std::string nativeCoreCommit =
+            "3f2675b1514f6535e63164074bf079bc8ecc7f36";
+        std::string nativeBindingSchema =
+            "glscheme.gl128_h64_selected_leaf_fold_binding.v1";
+        std::string nativeEvidenceSchema =
+            "glscheme.gl128_h64_selected_leaf_fold_evidence.v1";
+        std::string parameterFingerprint =
+            "glrsha256:66a12778024471924327683b7f52e8df4dd038cb3f7f803a516b393e1363e6ab";
+        std::string supportCommitment =
+            "glr-ship-support-v1:n=128:phi=256:count=64:fnv64=16830100300970850058";
+        std::uint32_t matrixOrder = 128;
+        std::uint32_t matrixCount = 256;
+        std::uint64_t xwCoordinatesPerLeaf = 32768;
+        std::uint32_t selectedLeafCount = 64;
+        std::uint32_t leafLevel = 2;
+        std::uint32_t rootLevel = 14;
+        std::uint32_t outputLevel = 14;
+        std::array<std::uint32_t, 6> frontierInputLevels{
+            2, 4, 6, 8, 10, 12};
+        std::array<std::uint32_t, 6> frontierProductCounts{
+            32, 16, 8, 4, 2, 1};
+        std::uint32_t treeProductNodes = 63;
+        std::uint32_t treeRelinearizations = 63;
+        std::uint32_t treePairedRescales = 63;
+        std::uint32_t physicalQPrimeDrops = 126;
+        std::uint32_t conjugationToSparseSwitches = 1;
+        std::uint32_t sparseToPrimarySwitches = 1;
+        std::uint32_t sparseRelinKeyLeases = 1;
+        std::uint32_t fullP14SpecialPrimeSentinel = 0;
+        std::uint32_t effectiveSpecialPrimeCount = 14;
+        std::uint64_t compactThreeKeyBytes = 32505952;
+        std::uint32_t peakLiveLeafLeases = 1;
+        std::uint32_t peakLiveSparseTreeFrontierCiphertexts = 7;
+        std::uint32_t peakLiveEvaluationKeys = 1;
+        bool cpuValueDelegationExposed = true;
+        bool coreOwnerAcceptanceValueExecuted = true;
+        bool frameworkNativeValuePassExecuted = false;
+        bool randomizedNontransparentSparseLeavesRequired = true;
+        bool synchronousOneLeafProviderRequired = true;
+        bool fullP14FoldScheduleRequired = true;
+        bool underprovisionedP13Accepted = false;
+        bool restrictedP1Accepted = false;
+        bool hiddenControlSelectionExecuted = false;
+        bool full64SupportHiddenControlFold = false;
+        bool fullAllYStcComposed = false;
+        bool exactEstimatorEvidencePresent = false;
+        bool formalComposedNoiseCertificatePresent = false;
+        bool structuredSecurityCertificatePresent = false;
+        bool gpuValueExecutionExposed = false;
+        bool productionSecurityAuthorized = false;
+        bool bootstrapDirectAdmitted = false;
+    };
+
     // Executable CPU anchor for one canonical encrypted W-index bit.  This
     // is deliberately a distinct capability from the metadata-only complete
     // logarithmic plan: it covers the full 32,768-coordinate grid and the
@@ -608,6 +690,9 @@ public:
     static_assert(NativeGL128H64P257RightMuxRotEvidence::research_only);
     static_assert(!NativeGL128H64P257RightMuxRotEvidence::
                       production_security_authorized);
+    static_assert(!std::is_convertible_v<
+                  NativeGL128H64SelectedLeafFoldResult,
+                  NativeGL128BootstrapResult>);
     static_assert(!std::is_convertible_v<
                   NativeGL128H64P257OneBitResult,
                   NativeGL128BootstrapResult>);
@@ -1452,6 +1537,15 @@ public:
     NativeGL128H64P257RightMuxRotResult EvaluateH64P257RightMuxRotCpu(
         const NativeGL128H64P257RightMuxRotMaterial& material,
         std::span<const NativeGL128H64P257OneBitRequest> requests) const;
+    NativeGL128H64SelectedLeafFoldCapabilities
+    GetH64SelectedLeafFoldCapabilities() const;
+    NativeGL128H64SelectedLeafFoldResult EvaluateH64SelectedLeafFoldCpu(
+        const NativeGL128H64SelectedLeafFoldBinding& inputBinding,
+        const NativeGL128H64SelectedLeafProvider& selectedLeaves,
+        const NativeKeyProvider& evaluationKeys,
+        const NativeGL128H64SparseFoldKskBinding& sparseFoldKeys,
+        const NativeGL128H64SelectedLeafFoldCheckpointVisitor& checkpoint =
+            {}) const;
     NativeGL128H64StructuredSecurityAudit
     AuditH64StructuredSecurity() const;
     NativeGL128H64StructuredSecurityCapabilities
