@@ -18,10 +18,10 @@ claim**.
 
 The algorithm follows Jean-Sebastien Coron and Tim Seure, *PaCo:
 Bootstrapping for CKKS via Partial CoeffToSlot*, ASIACRYPT 2025. The workspace
-copy is [PACO.md](../../../../GL_scheme/PACO.md). The authors' proof-of-concept
+copy is [PACO.md](../../../../PACO.md). The authors' proof-of-concept
 repository is [se-tim/PaCo-Implementation](https://github.com/se-tim/PaCo-Implementation),
 with a local recursively initialized clone at
-[GL_scheme/external/PaCo-Implementation](../../../../GL_scheme/external/PaCo-Implementation/).
+[GL_scheme/external/PaCo-Implementation](../../../../external/PaCo-Implementation/).
 
 The behavior comparison used the following pinned revisions:
 
