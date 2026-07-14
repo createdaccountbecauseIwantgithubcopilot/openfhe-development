@@ -35,6 +35,7 @@ File Listing
 - [linearwsum-evaluation.cpp](linearwsum-evaluation.cpp): demonstrates the evaluation of a linear weighted sum using CKKS
 - [polynomial-evaluation.cpp](polynomial-evaluation.cpp): demonstrates an evaluation of a polynomial (power series) using CKKS
 - [polynomial-evaluation-high-precision-composite-scaling.cpp](polynomial-evaluation-high-precision-composite-scaling.cpp): high-precision (80-bit scaling factor) power series evaluation in the CKKS composite scaling mode
+- [paco-ckks-bootstrapping.cpp](paco-ckks-bootstrapping.cpp): research-only native CKKS-RNS implementation of PaCo bootstrapping via partial CoeffToSlot; see [PACO_BOOTSTRAPPING.md](PACO_BOOTSTRAPPING.md) for its exact scope and non-claims
 - [pre-buffer.cpp](pre-buffer.cpp): demonstrates use of OpenFHE for encryption, re-encryption and decryption of packed vector of binary data
 - [pre-hra-secure.cpp](pre-hra-secure.cpp): shows examples of HRA-secure PRE based on BGV
 - [rotation.cpp](rotation.cpp): demonstrates use of EvalRotate for different schemes
