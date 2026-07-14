@@ -21,11 +21,11 @@ The hardened implementation also freezes the revised 64-bit
 bits), six P primes (360 bits), and a three-part HYBRID decomposition over a
 1,270-bit QP product. Its complete pinned conventional estimator run has a
 144.4963829467-bit minimum among the modeled attacks and passes the repository's
-140-bit parameter-screening floor. The checked-in report is regenerated after
-the final OpenFHE commit to bind clean provenance. A parameter-screening label
-is deliberately narrower than “128-bit secure” or “independently audited”; see
-`docs/paco-security-profile.md` and `docs/paco-independent-audit-packet.md` in
-the parent workspace.
+140-bit parameter-screening floor. Release evidence must bind the exact clean,
+published OpenFHE revision, estimator script, embedded manifest, and reference
+revisions; this living guide is not execution evidence. A parameter-screening
+label is deliberately narrower than “128-bit secure” or “independently
+audited.”
 
 ## Exact admitted native profile
 
@@ -414,19 +414,21 @@ v2 round trips, context/numerical/lifecycle binding, corruption and rollback,
 and wrong key-basis/level rejection. Numerical tests use high-precision clear
 phase oracles and large arbitrary-size moduli.
 
-The acknowledged full production audit also passed with authenticated v2
-round-trip, 26 signed rotations, 28 automorphisms, `1,594,884,096` live
-coefficient bytes, a `1,595,099,539`-byte artifact, and
-`10,006,605,824`-byte peak RSS.
-Sequential decoded error was `7.232545e-6` (17.077 bits); both parallel modes
-had `8.689577e-6` (16.812 bits) and agreed exactly. Raw sequential and parallel
-output polynomial errors were `1,738,063,741` and `890,891,651`, below the
-conditional total bound `45,440,915,006.44838`. The externally supplied `2^34`
-non-small-angle premise is still an assumption beyond these fixtures.
+The acknowledged full production audit is the machine-readable evidence gate.
+It requires an authenticated v2 round-trip, the frozen 26-signed-rotation and
+28-automorphism manifests, exact serial/concurrent parallel agreement, admitted
+output metadata, raw polynomial error below the conditional total bound, and
+decoded error below the explicitly labeled heuristic gate. It records the
+actual restricted-key layout, live coefficient bytes, artifact bytes, wall and
+CPU time, concurrency speedup, and peak RSS. Exact observations belong in the
+commit-bound JSON evidence bundle because encryption randomness, scheduling,
+and host resources make them run-specific. The externally supplied `2^34`
+non-small-angle premise remains an assumption beyond those fixtures.
 
 Those tests, measurements, and the complete conventional estimator support the
 parameter-screening candidate label. They do not supply independent
 cryptanalysis, a KDM/circular-security reduction, a side-channel or entropy
-audit, or a production-approval decision. The checked-in estimator and audit
-JSON must be regenerated after the final OpenFHE commit so their provenance is
-clean.
+audit, or a production-approval decision. A release must either pin the exact
+evaluated OpenFHE commit or regenerate its estimator and production evidence
+after any source revision; documentation text must never be used to relabel an
+older execution as a newer one.
