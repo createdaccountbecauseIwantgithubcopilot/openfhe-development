@@ -39,7 +39,6 @@ TEST(GLIntProductionMatMul, GadgetTErrCrossLaneAndHadamard) {
     EXPECT_FALSE(capabilities.conjugationFamilySwap);
     EXPECT_FALSE(capabilities.auxiliaryAutomorphismSwitch);
     EXPECT_FALSE(capabilities.securityAuthorized);
-    EXPECT_FALSE(capabilities.bootstrap);
 
     const GLIntProductionSparsePlaintext left(
         evaluator.GetParameters(),

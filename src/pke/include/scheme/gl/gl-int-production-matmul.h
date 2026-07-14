@@ -128,7 +128,6 @@ struct GLIntProductionMatMulCapabilities {
     bool conjugationFamilySwap{false};
     bool auxiliaryAutomorphismSwitch{false};
     bool securityAuthorized{false};
-    bool bootstrap{false};
 };
 
 /**

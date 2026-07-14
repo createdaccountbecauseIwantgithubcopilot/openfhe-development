@@ -110,13 +110,6 @@ endif()
 add_custom_command(OUTPUT pkeinfocmd COMMAND echo Builds OPENFHEpke and these apps: ${PKEAPPS})
 add_custom_target(pkeinfo DEPENDS pkeinfocmd)
 
-# The production GLR engine is deliberately an optional, separately linked
-# provider.  It is not part of pkeobj's lib/*.cpp glob and therefore cannot
-# change the existing OpenFHE GLSchemelet implementation when disabled.
-if(WITH_GLR_PRODUCTION_ADAPTER)
-    add_subdirectory(glr-production-adapter)
-endif()
-
 # Collect compile definitions and pass them upward
 if(BUILD_SHARED)
     get_target_property(_compile_defs OPENFHEpke COMPILE_DEFINITIONS)

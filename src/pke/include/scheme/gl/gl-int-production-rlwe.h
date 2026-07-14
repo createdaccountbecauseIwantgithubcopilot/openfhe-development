@@ -121,7 +121,6 @@ struct GLIntProductionRLWECapabilities {
     bool switchIntBig{false};
     bool securityAuthorized{false};
     bool ciphertextMatMul{false};
-    bool bootstrap{false};
 };
 
 /**

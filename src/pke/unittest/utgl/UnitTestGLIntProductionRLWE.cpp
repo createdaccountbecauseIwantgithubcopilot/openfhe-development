@@ -35,7 +35,6 @@ TEST(GLIntProductionRLWE, ExactTErrEncryptDecryptAndNoiseScalingModSwitch) {
     EXPECT_FALSE(capabilities.switchIntBig);
     EXPECT_FALSE(capabilities.securityAuthorized);
     EXPECT_FALSE(capabilities.ciphertextMatMul);
-    EXPECT_FALSE(capabilities.bootstrap);
 
     const GLIntProductionSparsePlaintext sparse(
         codec.GetParameters(),

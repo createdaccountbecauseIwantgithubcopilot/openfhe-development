@@ -551,9 +551,8 @@ GLPlaintext TransposeLogicalPlaintext(const GLPlaintext& plaintext) {
  * (component-wise negacyclic monomial multiply).  Every canonical CKKS slot
  * root is zeta^{5^j} with 5^j = 1 (mod 4), so this scales every slot value by
  * exactly +i in any power-of-two CKKS ring; in the exact ring 2n the monomial
- * is literally the Gaussian unit i = T^n (the same unit the SHIP port
- * multiplies by).  Monomial multiplication is exact: no key switch, no level
- * or scale metadata change, works at any level.
+ * is literally the Gaussian unit i = T^n.  Monomial multiplication is exact:
+ * no key switch, no level or scale metadata change, and it works at any level.
  */
 void MultiplyRowByUnitIInPlace(Ciphertext<DCRTPoly>& row) {
     if (!row || row->GetElements().size() != 2) {

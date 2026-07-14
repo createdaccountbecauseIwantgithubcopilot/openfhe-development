@@ -64,7 +64,6 @@ enum class GLIntOperation : uint8_t {
     MatrixMultiplyPlain,
     CircledastCipher,
     MatrixMultiplyCipher,
-    BootstrapRows,
     SerializeAggregate,
 };
 
@@ -78,14 +77,13 @@ enum class GLIntWFreeCoverage : uint8_t {
 
 /** Key families needed by an operation; values compose as a bit mask. */
 enum GLIntKeyRequirement : uint16_t {
-    GLIntKeyNone                = 0,
-    GLIntKeySmallRelinearize    = 1u << 0,
-    GLIntKeyBigConjugateK1      = 1u << 1,
-    GLIntKeyBigProductK2        = 1u << 2,
-    GLIntKeyBigTransposeK3      = 1u << 3,
-    GLIntKeyXYAutomorphism      = 1u << 4,
-    GLIntKeyWAutomorphism       = 1u << 5,
-    GLIntKeyBootstrap           = 1u << 6,
+    GLIntKeyNone             = 0,
+    GLIntKeySmallRelinearize = 1u << 0,
+    GLIntKeyBigConjugateK1   = 1u << 1,
+    GLIntKeyBigProductK2     = 1u << 2,
+    GLIntKeyBigTransposeK3   = 1u << 3,
+    GLIntKeyXYAutomorphism   = 1u << 4,
+    GLIntKeyWAutomorphism    = 1u << 5,
 };
 
 struct GLIntOperationCensusEntry {
@@ -98,7 +96,7 @@ struct GLIntOperationCensusEntry {
     bool productionValuePathImplemented{false};
 };
 
-inline constexpr std::size_t kGLIntOperationCensusSize = 22;
+inline constexpr std::size_t kGLIntOperationCensusSize = 21;
 
 /**
  * Algebraic parameter contract for the p>1, W-batched integer GL layout.
@@ -133,8 +131,8 @@ struct GLIntWBatchedParameters {
  * n=4,p=3,t=97 receipt reports a plaintext codec and bounded sliced linear
  * ciphertext path; no receipt is evidence of native fused W-dependent RLWE
  * transport, a security-authorized BGV chain, evaluation-key serialization,
- * matrix multiplication, or integer bootstrapping.  The bounded receipt does
- * cover its eight-ciphertext value aggregate.  `operations` records the p=1
+ * or matrix multiplication.  The bounded receipt covers its eight-ciphertext
+ * value aggregate.  `operations` records the p=1
  * reference surface and remaining p>1 production gaps.
  */
 struct GLIntWBatchedCensus {
@@ -152,7 +150,6 @@ struct GLIntWBatchedCensus {
     uint64_t nonIdentityRowRotations{0};
     uint64_t nonIdentityColumnRotations{0};
     uint64_t nonIdentityInterMatrixRotations{0};
-    uint64_t independentRowBootstrapCount{0};
     uint32_t logicalBigSwitchFamilyCount{3};  // K1, K2, K3
     uint32_t logicalSmallSwitchFamilyCount{1};
     bool boundedPlaintextCodecImplemented{false};
@@ -160,7 +157,6 @@ struct GLIntWBatchedCensus {
     bool nativeFusedWTransportImplemented{false};
     bool securityAuthorized{false};
     bool aggregateSerializationImplemented{false};
-    bool integerBootstrapImplemented{false};
     std::array<GLIntOperationCensusEntry, kGLIntOperationCensusSize> operations{};
 };
 
@@ -254,8 +250,8 @@ private:
  * (I,zeta_j,zeta_k,eta_l); the - lane evaluates
  * (-I,zeta_j^-1,zeta_k^-1,eta_l^-1).  ApplyWAutomorphism performs the actual
  * coefficient substitution W -> W^(gamma^nu) modulo Phi_p(W), while
- * RotateInterMatrix is its direct clear-matrix oracle.  No ciphertext,
- * security, serialization, or bootstrap claim is attached to this class.
+ * RotateInterMatrix is its direct clear-matrix oracle.  This class exposes no
+ * ciphertext, security, or serialization surface.
  */
 class GLIntWBatchedPlaintextCodec final {
 public:
@@ -353,8 +349,8 @@ struct GLIntWBatchedSerializedCiphertext {
  * and relinearizes the X/Gaussian slices while the aggregate performs the Y
  * convolution modulo Y^n-I and W convolution modulo Phi_p(W).  Native fused
  * single-RLWE W transport under a W-dependent secret, ordinary GL matrix
- * multiplication, security authorization, evaluation-key serialization, and
- * bootstrapping are explicitly pending.  The eight-ciphertext value bundle
+ * multiplication, security authorization, and evaluation-key serialization
+ * are outside this bounded schemelet.  The eight-ciphertext value bundle
  * itself has a canonical, context-bound OpenFHE binary envelope.
  */
 class GLIntWBatchedSlicedSchemelet final {
@@ -373,7 +369,6 @@ public:
     bool SupportsCiphertextMatMul() const noexcept;
     bool IsSecurityAuthorized() const noexcept;
     bool SupportsSerialization() const noexcept;
-    bool SupportsBootstrap() const noexcept;
 
     KeyPair<DCRTPoly> KeyGen() const;
     /** Generate the real OpenFHE s^2 relinearization key used by EvalHadamard. */
@@ -590,8 +585,7 @@ private:
  * the adjoint-analog of the right operand and multiplies by the exact
  * public integer n, decoding to the pair of ordinary per-branch products
  * (U+ V+, U- V-).  BGV ModReduce is the spec's ModSwitch; every
- * multiplication-class operation consumes exactly one level.  No method in
- * this slice implements or claims SHIP bootstrapping.
+ * multiplication-class operation consumes exactly one level.
  */
 class GLIntSchemelet final {
 public:

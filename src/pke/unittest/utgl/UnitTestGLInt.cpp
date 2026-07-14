@@ -20,7 +20,7 @@
 // a separate n=4,p=3,t=97 codec and sliced BGV aggregate exercise genuine
 // p>1 plaintext plus linear ciphertext semantics under W-constant s(X),
 // without claiming fused W-dependent transport, security, evaluation-key
-// serialization, matrix multiplication, or integer bootstrapping.  Its eight
+// serialization or matrix multiplication.  Its eight
 // ciphertext value bundle has a canonical OpenFHE binary envelope.
 
 #include "gtest/gtest.h"
@@ -478,7 +478,6 @@ TEST(GLInt, WBatchedProductionParameterAndOperationCensus) {
     EXPECT_EQ(census.nonIdentityRowRotations, 127u);
     EXPECT_EQ(census.nonIdentityColumnRotations, 127u);
     EXPECT_EQ(census.nonIdentityInterMatrixRotations, 255u);
-    EXPECT_EQ(census.independentRowBootstrapCount, 128u);
     EXPECT_EQ(census.logicalBigSwitchFamilyCount, 3u);
     EXPECT_EQ(census.logicalSmallSwitchFamilyCount, 1u);
 
@@ -490,7 +489,6 @@ TEST(GLInt, WBatchedProductionParameterAndOperationCensus) {
     EXPECT_FALSE(census.nativeFusedWTransportImplemented);
     EXPECT_FALSE(census.securityAuthorized);
     EXPECT_FALSE(census.aggregateSerializationImplemented);
-    EXPECT_FALSE(census.integerBootstrapImplemented);
 
     ASSERT_EQ(census.operations.size(), kGLIntOperationCensusSize);
     for (std::size_t index = 0; index < census.operations.size(); ++index) {
@@ -514,10 +512,6 @@ TEST(GLInt, WBatchedProductionParameterAndOperationCensus) {
     EXPECT_EQ(cipherMatMul.consumedLevels, 1u);
     EXPECT_EQ(cipherMatMul.keyRequirements,
               GLIntKeyBigConjugateK1 | GLIntKeyBigProductK2);
-    const auto& bootstrap =
-        census.operations[static_cast<std::size_t>(GLIntOperation::BootstrapRows)];
-    EXPECT_EQ(bootstrap.wFreeCoverage, GLIntWFreeCoverage::Missing);
-    EXPECT_EQ(bootstrap.keyRequirements, GLIntKeyBootstrap);
     const auto& serialization =
         census.operations[static_cast<std::size_t>(GLIntOperation::SerializeAggregate)];
     EXPECT_FALSE(serialization.section4Required);
@@ -744,7 +738,6 @@ TEST(GLInt, WBatchedSlicedBGVEncryptDecryptAndContract) {
     EXPECT_FALSE(scheme.SupportsCiphertextMatMul());
     EXPECT_FALSE(scheme.IsSecurityAuthorized());
     EXPECT_TRUE(scheme.SupportsSerialization());
-    EXPECT_FALSE(scheme.SupportsBootstrap());
 
     const GLIntWBatchedPlaintext input(parameters, WBatchedPlusValues(), WBatchedMinusValues());
     const auto encoded = scheme.GetCodec().Encode(input);
@@ -792,7 +785,6 @@ TEST(GLInt, WBatchedSlicedBGVEncryptDecryptAndContract) {
     EXPECT_FALSE(census.operations[static_cast<std::size_t>(
                      GLIntOperation::SerializeAggregate)]
                      .productionValuePathImplemented);
-    EXPECT_FALSE(census.integerBootstrapImplemented);
 }
 
 TEST(GLInt, WBatchedSlicedBGVSerializationRoundTripAndOperationParity) {

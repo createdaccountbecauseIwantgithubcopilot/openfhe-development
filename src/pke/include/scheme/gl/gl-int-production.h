@@ -95,7 +95,6 @@ struct GLIntProductionCapabilities {
     bool switchIntSmall{false};
     bool switchIntBig{false};
     bool securityAuthorized{false};
-    bool bootstrap{false};
 };
 
 /**
@@ -109,7 +108,7 @@ struct GLIntProductionCapabilities {
  *   minus = n^-1 U_minus * V_plus^T.
  *
  * This class is plaintext/ring arithmetic only.  It makes no RLWE,
- * SwitchInt, security, or bootstrap claim.
+ * SwitchInt, or security claim.
  */
 class GLIntProductionCore final {
 public:

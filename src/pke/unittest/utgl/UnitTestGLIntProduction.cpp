@@ -48,7 +48,6 @@ TEST(GLIntProduction, SparseSigmaIntDenseRPrimeRoundTrip) {
     EXPECT_FALSE(capabilities.switchIntSmall);
     EXPECT_FALSE(capabilities.switchIntBig);
     EXPECT_FALSE(capabilities.securityAuthorized);
-    EXPECT_FALSE(capabilities.bootstrap);
 
     const GLIntProductionSparsePlaintext sparse(
         parameters,

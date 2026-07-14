@@ -244,9 +244,8 @@ private:
  * Maps every requested GL row-rotation amount nu (1 <= nu < n) to the
  * framework automorphism key for X -> X^{5^nu}, generated through the
  * framework's own EvalAtIndexKeyGen path but kept in this owned object rather
- * than the ambient global registry (the SHIP port's owned xForwardKeys map is
- * the precedent).  It contains destination-bound OpenFHE EvalKeys only; no
- * private-key element is retained.
+ * than the ambient global registry.  It contains destination-bound OpenFHE
+ * EvalKeys only; no private-key element is retained.
  */
 class GLRotationEvalKey final {
 public:
@@ -346,8 +345,7 @@ private:
  * DCRT coefficient pairs and use genuine OpenFHE key switching; they are
  * restricted to exact ringDimension=2n.  EvalMatMulPlain and
  * EvalMatMulReference remain transport/reference oracles that reconstruct
- * logical columns with packed operations.  No method in this slice implements
- * or claims SHIP bootstrapping.
+ * logical columns with packed operations.
  */
 class GLSchemelet final {
 public:

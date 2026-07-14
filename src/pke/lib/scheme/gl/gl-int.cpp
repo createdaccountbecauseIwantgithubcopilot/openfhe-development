@@ -17,7 +17,7 @@
 // The bounded n=4,p=3,t=97 extension below adds the genuine W-batched
 // plaintext codec plus linear BGV encryption sliced by (Y,W), explicitly
 // under the W-constant s(X) conformance embedding; it is not native fused
-// W-dependent RLWE transport and makes no security/matmul/bootstrap claim.
+// W-dependent RLWE transport and makes no security or matmul claim.
 
 #include "scheme/gl/gl-int.h"
 
@@ -502,7 +502,6 @@ std::array<GLIntOperationCensusEntry, kGLIntOperationCensusSize> WFreeOperationC
                     GLIntKeyBigConjugateK1 | GLIntKeyBigProductK2),
         CensusEntry(GLIntOperation::MatrixMultiplyCipher, Coverage::PublicValuePath, 1,
                     GLIntKeyBigConjugateK1 | GLIntKeyBigProductK2),
-        CensusEntry(GLIntOperation::BootstrapRows, Coverage::Missing, 0, GLIntKeyBootstrap),
         CensusEntry(GLIntOperation::SerializeAggregate, Coverage::Missing, 0, GLIntKeyNone, false),
     }};
 }
@@ -984,7 +983,6 @@ GLIntWBatchedCensus MakeGLIntWBatchedCensus(const GLIntWBatchedParameters& param
     census.nonIdentityRowRotations         = parameters.dimension - 1;
     census.nonIdentityColumnRotations      = parameters.dimension - 1;
     census.nonIdentityInterMatrixRotations = census.phi - 1;
-    census.independentRowBootstrapCount   = parameters.dimension;
     census.operations                     = WFreeOperationCensus();
     if (parameters.IsConformanceN4P3T97()) {
         census.boundedPlaintextCodecImplemented = true;
@@ -1698,10 +1696,6 @@ bool GLIntWBatchedSlicedSchemelet::IsSecurityAuthorized() const noexcept {
 
 bool GLIntWBatchedSlicedSchemelet::SupportsSerialization() const noexcept {
     return true;
-}
-
-bool GLIntWBatchedSlicedSchemelet::SupportsBootstrap() const noexcept {
-    return false;
 }
 
 KeyPair<DCRTPoly> GLIntWBatchedSlicedSchemelet::KeyGen() const {
