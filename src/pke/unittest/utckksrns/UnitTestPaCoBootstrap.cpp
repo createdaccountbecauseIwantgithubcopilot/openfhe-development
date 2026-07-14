@@ -28,7 +28,9 @@
 //==================================================================================
 
 #include "openfhe.h"
+#include "key/evalkeyrelin.h"
 #include "scheme/ckksrns/ckksrns-paco.h"
+#include "scheme/ckksrns/ckksrns-paco-bsgs.h"
 
 #include "gtest/gtest.h"
 
@@ -37,6 +39,8 @@
 #include <complex>
 #include <cstdint>
 #include <limits>
+#include <map>
+#include <numeric>
 #include <set>
 #include <vector>
 
@@ -57,14 +61,15 @@ PaCoParameters SmallPaCoParameters() {
 CryptoContext<DCRTPoly> MakeComplexContext(uint32_t ringDimension, uint32_t multiplicativeDepth,
                                            ScalingTechnique scalingTechnique     = FLEXIBLEAUTO,
                                            CKKSDataType dataType                 = COMPLEX,
-                                           KeySwitchTechnique keySwitchTechnique = HYBRID) {
+                                           KeySwitchTechnique keySwitchTechnique = HYBRID, uint32_t firstModSize = 45,
+                                           uint32_t scalingModSize = 35, SecurityLevel securityLevel = HEStd_NotSet) {
     CCParams<CryptoContextCKKSRNS> parameters;
     parameters.SetRingDim(ringDimension);
     parameters.SetBatchSize(ringDimension / 2);
     parameters.SetMultiplicativeDepth(multiplicativeDepth);
-    parameters.SetFirstModSize(45);
-    parameters.SetScalingModSize(35);
-    parameters.SetSecurityLevel(HEStd_NotSet);
+    parameters.SetFirstModSize(firstModSize);
+    parameters.SetScalingModSize(scalingModSize);
+    parameters.SetSecurityLevel(securityLevel);
     parameters.SetKeySwitchTechnique(keySwitchTechnique);
     parameters.SetNumLargeDigits(2);
     parameters.SetScalingTechnique(scalingTechnique);
@@ -96,6 +101,40 @@ uint32_t ActiveTowers(ConstCiphertext<DCRTPoly> ciphertext) {
     return ciphertext->GetElements().at(0).GetNumOfElements();
 }
 
+void ExpectRestrictedHybridLayout(const EvalKey<DCRTPoly>& key, uint32_t minimumLevel, uint32_t totalQTowers,
+                                  const std::shared_ptr<CryptoParametersCKKSRNS>& cryptoParams) {
+    ASSERT_TRUE(key);
+    ASSERT_GT(minimumLevel, 0U);
+    ASSERT_LT(minimumLevel, totalQTowers);
+    const uint32_t qTowers = totalQTowers - minimumLevel;
+    const uint32_t pTowers = cryptoParams->GetParamsP()->GetParams().size();
+    const uint32_t digits  = 1 + (qTowers - 1) / cryptoParams->GetNumPerPartQ();
+    ASSERT_EQ(key->GetAVector().size(), digits);
+    ASSERT_EQ(key->GetBVector().size(), digits);
+    const auto checkComponent = [&](const DCRTPoly& component) {
+        ASSERT_EQ(component.GetFormat(), Format::EVALUATION);
+        ASSERT_EQ(component.GetNumOfElements(), qTowers + pTowers);
+        ASSERT_TRUE(component.GetParams());
+        const auto& params = component.GetParams()->GetParams();
+        for (uint32_t i = 0; i < qTowers; ++i)
+            EXPECT_EQ(*params[i], *cryptoParams->GetElementParams()->GetParams()[i]);
+        for (uint32_t i = 0; i < pTowers; ++i)
+            EXPECT_EQ(*params[qTowers + i], *cryptoParams->GetParamsP()->GetParams()[i]);
+    };
+    for (const auto& component : key->GetAVector())
+        checkComponent(component);
+    for (const auto& component : key->GetBVector())
+        checkComponent(component);
+}
+
+EvalKey<DCRTPoly> CloneEvalKey(const EvalKey<DCRTPoly>& key) {
+    auto clone = std::make_shared<EvalKeyRelinImpl<DCRTPoly>>(key->GetCryptoContext());
+    clone->SetAVector(key->GetAVector());
+    clone->SetBVector(key->GetBVector());
+    clone->SetKeyTag(key->GetKeyTag());
+    return clone;
+}
+
 void ExpectVectorsNear(const std::vector<Complex>& actual, const std::vector<Complex>& expected, double tolerance,
                        const char* label) {
     ASSERT_EQ(actual.size(), expected.size()) << label;
@@ -117,6 +156,52 @@ std::vector<Complex> ApplyInReverseOrder(const std::vector<paco::detail::SparseD
     return value;
 }
 
+std::vector<Complex> RotateLogical(const std::vector<Complex>& value, int32_t rotation) {
+    std::vector<Complex> result(value.size());
+    const int64_t dimension = static_cast<int64_t>(value.size());
+    for (int64_t row = 0; row < dimension; ++row) {
+        int64_t source = (row + rotation) % dimension;
+        if (source < 0)
+            source += dimension;
+        result[static_cast<size_t>(row)] = value[static_cast<size_t>(source)];
+    }
+    return result;
+}
+
+std::vector<Complex> ApplyBSGSOracle(const paco::detail::SparseDiagonalMatrix& matrix,
+                                     const std::vector<Complex>& input) {
+    std::vector<uint32_t> support;
+    for (const auto& [canonical, diagonal] : matrix.diagonals) {
+        (void)diagonal;
+        support.push_back(canonical);
+    }
+    const auto plan = paco::detail::MakeSparseDiagonalBSGSPlan(matrix.dimension, support);
+    if (plan.directFallback)
+        return matrix.Apply(input);
+
+    std::map<int32_t, std::vector<Complex>> babies;
+    for (const int32_t baby : plan.babySteps)
+        babies.emplace(baby, RotateLogical(input, baby));
+
+    std::vector<Complex> output(matrix.dimension);
+    for (const int32_t giant : plan.giantSteps) {
+        std::vector<Complex> inner(matrix.dimension);
+        for (const auto& [canonical, diagonal] : matrix.diagonals) {
+            const auto [baby, diagonalGiant] = plan.decomposition.at(canonical);
+            if (diagonalGiant != giant)
+                continue;
+            const auto adjusted = RotateLogical(diagonal, -giant);
+            const auto& rotated = babies.at(baby);
+            for (uint32_t row = 0; row < matrix.dimension; ++row)
+                inner[row] += adjusted[row] * rotated[row];
+        }
+        const auto outer = RotateLogical(inner, giant);
+        for (uint32_t row = 0; row < matrix.dimension; ++row)
+            output[row] += outer[row];
+    }
+    return output;
+}
+
 Ciphertext<DCRTPoly> EncryptAtBaseModulus(const CryptoContext<DCRTPoly>& context, const PublicKey<DCRTPoly>& publicKey,
                                           const std::vector<Complex>& slots) {
     auto plaintext  = context->MakeCKKSPackedPlaintext(slots, 1, 0, nullptr, slots.size());
@@ -124,6 +209,17 @@ Ciphertext<DCRTPoly> EncryptAtBaseModulus(const CryptoContext<DCRTPoly>& context
     ciphertext      = context->Compress(ciphertext, 1);
     EXPECT_EQ(ciphertext->GetElements().at(0).GetNumOfElements(), 1U);
     EXPECT_EQ(ciphertext->GetElements().at(1).GetNumOfElements(), 1U);
+    return ciphertext;
+}
+
+Ciphertext<DCRTPoly> EncryptWithActiveTowers(const CryptoContext<DCRTPoly>& context,
+                                             const PublicKey<DCRTPoly>& publicKey, const std::vector<Complex>& slots,
+                                             uint32_t activeTowers) {
+    auto plaintext  = context->MakeCKKSPackedPlaintext(slots, 1, 0, nullptr, slots.size());
+    auto ciphertext = context->Encrypt(publicKey, plaintext);
+    ciphertext      = context->Compress(ciphertext, activeTowers);
+    EXPECT_EQ(ciphertext->GetElements().at(0).GetNumOfElements(), activeTowers);
+    EXPECT_EQ(ciphertext->GetElements().at(1).GetNumOfElements(), activeTowers);
     return ciphertext;
 }
 
@@ -212,6 +308,21 @@ TEST_F(UTCKKSRNS_PACO, ParameterGeometryAndDepthValidation) {
     invalid.g1 = 0;
     EXPECT_THROW(invalid.Validate(64), OpenFHEException);
 
+    invalid    = parameters;
+    invalid.g0 = 4;
+    EXPECT_THROW(invalid.Validate(64), OpenFHEException);
+
+    invalid                                            = parameters;
+    invalid.numerics.maximumNonSmallAngleAbsoluteError = 1.0;
+    EXPECT_THROW(invalid.Validate(64), OpenFHEException);
+
+    auto certified     = parameters;
+    certified.numerics = {/*maximumAbsScaledCoefficient=*/std::ldexp(1.0, 35),
+                          /*maximumNonSmallAngleAbsoluteError=*/std::ldexp(1.0, 24),
+                          /*minimumPrecisionBits=*/8,
+                          /*maximumActiveTowers=*/1};
+    EXPECT_NO_THROW(certified.Validate(64));
+
     EXPECT_THROW(parameters.Validate(16), OpenFHEException);
     EXPECT_THROW(parameters.Validate(48), OpenFHEException);
 
@@ -272,6 +383,115 @@ TEST_F(UTCKKSRNS_PACO, DAndEStagesInvertAndGroupingPreservesComposition) {
     ASSERT_EQ(rightGrouped.size(), 2U);
     ExpectVectorsNear(ApplyInOrder(rightGrouped, input), ApplyInOrder(stages, input), kMatrixTolerance,
                       "right-grouped E composition");
+}
+
+TEST_F(UTCKKSRNS_PACO, BSGSSparseDiagonalEvaluationMatchesDirectOracle) {
+    constexpr uint32_t dimension = 64;
+    constexpr uint32_t reversal  = 8;
+    std::vector<Complex> input(dimension);
+    for (uint32_t i = 0; i < dimension; ++i)
+        input[i] = Complex{std::sin(0.17 * i) + 0.01 * i, std::cos(0.11 * i) - 0.005 * i};
+
+    std::vector<paco::detail::SparseDiagonalMatrix> stages;
+    for (uint32_t logStride = 0; logStride <= 3; ++logStride)
+        stages.push_back(paco::detail::MakeEStage(dimension, logStride, reversal, true));
+    const auto grouped = paco::detail::GroupStages(stages, 3, true);
+
+    bool exercisedBSGS = false;
+    for (const auto& matrix : grouped) {
+        std::vector<uint32_t> support;
+        for (const auto& [canonical, diagonal] : matrix.diagonals) {
+            (void)diagonal;
+            support.push_back(canonical);
+        }
+        const auto plan = paco::detail::MakeSparseDiagonalBSGSPlan(matrix.dimension, support);
+        exercisedBSGS   = exercisedBSGS || !plan.directFallback;
+        ASSERT_EQ(plan.decomposition.size(), matrix.diagonals.size());
+        for (const auto& [canonical, steps] : plan.decomposition) {
+            int64_t recomposed = (static_cast<int64_t>(steps.first) + steps.second) % matrix.dimension;
+            if (recomposed < 0)
+                recomposed += matrix.dimension;
+            EXPECT_EQ(static_cast<uint32_t>(recomposed), canonical);
+        }
+        ExpectVectorsNear(ApplyBSGSOracle(matrix, input), matrix.Apply(input), 4e-12,
+                          "BSGS/direct sparse-diagonal parity");
+    }
+    EXPECT_TRUE(exercisedBSGS);
+
+    paco::detail::SparseDiagonalMatrix irregular;
+    irregular.dimension = 16;
+    irregular.diagonals.emplace(0, std::vector<Complex>(16, {1.0, 0.0}));
+    irregular.diagonals.emplace(2, std::vector<Complex>(16, {0.5, 0.0}));
+    irregular.diagonals.emplace(7, std::vector<Complex>(16, {-0.25, 0.0}));
+    const auto fallback = paco::detail::MakeSparseDiagonalBSGSPlan(16, {0, 2, 7});
+    EXPECT_TRUE(fallback.directFallback);
+    ExpectVectorsNear(ApplyBSGSOracle(irregular, std::vector<Complex>(16, {0.125, -0.25})),
+                      irregular.Apply(std::vector<Complex>(16, {0.125, -0.25})), kMatrixTolerance,
+                      "irregular support direct fallback");
+    EXPECT_THROW((void)paco::detail::MakeSparseDiagonalBSGSPlan(16, {0, 0}), OpenFHEException);
+    EXPECT_THROW((void)paco::detail::MakeSparseDiagonalBSGSPlan(16, {16}), OpenFHEException);
+    std::vector<uint32_t> oversizedSupport(33);
+    std::iota(oversizedSupport.begin(), oversizedSupport.end(), 0);
+    EXPECT_THROW((void)paco::detail::MakeSparseDiagonalBSGSPlan(64, oversizedSupport), OpenFHEException);
+}
+
+TEST_F(UTCKKSRNS_PACO, PaperSetIBSGSManifestStaysBelowPublishedTwentyNineKeyBudget) {
+    constexpr uint32_t ringDimension = 1U << 15;
+    constexpr uint32_t slots         = ringDimension / 2;
+    constexpr uint32_t h             = 64;
+    constexpr uint32_t C             = ringDimension / (4 * h);
+    constexpr uint32_t n             = 2 * h * C;
+    constexpr uint32_t grouping      = 3;
+
+    std::vector<paco::detail::SparseDiagonalMatrix> partialStages;
+    for (uint32_t logStride = 0; logStride <= 7; ++logStride)
+        partialStages.push_back(paco::detail::MakeEStage(n, logStride, C / 2, true));
+    const auto partial = paco::detail::GroupStages(partialStages, grouping, true);
+
+    std::vector<paco::detail::SparseDiagonalMatrix> finalStages;
+    for (uint32_t logStride = 0; logStride < 6; ++logStride)
+        finalStages.push_back(paco::detail::MakeEStage(C / 2, logStride, C / 2, false));
+    const auto final = paco::detail::GroupStages(finalStages, grouping, false);
+
+    std::set<int32_t> rotationManifest;
+    const auto addTrace = [&](uint32_t from, uint32_t to) {
+        for (uint32_t current = from; current > to; current /= 2)
+            rotationManifest.insert(static_cast<int32_t>(current / 2));
+    };
+    const auto addPlans = [&](const std::vector<paco::detail::SparseDiagonalMatrix>& matrices) {
+        for (const auto& matrix : matrices) {
+            std::vector<uint32_t> support;
+            for (const auto& [canonical, diagonal] : matrix.diagonals) {
+                (void)diagonal;
+                support.push_back(canonical);
+            }
+            const auto plan    = paco::detail::MakeSparseDiagonalBSGSPlan(matrix.dimension, support);
+            const auto indices = plan.RotationKeyIndices();
+            rotationManifest.insert(indices.begin(), indices.end());
+            EXPECT_FALSE(plan.directFallback);
+        }
+    };
+    addTrace(slots, n);
+    addPlans(partial);
+    addTrace(n, 2 * C);
+    addTrace(2 * C, C);
+    addTrace(C, C / 2);
+    addPlans(final);
+
+    const uint32_t M = 2 * ringDimension;
+    std::set<uint32_t> automorphismManifest;
+    for (const int32_t rotation : rotationManifest)
+        automorphismManifest.insert(FindAutomorphismIndex2nComplex(rotation, M));
+    automorphismManifest.insert(M - 1);
+    const uint32_t rotationC = FindAutomorphismIndex2nComplex(static_cast<int32_t>(C), M);
+    automorphismManifest.insert(static_cast<uint32_t>((static_cast<uint64_t>(M - 1) * rotationC) % M));
+
+    // PACO.md reports 29 switching keys for PaCo I. Searching all aligned
+    // rectangles places zero rotations more effectively than the pinned Sage
+    // ceil(sqrt(t)) heuristic, so the same matrices need only 27 keys here.
+    EXPECT_EQ(rotationManifest.size(), 25U);
+    EXPECT_EQ(automorphismManifest.size(), 27U);
+    EXPECT_LE(automorphismManifest.size(), 29U);
 }
 
 TEST_F(UTCKKSRNS_PACO, DAndEMatricesMatchPinnedSageReferenceFixtures) {
@@ -374,6 +594,69 @@ TEST_F(UTCKKSRNS_PACO, StructuredKeyHasAlgorithmOneShape) {
     EXPECT_EQ(observedWeight, kTestH);
 }
 
+TEST_F(UTCKKSRNS_PACO, RestrictedHybridKeysBindLevelAndExactQPrefixPlusPBasis) {
+    const auto parameters = SmallPaCoParameters();
+    auto context          = MakeSmallComplexContext(parameters.MultiplicativeDepth() + 2);
+    auto owner            = PaCoCKKSRNS::KeyGen(context, parameters.h, UINT64_C(0x4c45564c));
+    PaCoCKKSRNS paco(context, parameters);
+    paco.GenerateBootstrapKeys(owner);
+    const auto bundle       = paco.GetBootstrapKeys();
+    const auto cryptoParams = std::dynamic_pointer_cast<CryptoParametersCKKSRNS>(context->GetCryptoParameters());
+
+    ASSERT_EQ(bundle.automorphismKeyLevels.size(), bundle.automorphismIndices.size());
+    ASSERT_EQ(bundle.automorphismKeys->size(), bundle.automorphismIndices.size());
+    std::set<uint32_t> observedLevels;
+    for (const uint32_t index : bundle.automorphismIndices) {
+        const auto level = bundle.automorphismKeyLevels.find(index);
+        const auto key   = bundle.automorphismKeys->find(index);
+        ASSERT_TRUE(level != bundle.automorphismKeyLevels.end());
+        ASSERT_TRUE(key != bundle.automorphismKeys->end());
+        observedLevels.insert(level->second);
+        ExpectRestrictedHybridLayout(key->second, level->second, bundle.totalTowers, cryptoParams);
+    }
+    EXPECT_GT(observedLevels.size(), 1U);
+    ExpectRestrictedHybridLayout(bundle.multiplicationKey, bundle.multiplicationKeyLevel, bundle.totalTowers,
+                                 cryptoParams);
+
+    const uint32_t slots = context->GetRingDimension() / 2;
+    auto plaintext =
+        context->MakeCKKSPackedPlaintext(std::vector<Complex>(slots, {0.125, -0.0625}), 1, 0, nullptr, slots);
+    auto fullCiphertext = context->Encrypt(owner.keyPair.publicKey, plaintext);
+
+    const uint32_t automorphism      = bundle.automorphismIndices.front();
+    const uint32_t automorphismLevel = bundle.automorphismKeyLevels.at(automorphism);
+    EXPECT_THROW((void)context->EvalAutomorphism(fullCiphertext, automorphism, *bundle.automorphismKeys),
+                 OpenFHEException);
+    auto atAutomorphismLevel = context->Compress(fullCiphertext, bundle.totalTowers - automorphismLevel);
+    EXPECT_EQ(atAutomorphismLevel->GetLevel(), automorphismLevel);
+    EXPECT_NO_THROW((void)context->EvalAutomorphism(atAutomorphismLevel, automorphism, *bundle.automorphismKeys));
+
+    EXPECT_THROW((void)context->GetScheme()->EvalMult(fullCiphertext, fullCiphertext, bundle.multiplicationKey),
+                 OpenFHEException);
+    auto atMultiplicationLevel = context->Compress(fullCiphertext, bundle.totalTowers - bundle.multiplicationKeyLevel);
+    EXPECT_EQ(atMultiplicationLevel->GetLevel(), bundle.multiplicationKeyLevel);
+    EXPECT_NO_THROW(
+        (void)context->GetScheme()->EvalMult(atMultiplicationLevel, atMultiplicationLevel, bundle.multiplicationKey));
+
+    auto wrongLevel                                  = bundle;
+    wrongLevel.automorphismKeyLevels.begin()->second = wrongLevel.automorphismKeyLevels.begin()->second + 1;
+    EXPECT_THROW(paco.LoadBootstrapKeys(std::move(wrongLevel)), OpenFHEException);
+
+    auto wrongMultiplicationLevel = bundle;
+    ++wrongMultiplicationLevel.multiplicationKeyLevel;
+    EXPECT_THROW(paco.LoadBootstrapKeys(std::move(wrongMultiplicationLevel)), OpenFHEException);
+
+    auto wrongBasis             = bundle;
+    wrongBasis.automorphismKeys = std::make_shared<std::map<uint32_t, EvalKey<DCRTPoly>>>(*bundle.automorphismKeys);
+    auto malformed              = CloneEvalKey(wrongBasis.automorphismKeys->begin()->second);
+    auto malformedA             = malformed->GetAVector();
+    ASSERT_FALSE(malformedA.empty());
+    malformedA.front().DropLastElement();
+    malformed->SetAVector(std::move(malformedA));
+    wrongBasis.automorphismKeys->begin()->second = std::move(malformed);
+    EXPECT_THROW(paco.LoadBootstrapKeys(std::move(wrongBasis)), OpenFHEException);
+}
+
 TEST_F(UTCKKSRNS_PACO, MaterialImportRejectsUnboundIncompleteAndMismatchedBundles) {
     const auto parameters = SmallPaCoParameters();
     auto context          = MakeSmallComplexContext(parameters.MultiplicativeDepth() + 2);
@@ -382,12 +665,27 @@ TEST_F(UTCKKSRNS_PACO, MaterialImportRejectsUnboundIncompleteAndMismatchedBundle
     // Regression: an overlapping key already present in OpenFHE's ambient map
     // must be merged into PaCo's explicit private bundle.
     context->EvalRotateKeyGen(owner.keyPair.secretKey, {1});
+    const uint32_t cachedIndex = FindAutomorphismIndex2nComplex(1, 2 * kTestRingDimension);
+    const auto& globalBefore   = CryptoContextImpl<DCRTPoly>::GetAllEvalAutomorphismKeys();
+    const auto globalTag       = globalBefore.find(owner.keyPair.secretKey->GetKeyTag());
+    ASSERT_TRUE(globalTag != globalBefore.end());
+    ASSERT_TRUE(globalTag->second);
+    const auto cachedKey = globalTag->second->find(cachedIndex);
+    ASSERT_TRUE(cachedKey != globalTag->second->end());
+    const auto fullCachedKey = cachedKey->second;
     PaCoCKKSRNS ownerSide(context, parameters);
     EXPECT_NO_THROW(ownerSide.GenerateBootstrapKeys(owner));
     ASSERT_TRUE(ownerSide.IsSetup());
     const auto bundle = ownerSide.GetBootstrapKeys();
     EXPECT_EQ(bundle.automorphismIndices.size(), bundle.automorphismKeys->size());
     EXPECT_FALSE(bundle.rotationIndices.empty());
+    const auto restrictedCached = bundle.automorphismKeys->find(cachedIndex);
+    ASSERT_TRUE(restrictedCached != bundle.automorphismKeys->end());
+    EXPECT_NE(restrictedCached->second.get(), fullCachedKey.get());
+    const auto cryptoParams     = std::dynamic_pointer_cast<CryptoParametersCKKSRNS>(context->GetCryptoParameters());
+    const uint32_t fullQPTowers = cryptoParams->GetParamsQP()->GetParams().size();
+    EXPECT_EQ(fullCachedKey->GetAVector().front().GetNumOfElements(), fullQPTowers);
+    EXPECT_LT(restrictedCached->second->GetAVector().front().GetNumOfElements(), fullQPTowers);
 
     PaCoCKKSRNS evaluator(context, parameters);
     EXPECT_NO_THROW(evaluator.LoadBootstrapKeys(bundle));
@@ -445,11 +743,24 @@ TEST_F(UTCKKSRNS_PACO, ContextAndInputPreconditionsFailBeforeEvaluation) {
     auto fixedManual = MakeComplexContext(kTestRingDimension, depth + 2, FIXEDMANUAL);
     EXPECT_THROW((void)PaCoCKKSRNS(fixedManual, parameters), OpenFHEException);
 
+    auto flexibleExtended = MakeComplexContext(kTestRingDimension, depth + 2, FLEXIBLEAUTOEXT);
+    EXPECT_THROW((void)PaCoCKKSRNS(flexibleExtended, parameters), OpenFHEException);
+
     auto realPacking = MakeComplexContext(kTestRingDimension, depth + 2, FLEXIBLEAUTO, REAL);
     EXPECT_THROW((void)PaCoCKKSRNS(realPacking, parameters), OpenFHEException);
 
     auto bvKeys = MakeComplexContext(kTestRingDimension, depth + 2, FLEXIBLEAUTO, COMPLEX, BV);
     EXPECT_THROW((void)PaCoCKKSRNS(bvKeys, parameters), OpenFHEException);
+
+    auto securedContext = MakeComplexContext(/*ringDimension=*/32768, depth + 2, FLEXIBLEAUTO, COMPLEX, HYBRID,
+                                             /*firstModSize=*/45, /*scalingModSize=*/35, HEStd_128_classic);
+    EXPECT_THROW((void)PaCoCKKSRNS(securedContext, parameters), OpenFHEException);
+    auto certifiedParameters     = parameters;
+    certifiedParameters.numerics = {/*maximumAbsScaledCoefficient=*/std::ldexp(1.0, 35),
+                                    /*maximumNonSmallAngleAbsoluteError=*/std::ldexp(1.0, 20),
+                                    /*minimumPrecisionBits=*/8,
+                                    /*maximumActiveTowers=*/1};
+    EXPECT_NO_THROW((void)PaCoCKKSRNS(securedContext, certifiedParameters));
 
     auto context = MakeSmallComplexContext(depth + 2);
     auto owner   = PaCoCKKSRNS::KeyGen(context, parameters.h, UINT64_C(0x50524543));
@@ -459,7 +770,7 @@ TEST_F(UTCKKSRNS_PACO, ContextAndInputPreconditionsFailBeforeEvaluation) {
     const std::vector<Complex> values(kTestRingDimension / 2, {0.01, -0.005});
     auto plaintext = context->MakeCKKSPackedPlaintext(values, 1, 0, nullptr, values.size());
     auto fullChain = context->Encrypt(owner.keyPair.publicKey, plaintext);
-    EXPECT_THROW((void)paco.EvalSequential(fullChain), OpenFHEException);
+    EXPECT_NO_THROW((void)paco.GetCoefficientEncodings(fullChain));
 
     auto depleted = context->Compress(fullChain, 1);
     EXPECT_NO_THROW((void)paco.GetCoefficientEncodings(depleted));
@@ -554,6 +865,90 @@ TEST_F(UTCKKSRNS_PACO, CoefficientEncodingsMatchIndependentPublicBoundaryOracle)
         auto observed = actual[t]->GetCKKSPackedValue();
         observed.resize(slots);
         ExpectVectorsNear(observed, expected, 2e-10, "public coefficient encoding");
+    }
+}
+
+TEST_F(UTCKKSRNS_PACO, MultiTowerCoefficientEncodingsMatchIndependentCrtOracle) {
+    constexpr uint32_t ringDimension = 64;
+    const PaCoParameters parameters{/*h=*/2, /*C=*/4, /*g0=*/2, /*g1=*/1};
+    auto context = MakeComplexContext(ringDimension, parameters.MultiplicativeDepth() + 2, FLEXIBLEAUTO, COMPLEX,
+                                      HYBRID, /*firstModSize=*/35, /*scalingModSize=*/20);
+    auto owner   = PaCoCKKSRNS::KeyGen(context, parameters.h, UINT64_C(0x4352544f));
+    PaCoCKKSRNS paco(context, parameters);
+    paco.GenerateBootstrapKeys(owner);
+
+    const uint32_t slots = ringDimension / 2;
+    const auto input     = RepeatToAmbient({{0.0013, -0.0004}, {-0.0009, 0.0006}}, slots);
+    auto ciphertext      = EncryptWithActiveTowers(context, owner.keyPair.publicKey, input, /*activeTowers=*/2);
+    const auto actual    = paco.GetCoefficientEncodings(ciphertext);
+    ASSERT_EQ(actual.size(), 4U);
+
+    DCRTPoly c0 = ciphertext->GetElements()[0];
+    DCRTPoly c1 = ciphertext->GetElements()[1];
+    c0.SetFormat(Format::COEFFICIENT);
+    c1.SetFormat(Format::COEFFICIENT);
+    const uint64_t q0             = c0.GetElementAtIndex(0).GetModulus().ConvertToInt();
+    const uint64_t q1             = c0.GetElementAtIndex(1).GetModulus().ConvertToInt();
+    const uint64_t q0InverseModQ1 = NativeInteger(q0).ModInverse(NativeInteger(q1)).ConvertToInt<uint64_t>();
+    const BigInteger q            = BigInteger(q0) * BigInteger(q1);
+    const auto interpolate        = [&](const DCRTPoly& polynomial, uint32_t coefficient) {
+        const uint64_t a0         = polynomial.GetElementAtIndex(0)[coefficient].ConvertToInt<uint64_t>();
+        const uint64_t a1         = polynomial.GetElementAtIndex(1)[coefficient].ConvertToInt<uint64_t>();
+        const uint64_t difference = a1 >= a0 % q1 ? a1 - (a0 % q1) : q1 - ((a0 % q1) - a1);
+        const uint64_t lift =
+            NativeInteger(difference).ModMul(NativeInteger(q0InverseModQ1), NativeInteger(q1)).ConvertToInt<uint64_t>();
+        return BigInteger(a0) + BigInteger(q0) * BigInteger(lift);
+    };
+    constexpr long double pi = 3.141592653589793238462643383279502884L;
+    const auto phase         = [&](const BigInteger& value) {
+        const BigInteger reduced   = value.Mod(q);
+        const bool negative        = reduced > (q >> 1);
+        const BigInteger magnitude = negative ? q - reduced : reduced;
+        const long double ratio    = magnitude.ConvertToLongDouble() / q.ConvertToLongDouble();
+        const long double angle    = (negative ? -1.0L : 1.0L) * 2.0L * pi * ratio;
+        return Complex{static_cast<double>(std::cos(angle)), static_cast<double>(std::sin(angle))};
+    };
+
+    const uint32_t k = parameters.ResidueBlockCount(ringDimension);
+    const uint32_t n = parameters.PartialRingSlots();
+    std::vector<std::vector<Complex>> phases(4 * parameters.h * k, std::vector<Complex>(2 * parameters.C));
+    const auto phaseAt = [&](uint32_t v, uint32_t r) -> std::vector<Complex>& {
+        return phases[v * k + r];
+    };
+    for (uint32_t v = 0; v < 4 * parameters.h; ++v) {
+        for (uint32_t r = 0; r < k; ++r) {
+            for (uint32_t i = 0; i < parameters.C; ++i) {
+                const uint32_t base = 4 * parameters.h * (i * k + r);
+                BigInteger residue;
+                if (v == 0)
+                    residue = (interpolate(c0, base) + interpolate(c1, base)).Mod(q);
+                else if (i == 0 && r == 0) {
+                    const BigInteger value = interpolate(c1, ringDimension - v);
+                    residue                = value == BigInteger(0) ? BigInteger(0) : q - value;
+                }
+                else
+                    residue = interpolate(c1, base - v);
+                phaseAt(v, r)[i] = phase(residue);
+            }
+        }
+    }
+
+    for (uint32_t t = 0; t < 4; ++t) {
+        std::vector<Complex> expected(slots);
+        for (uint32_t r = 0; r < k; ++r) {
+            std::vector<Complex> block(n);
+            for (uint32_t v = 0; v < parameters.h; ++v)
+                std::copy(phaseAt(t * parameters.h + v, r).begin(), phaseAt(t * parameters.h + v, r).end(),
+                          block.begin() + v * 2 * parameters.C);
+            for (int32_t logStride = 2; logStride >= 0; --logStride)
+                block = paco::detail::MakeDStage(n, static_cast<uint32_t>(logStride)).Apply(block);
+            std::copy(block.begin(), block.end(), expected.begin() + r * n);
+        }
+        expected = paco::detail::ExtendedBitReverseVector(expected, parameters.C / 2);
+        actual[t]->SetLength(slots);
+        auto observed = actual[t]->GetCKKSPackedValue();
+        observed.resize(slots);
+        ExpectVectorsNear(observed, expected, 3e-10, "multi-tower public coefficient encoding");
     }
 }
 
@@ -704,6 +1099,60 @@ TEST_F(UTCKKSRNS_PACO, SequentialRefreshesConstantComplexMessageFromOneTower) {
     const auto continuedSlots = DecryptSlots(context, owner.keyPair.secretKey, continued, slots);
     const std::vector<Complex> expectedHalf(slots, 0.5 * message);
     ExpectVectorsNear(continuedSlots, expectedHalf, 4e-4, "post-PaCo multiplication");
+}
+
+TEST_F(UTCKKSRNS_PACO, RestrictedMultiplicationKeyWorksAcrossLaterQPrefixes) {
+    const PaCoParameters parameters{/*h=*/4, /*C=*/2, /*g0=*/1, /*g1=*/1};
+    auto context = MakeComplexContext(/*ringDimension=*/64, parameters.MultiplicativeDepth() + 2);
+    auto owner   = PaCoCKKSRNS::KeyGen(context, parameters.h, /*deterministicSeed=*/UINT64_C(0x48344b4559));
+    PaCoCKKSRNS paco(context, parameters);
+    paco.GenerateBootstrapKeys(owner);
+
+    const auto bundle = paco.GetBootstrapKeys();
+    ASSERT_GT(parameters.h, 2U);
+    ASSERT_GT(parameters.MultiplicativeDepth() - bundle.multiplicationKeyLevel, 1U);
+
+    const uint32_t slots = context->GetRingDimension() / 2;
+    const Complex message{0.015625, -0.0078125};
+    const std::vector<Complex> expected(slots, message);
+    auto depleted     = EncryptAtBaseModulus(context, owner.keyPair.publicKey, expected);
+    auto refreshed    = paco.EvalSequential(depleted);
+    const auto actual = DecryptSlots(context, owner.keyPair.secretKey, refreshed, slots);
+    ExpectVectorsNear(actual, expected, 4e-4, "restricted multiplication key reuse across Q prefixes");
+}
+
+TEST_F(UTCKKSRNS_PACO, MultiTowerEvaluationIsPolicyGatedAndRefreshesAdmittedInput) {
+    auto parameters     = SmallPaCoParameters();
+    parameters.numerics = {/*maximumAbsScaledCoefficient=*/std::ldexp(1.0, 35),
+                           /*maximumNonSmallAngleAbsoluteError=*/std::ldexp(1.0, 18),
+                           /*minimumPrecisionBits=*/12,
+                           /*maximumActiveTowers=*/2};
+    auto context = MakeComplexContext(kTestRingDimension, parameters.MultiplicativeDepth() + 2, FLEXIBLEAUTO, COMPLEX,
+                                      HYBRID, /*firstModSize=*/45, /*scalingModSize=*/35);
+    auto owner   = PaCoCKKSRNS::KeyGen(context, parameters.h, UINT64_C(0x43525432));
+    PaCoCKKSRNS paco(context, parameters);
+    paco.GenerateBootstrapKeys(owner);
+
+    const uint32_t slots = kTestRingDimension / 2;
+    const Complex message{0.00075, -0.00025};
+    const std::vector<Complex> expected(slots, message);
+    auto oneTower             = EncryptWithActiveTowers(context, owner.keyPair.publicKey, expected, /*activeTowers=*/1);
+    const auto oneTowerBudget = paco.GetNumericalBudget(oneTower);
+    EXPECT_GE(oneTowerBudget.conditionalPrecisionBits, parameters.numerics.minimumPrecisionBits);
+    auto oneTowerRefreshed    = paco.EvalSequential(oneTower);
+    const auto oneTowerActual = DecryptSlots(context, owner.keyPair.secretKey, oneTowerRefreshed, slots);
+    ExpectVectorsNear(oneTowerActual, expected, 2e-4, "one-tower admitted PaCo output");
+
+    auto twoTower             = EncryptWithActiveTowers(context, owner.keyPair.publicKey, expected, /*activeTowers=*/2);
+    const auto twoTowerBudget = paco.GetNumericalBudget(twoTower);
+    EXPECT_GE(twoTowerBudget.conditionalPrecisionBits, parameters.numerics.minimumPrecisionBits);
+    auto refreshed    = paco.EvalSequential(twoTower);
+    const auto actual = DecryptSlots(context, owner.keyPair.secretKey, refreshed, slots);
+    ExpectVectorsNear(actual, expected, 2e-4, "two-tower sequential PaCo output");
+
+    auto threeTower = EncryptWithActiveTowers(context, owner.keyPair.publicKey, expected, /*activeTowers=*/3);
+    EXPECT_THROW((void)paco.GetNumericalBudget(threeTower), OpenFHEException);
+    EXPECT_THROW((void)paco.EvalSequential(threeTower), OpenFHEException);
 }
 
 TEST_F(UTCKKSRNS_PACO, ParallelConcurrentEvaluationMatchesSequentialSchedule) {

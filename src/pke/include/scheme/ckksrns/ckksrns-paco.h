@@ -36,6 +36,7 @@
 #include "key/keypair.h"
 #include "key/privatekey.h"
 #include "key/publickey.h"
+#include "scheme/ckksrns/ckksrns-paco-numerics.h"
 
 #include <array>
 #include <complex>
@@ -49,20 +50,43 @@
 namespace lbcrypto {
 
 /**
+ * Application-supplied numerical admission contract.
+ *
+ * Bounds are expressed in raw scaled plaintext-coefficient units, before CKKS
+ * decoding. maximumNonSmallAngleAbsoluteError must cover every error source
+ * other than the analytically bounded sine approximation: incoming CKKS error,
+ * binary64 phase/transforms, encoding, rescaling, key switching, and evaluation
+ * noise. The evaluator cannot discover these facts from an encrypted input, so
+ * production callers must establish them independently. An all-zero policy is
+ * admitted only for explicitly unsecured HEStd_NotSet research contexts.
+ */
+struct PaCoNumericalPolicy {
+    double maximumAbsScaledCoefficient       = 0.0;
+    double maximumNonSmallAngleAbsoluteError = 0.0;
+    uint32_t minimumPrecisionBits            = 0;
+    uint32_t maximumActiveTowers             = 0;
+
+    bool IsConfigured() const noexcept;
+    void Validate() const;
+};
+
+using PaCoNumericalBudget = paco::detail::PaCoNumericalBudget;
+
+/**
  * Native OpenFHE parameters for PaCo (Bootstrapping via Partial CoeffToSlot).
  *
  * The notation follows Algorithms 1--5 of the PaCo paper.  C is the number
  * of real plaintext-polynomial coefficients refreshed by one sequential
  * invocation, so it represents C/2 ordinary complex CKKS slots.  The context
- * ring dimension N must satisfy 4*h*C <= N. Positive g0/g1 values larger than
- * their layer counts are accepted as the harmless extension "group all
- * remaining layers" (the pinned reference clamps them to the same effect).
+ * ring dimension N must satisfy 4*h*C <= N. g0 and g1 are deliberately capped
+ * at three so arbitrary inputs cannot trigger combinatorial BSGS planning.
  */
 struct PaCoParameters {
     uint32_t h  = 0;
     uint32_t C  = 0;
     uint32_t g0 = 1;
     uint32_t g1 = 1;
+    PaCoNumericalPolicy numerics;
 
     uint32_t CoefficientBudget(uint32_t ringDimension) const;
     uint32_t ResidueBlockCount(uint32_t ringDimension) const;
@@ -73,8 +97,8 @@ struct PaCoParameters {
 
 /**
  * Published proof-of-concept parameter metadata from PACO.md, Table 4.
- * These are citation/calibration values only. The native port uses direct
- * diagonal maps and full-context OpenFHE HYBRID keys, so the table's key
+ * These are citation/calibration values only. The native port uses its own
+ * BSGS planner and OpenFHE level-restricted HYBRID keys, so the table's key
  * counts, modulus sizes, memory, timing, security, and precision do not carry
  * over without native measurement.
  */
@@ -111,10 +135,10 @@ struct PaCoKeyMaterial {
 /**
  * Evaluator-visible PaCo material. It contains no plaintext secret key.
  *
- * This is a trusted in-process handle bundle rather than a hardened wire
- * format. OpenFHE evaluation-key pointees are shared and must be treated as
- * immutable after generation/loading. LoadBootstrapKeys validates the bundle
- * boundary and privately clones its selector ciphertexts and key map.
+ * OpenFHE evaluation-key pointees are shared and must be treated as immutable
+ * after generation/loading. LoadBootstrapKeys validates the in-process bundle
+ * boundary and privately clones its selector ciphertexts and key map. Use
+ * PaCoBootstrapKeySerializer for an authenticated external artifact.
  */
 struct PaCoBootstrapKeys {
     uint32_t formatVersion = 1;
@@ -128,6 +152,10 @@ struct PaCoBootstrapKeys {
     std::vector<int32_t> rotationIndices;
     /** Complete, deduplicated X -> X^j automorphism manifest used by this bundle. */
     std::vector<uint32_t> automorphismIndices;
+    /** Earliest OpenFHE level at which each restricted automorphism key may be used. */
+    std::map<uint32_t, uint32_t> automorphismKeyLevels;
+    /** Earliest OpenFHE level at which the restricted multiplication key may be used. */
+    uint32_t multiplicationKeyLevel = 0;
     std::string keyTag;
 };
 
@@ -163,16 +191,16 @@ std::vector<SparseDiagonalMatrix> GroupStages(const std::vector<SparseDiagonalMa
  * automorphism/relinearization keys.  Setup is an owner operation; evaluation
  * uses only PaCoBootstrapKeys and public ciphertext coefficients.
  *
- * This native profile requires the input at an exactly one-tower base CKKS
- * modulus, one of the context's configured CKKS scales, noise-scale degree
- * one, and scaled
- * plaintext coefficients small relative to that modulus.  PaCo itself only
- * requires a well-defined modulus q; supporting a multi-tower RNS product as
- * q would additionally require exact CRT coefficient interpolation, which is
- * not implemented here.  The CryptoContext must use 64-bit NativeInteger,
- * COMPLEX CKKS packing, FLEXIBLEAUTO, HYBRID key switching, and have at least
- * MultiplicativeDepth()+2 Q towers so that the result regains at least one
- * usable level.
+ * The input may contain any nonempty prefix of the context's active Q towers.
+ * GetCoefficientEncodings interpolates that prefix exactly and defines q as
+ * its exact CRT product. Full evaluation validates an admitted wider prefix at
+ * q0 and projects it to that one-tower PaCo boundary before Algorithm 3; this
+ * prevents the reconstruction scalar from amplifying evaluation noise with
+ * every extra tower. Inputs must use one of the context's configured CKKS
+ * scales and noise-scale degree one. Secured contexts reject an absent
+ * numerical policy. The CryptoContext must use COMPLEX CKKS packing, FLEXIBLEAUTO
+ * scaling, HYBRID key switching, one prime per logical level, and have enough
+ * Q towers for a useful output.
  */
 class PaCoCKKSRNS {
 public:
@@ -193,12 +221,16 @@ public:
     void LoadBootstrapKeys(PaCoBootstrapKeys bootstrapKeys);
 
     bool IsSetup() const noexcept;
+    bool HasNumericalPolicy() const noexcept;
     const PaCoParameters& GetParameters() const noexcept;
     /** Return an evaluator bundle with privately cloned selector ciphertexts and key map. */
     PaCoBootstrapKeys GetBootstrapKeys() const;
 
     /** Public part of Algorithm 3; exposed for reproducibility and testing. */
     std::vector<Plaintext> GetCoefficientEncodings(ConstCiphertext<DCRTPoly> ciphertext) const;
+
+    /** Recompute the fail-closed numerical certificate for an admitted input. */
+    PaCoNumericalBudget GetNumericalBudget(ConstCiphertext<DCRTPoly> ciphertext) const;
 
     /** Algorithm 4: refresh the C coefficients indexed by multiples of N/C. */
     Ciphertext<DCRTPoly> EvalSequential(ConstCiphertext<DCRTPoly> ciphertext) const;
@@ -228,8 +260,13 @@ private:
 
     void RequireSetup() const;
     void ValidateInput(ConstCiphertext<DCRTPoly> ciphertext) const;
+    BigInteger ActiveModulus(ConstCiphertext<DCRTPoly> ciphertext) const;
+    BigInteger EvaluationModulus(ConstCiphertext<DCRTPoly> ciphertext) const;
     std::vector<int32_t> RequiredRotationIndices() const;
     std::vector<uint32_t> RequiredAutomorphismIndices(const std::vector<int32_t>& rotations) const;
+    std::map<uint32_t, uint32_t> RequiredAutomorphismKeyLevels() const;
+    uint32_t RequiredMultiplicationKeyLevel() const;
+    void RequireAutomorphismAtLevel(ConstCiphertext<DCRTPoly> ciphertext, uint32_t automorphism) const;
     Ciphertext<DCRTPoly> Rotate(ConstCiphertext<DCRTPoly> ciphertext, int32_t index) const;
     Ciphertext<DCRTPoly> Conjugate(ConstCiphertext<DCRTPoly> ciphertext) const;
     Ciphertext<DCRTPoly> ConjugateRotate(ConstCiphertext<DCRTPoly> ciphertext, int32_t index) const;

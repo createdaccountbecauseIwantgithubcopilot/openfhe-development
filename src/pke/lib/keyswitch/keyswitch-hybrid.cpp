@@ -41,7 +41,79 @@
 #include "keyswitch/keyswitch-hybrid.h"
 #include "scheme/ckksrns/ckksrns-cryptoparameters.h"
 
+#include <algorithm>
+
 namespace lbcrypto {
+
+EvalKey<DCRTPoly> KeySwitchHYBRID::RestrictEvalKeyToLevel(const EvalKey<DCRTPoly>& evalKey, uint32_t minimumLevel) {
+    if (!evalKey || !evalKey->GetCryptoContext())
+        OPENFHE_THROW("HYBRID evaluation-key restriction requires a bound key");
+    const auto cryptoParams = std::dynamic_pointer_cast<CryptoParametersRNS>(evalKey->GetCryptoParameters());
+    if (!cryptoParams || !cryptoParams->GetElementParams() || !cryptoParams->GetParamsP() ||
+        !cryptoParams->GetParamsQP())
+        OPENFHE_THROW("HYBRID evaluation-key restriction requires complete RNS parameters");
+
+    const uint32_t fullQTowers = cryptoParams->GetElementParams()->GetParams().size();
+    const uint32_t pTowers     = cryptoParams->GetParamsP()->GetParams().size();
+    if (fullQTowers == 0 || pTowers == 0 || minimumLevel >= fullQTowers)
+        OPENFHE_THROW("HYBRID evaluation-key restriction level is outside the Q chain");
+    const uint32_t activeQTowers = fullQTowers - minimumLevel;
+
+    const auto& a = evalKey->GetAVector();
+    const auto& b = evalKey->GetBVector();
+    if (a.size() != cryptoParams->GetNumPartQ() || b.size() != a.size() || a.empty())
+        OPENFHE_THROW("HYBRID evaluation key does not have the full digit vector required for restriction");
+    const auto& fullQP              = cryptoParams->GetParamsQP();
+    const auto fullComponentMatches = [&](const DCRTPoly& component) {
+        return component.GetFormat() == Format::EVALUATION && component.GetParams() &&
+               *component.GetParams() == *fullQP;
+    };
+    if (!std::all_of(a.begin(), a.end(), fullComponentMatches) ||
+        !std::all_of(b.begin(), b.end(), fullComponentMatches))
+        OPENFHE_THROW("HYBRID evaluation key is not in the context's full QP basis");
+
+    std::vector<NativeInteger> moduli(activeQTowers + pTowers);
+    std::vector<NativeInteger> roots(activeQTowers + pTowers);
+    const auto& fullParams = fullQP->GetParams();
+    for (uint32_t i = 0; i < activeQTowers; ++i) {
+        moduli[i] = fullParams[i]->GetModulus();
+        roots[i]  = fullParams[i]->GetRootOfUnity();
+    }
+    for (uint32_t i = 0; i < pTowers; ++i) {
+        moduli[activeQTowers + i] = fullParams[fullQTowers + i]->GetModulus();
+        roots[activeQTowers + i]  = fullParams[fullQTowers + i]->GetRootOfUnity();
+    }
+    auto restrictedParams =
+        std::make_shared<ParmType>(fullQP->GetCyclotomicOrder(), std::move(moduli), std::move(roots));
+
+    const auto restrictComponent = [&](const DCRTPoly& source) {
+        DCRTPoly restricted(restrictedParams, Format::EVALUATION, true);
+        for (uint32_t i = 0; i < activeQTowers; ++i)
+            restricted.SetElementAtIndex(i, source.GetElementAtIndex(i));
+        for (uint32_t i = 0; i < pTowers; ++i)
+            restricted.SetElementAtIndex(activeQTowers + i, source.GetElementAtIndex(fullQTowers + i));
+        return restricted;
+    };
+
+    const uint32_t alpha = cryptoParams->GetNumPerPartQ();
+    if (alpha == 0)
+        OPENFHE_THROW("HYBRID evaluation-key restriction requires a nonzero Q partition size");
+    const uint32_t digitCount = std::min<uint32_t>(cryptoParams->GetNumPartQ(), 1 + (activeQTowers - 1) / alpha);
+    std::vector<DCRTPoly> restrictedA;
+    std::vector<DCRTPoly> restrictedB;
+    restrictedA.reserve(digitCount);
+    restrictedB.reserve(digitCount);
+    for (uint32_t part = 0; part < digitCount; ++part) {
+        restrictedA.emplace_back(restrictComponent(a[part]));
+        restrictedB.emplace_back(restrictComponent(b[part]));
+    }
+
+    auto restricted = std::make_shared<EvalKeyRelinImpl<DCRTPoly>>(evalKey->GetCryptoContext());
+    restricted->SetAVector(std::move(restrictedA));
+    restricted->SetBVector(std::move(restrictedB));
+    restricted->SetKeyTag(evalKey->GetKeyTag());
+    return restricted;
+}
 
 EvalKey<DCRTPoly> KeySwitchHYBRID::KeySwitchGenInternal(const PrivateKey<DCRTPoly> oldKey,
                                                         const PrivateKey<DCRTPoly> newKey) const {
@@ -98,7 +170,7 @@ EvalKey<DCRTPoly> KeySwitchHYBRID::KeySwitchGenInternal(const PrivateKey<DCRTPol
 #pragma omp parallel for num_threads(OpenFHEParallelControls.GetThreadLimit(numPartQ)) private(dug, dgg)
     for (uint32_t part = 0; part < numPartQ; ++part) {
         auto a = (ekPrev == nullptr) ? DCRTPoly(dug, paramsQP, Format::EVALUATION) :  // single-key HE
-                                       ekPrev->GetAVector()[part];                                      // threshold HE
+                     ekPrev->GetAVector()[part];                                      // threshold HE
         DCRTPoly e(dgg, paramsQP, Format::EVALUATION);
         DCRTPoly b(paramsQP, Format::EVALUATION, true);
 
@@ -402,16 +474,83 @@ std::shared_ptr<std::vector<DCRTPoly>> KeySwitchHYBRID::EvalFastKeySwitchCore(
 std::shared_ptr<std::vector<DCRTPoly>> KeySwitchHYBRID::EvalFastKeySwitchCoreExt(
     const std::shared_ptr<std::vector<DCRTPoly>> digits, const EvalKey<DCRTPoly> evalKey,
     const std::shared_ptr<ParmType> paramsQl) const {
-    const auto paramsQlP   = (*digits)[0].GetParams();
-    const uint32_t sizeQlP = paramsQlP->GetParams().size();
-
-    const uint32_t limit  = digits->size();
-    const uint32_t sizeQl = paramsQl->GetParams().size();
-    auto&& cryptoParams   = std::dynamic_pointer_cast<CryptoParametersRNS>(evalKey->GetCryptoParameters());
-    const uint32_t delta  = cryptoParams->GetElementParams()->GetParams().size() - sizeQl;
-
+    if (!digits || digits->empty() || !evalKey || !paramsQl)
+        OPENFHE_THROW("HYBRID key switching requires nonempty digits, evaluation key, and Q_l parameters");
+    const auto cryptoParams = std::dynamic_pointer_cast<CryptoParametersRNS>(evalKey->GetCryptoParameters());
+    if (!cryptoParams || !cryptoParams->GetElementParams() || !cryptoParams->GetParamsP())
+        OPENFHE_THROW("HYBRID key switching requires complete RNS parameters");
     const auto& av = evalKey->GetAVector();
     const auto& bv = evalKey->GetBVector();
+    if (av.empty() || av.size() != bv.size())
+        OPENFHE_THROW("HYBRID evaluation key has an invalid digit vector");
+
+    const auto& paramsQ        = cryptoParams->GetElementParams();
+    const auto& paramsP        = cryptoParams->GetParamsP();
+    const uint32_t fullQTowers = paramsQ->GetParams().size();
+    const uint32_t pTowers     = paramsP->GetParams().size();
+    const uint32_t keyTowers   = av.front().GetNumOfElements();
+    if (pTowers == 0 || keyTowers <= pTowers)
+        OPENFHE_THROW("HYBRID evaluation key basis does not contain Q and P");
+    const uint32_t keyQTowers = keyTowers - pTowers;
+    if (keyQTowers > fullQTowers)
+        OPENFHE_THROW("HYBRID evaluation key Q prefix exceeds the context chain");
+
+    const uint32_t alpha = cryptoParams->GetNumPerPartQ();
+    if (alpha == 0)
+        OPENFHE_THROW("HYBRID evaluation-key use requires a nonzero Q partition size");
+    const uint32_t expectedKeyDigits = 1 + (keyQTowers - 1) / alpha;
+    if (av.size() != expectedKeyDigits)
+        OPENFHE_THROW("HYBRID evaluation-key digit count does not match its Q prefix");
+    const auto keyComponentMatches = [&](const DCRTPoly& component) {
+        if (component.GetFormat() != Format::EVALUATION || !component.GetParams() ||
+            component.GetNumOfElements() != keyQTowers + pTowers)
+            return false;
+        const auto& componentParams = component.GetParams()->GetParams();
+        for (uint32_t i = 0; i < keyQTowers; ++i) {
+            if (*componentParams[i] != *paramsQ->GetParams()[i])
+                return false;
+        }
+        for (uint32_t i = 0; i < pTowers; ++i) {
+            if (*componentParams[keyQTowers + i] != *paramsP->GetParams()[i])
+                return false;
+        }
+        return true;
+    };
+    if (!std::all_of(av.begin(), av.end(), keyComponentMatches) ||
+        !std::all_of(bv.begin(), bv.end(), keyComponentMatches))
+        OPENFHE_THROW("HYBRID evaluation key is not an exact Q-prefix-plus-P layout");
+
+    const uint32_t sizeQl = paramsQl->GetParams().size();
+    if (sizeQl == 0 || sizeQl > keyQTowers)
+        OPENFHE_THROW("HYBRID evaluation key cannot be used before its minimum level");
+    for (uint32_t i = 0; i < sizeQl; ++i) {
+        if (*paramsQl->GetParams()[i] != *paramsQ->GetParams()[i])
+            OPENFHE_THROW("HYBRID ciphertext basis is not a Q prefix of the evaluation-key context");
+    }
+
+    const uint32_t expectedCipherDigits = 1 + (sizeQl - 1) / alpha;
+    if (digits->size() != expectedCipherDigits || digits->size() > av.size())
+        OPENFHE_THROW("HYBRID decomposition digit count is incompatible with the evaluation key");
+    const auto paramsQlP    = (*digits)[0].GetParams();
+    const uint32_t sizeQlP  = sizeQl + pTowers;
+    const auto digitMatches = [&](const DCRTPoly& digit) {
+        if (digit.GetFormat() != Format::EVALUATION || !digit.GetParams() || digit.GetNumOfElements() != sizeQlP)
+            return false;
+        const auto& digitParams = digit.GetParams()->GetParams();
+        for (uint32_t i = 0; i < sizeQl; ++i) {
+            if (*digitParams[i] != *paramsQ->GetParams()[i])
+                return false;
+        }
+        for (uint32_t i = 0; i < pTowers; ++i) {
+            if (*digitParams[sizeQl + i] != *paramsP->GetParams()[i])
+                return false;
+        }
+        return true;
+    };
+    if (!std::all_of(digits->begin(), digits->end(), digitMatches))
+        OPENFHE_THROW("HYBRID decomposition is not in the expected Q_l-plus-P basis");
+
+    const uint32_t limit = digits->size();
 
     auto result = std::make_shared<std::vector<DCRTPoly>>();
     result->reserve(2);
@@ -422,7 +561,7 @@ std::shared_ptr<std::vector<DCRTPoly>> KeySwitchHYBRID::EvalFastKeySwitchCoreExt
     for (uint32_t j = 0; j < limit; ++j) {
 #pragma omp parallel for num_threads(OpenFHEParallelControls.GetThreadLimit(sizeQlP))
         for (uint32_t i = 0; i < sizeQlP; ++i) {
-            const auto idx  = (i >= sizeQl) ? i + delta : i;
+            const auto idx  = (i >= sizeQl) ? keyQTowers + (i - sizeQl) : i;
             const auto& cji = (*digits)[j].GetElementAtIndex(i);
             const auto& bji = bv[j].GetElementAtIndex(idx);
             const auto& aji = av[j].GetElementAtIndex(idx);

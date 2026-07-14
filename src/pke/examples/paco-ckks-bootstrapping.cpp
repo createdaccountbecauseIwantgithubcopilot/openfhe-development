@@ -27,7 +27,9 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //==================================================================================
 
-// Research-only end-to-end demonstration of PaCo CKKS bootstrapping.
+// Fast N=64, HEStd_NotSet smoke demonstration of PaCo CKKS bootstrapping.
+// This executable is intentionally a toy; it is not the separately frozen and
+// measured PACO-P128-65536-v1 production-candidate profile.
 //
 // Paper source: the workspace's GL_scheme/PACO.md transcription
 //   J.-S. Coron and T. Seure, "PaCo: Bootstrapping for CKKS via Partial
@@ -139,7 +141,7 @@ void PrintVector(const std::string& label, const std::vector<std::complex<double
     std::cout << "]\n";
 }
 
-CryptoContext<DCRTPoly> MakeResearchContext(const PaCoParameters& pacoParameters) {
+CryptoContext<DCRTPoly> MakeToySmokeContext(const PaCoParameters& pacoParameters) {
 #if NATIVEINT != 64
     throw std::runtime_error("this example requires the 64-bit FLEXIBLEAUTO CKKS build");
 #else
@@ -180,14 +182,15 @@ CryptoContext<DCRTPoly> MakeResearchContext(const PaCoParameters& pacoParameters
 
 int main() {
     try {
-        std::cout << "PaCo CKKS bootstrapping -- research-only toy demonstration\n"
-                  << "HEStd_NotSet is intentional: this run makes NO security claim.\n\n";
+        std::cout << "PaCo CKKS bootstrapping -- toy N=64 HEStd_NotSet smoke demonstration\n"
+                  << "This executable makes no security or production claim.\n"
+                  << "For PACO-P128-65536-v1, use paco-security-profile and paco-production-audit.\n\n";
 
         const PaCoParameters parameters{/*h=*/kH, /*C=*/kC, /*g0=*/kG0, /*g1=*/kG1};
         parameters.Validate(kRingDimension);
 
         const uint32_t depth = parameters.MultiplicativeDepth();
-        auto context         = MakeResearchContext(parameters);
+        auto context         = MakeToySmokeContext(parameters);
         const uint32_t slots = context->GetRingDimension() / 2;
 
         std::cout << "N=" << context->GetRingDimension() << ", h=" << parameters.h << ", C=" << parameters.C

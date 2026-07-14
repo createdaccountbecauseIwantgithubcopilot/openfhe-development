@@ -82,6 +82,15 @@ public:
     EvalKey<DCRTPoly> KeySwitchGenInternal(const PrivateKey<DCRTPoly> oldPrivateKey,
                                            const PublicKey<DCRTPoly> newPublicKey) const override;
 
+    /**
+     * Return a HYBRID evaluation key restricted to the Q prefix active at
+     * minimumLevel, followed by the complete P basis. The digit vector is
+     * truncated to the partitions intersecting that Q prefix. A restricted
+     * key is valid at minimumLevel and every later (smaller-Q) level, but the
+     * key-switch core rejects its use at an earlier level.
+     */
+    static EvalKey<DCRTPoly> RestrictEvalKeyToLevel(const EvalKey<DCRTPoly>& evalKey, uint32_t minimumLevel);
+
     void KeySwitchInPlace(Ciphertext<DCRTPoly>& ciphertext, const EvalKey<DCRTPoly> evalKey) const override;
 
     Ciphertext<DCRTPoly> KeySwitchExt(ConstCiphertext<DCRTPoly> ciphertext, bool addFirst) const override;
