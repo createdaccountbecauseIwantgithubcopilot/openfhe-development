@@ -12,7 +12,7 @@ namespace lbcrypto {
 
 GLSRDLPacoContractCapabilities GLSRDLPacoContractBridge::GetCapabilities() {
     GLSRDLPacoContractCapabilities capabilities;
-    capabilities.schema                              = "openfhe.gl.srdl_paco_contract.v12";
+    capabilities.schema                              = "openfhe.gl.srdl_paco_contract.v14";
     capabilities.requiredCMakeTarget                 = "GLScheme::glscheme";
     capabilities.requiredHeader                      = "glscheme/rns_srdl_paco.hpp";
     capabilities.requiredBankHeader                  = "glscheme/rns_srdl_bank.hpp";
@@ -43,11 +43,23 @@ GLSRDLPacoContractCapabilities GLSRDLPacoContractBridge::GetCapabilities() {
     capabilities.requiredNativeCCudaK2Header         = "glscheme/flashgl_srdl_native_c_cuda.hpp";
     capabilities.requiredNativeCCudaM4BatchHeader    = "glscheme/flashgl_srdl_native_c_cuda.hpp";
     capabilities.requiredSm89PlannerHeader           = "glscheme/flashgl_srdl_sm89_planner.hpp";
-    capabilities.requiredPacoSourceSpecSha256      = "22665294f36ea97a0dd80ed0682e1da9656d546a0a455dc7ef48d4879ac035f6";
+    capabilities.requiredDirectGaugeMathHeader       = "glscheme/rns_srdl_direct_gauge.hpp";
+    capabilities.requiredDirectGaugeRowCompilerHeader =
+        "glscheme/rns_srdl_direct_gauge_row_compiler.hpp";
+    capabilities.requiredDirectGaugeBankHeader       = "glscheme/rns_srdl_direct_gauge_bank.hpp";
+    capabilities.requiredDirectGaugeCpuHeader        = "glscheme/rns_srdl_direct_gauge_cpu.hpp";
+    capabilities.requiredDirectGaugeSuffixHeader     = "glscheme/rns_srdl_direct_gauge_suffix.hpp";
+    capabilities.requiredDirectGaugeCoreHeader       = "glscheme/rns_srdl_direct_gauge_core.hpp";
+    capabilities.requiredPacoSourceSpecSha256      = "8ac58ad4d09536da488631f25f2dd777130057eb4167bef38b231dce9e3850eb";
     capabilities.requiredGpuSourceSpecSha256       = "ea97a682728fe43c745551fe5546b4355c2ea2065556c25581112cdfaa788263";
     capabilities.requiredNativeCSourceSpecFilename = "PACO_GL_NativeC_redesign_formulation.md";
-    capabilities.requiredNativeCSourceSpecSha256   = "7e54bd7792df106288fbc9025bcc5e70eff6ddb711206b97907749e9b3d539b3";
+    capabilities.requiredNativeCSourceSpecSha256   = "b5da181b721d0991b50789ad31b52da137082aaa2314bff228eb267bb7a85df1";
     capabilities.requiredNativeCRevision           = "5";
+    capabilities.requiredDirectGaugeSourceSpecFilename = "PACO_GL_DirectGauge_verified_redesign.md";
+    capabilities.requiredDirectGaugeSourceSpecSha256 = "2fe843619d01cfe7f909ba6066585ddaed507ac6e81c365d59270da339345bb5";
+    capabilities.requiredDirectGaugeContractVersion = "srdl-direct-gauge-cpu-v1";
+    capabilities.requiredDirectGaugeCoreContractVersion =
+        "srdl-direct-gauge-authenticated-cpu-core-v1";
     capabilities.requiredContractVersion           = "srdl-phase0-v1";
     capabilities.requiredNativeCAdapterContractVersion        = "srdl-native-c-r5-adapter-v1";
     capabilities.requiredBankCiphertextSetSchema              = "glscheme.srdl_bank_ciphertext_set.v1";
@@ -90,6 +102,19 @@ GLSRDLPacoContractCapabilities GLSRDLPacoContractBridge::GetCapabilities() {
         "glscheme.flashgl_srdl_native_c_cuda_m4_batch_result.v2";
     capabilities.requiredSm89PlannerSchema                    = "glscheme.flashgl_srdl_sm89_resource_plan.v1";
     capabilities.requiredSm89DeviceLimitQuerySchema           = "glscheme.flashgl_srdl_sm89_device_limit_query.v1";
+    capabilities.requiredDirectGaugeReferenceSchema           = "glscheme.srdl_direct_gauge_reference.v1";
+    capabilities.requiredDirectGaugeRowCompilerSchema =
+        "glscheme.srdl_direct_gauge_row_map_compiler.v1";
+    capabilities.requiredDirectGaugeBankSchema                = "glscheme.srdl_direct_gauge_bank_set.v1";
+    capabilities.requiredDirectGaugeCpuPrefixSchema           = "glscheme.srdl_direct_gauge_cpu_prefix.v1";
+    capabilities.requiredDirectGaugeSuffixManifestSchema =
+        "glscheme.srdl_direct_gauge_product_suffix_manifest.v1";
+    capabilities.requiredDirectGaugeSuffixResultSchema =
+        "glscheme.srdl_direct_gauge_product_suffix_receipt.v1";
+    capabilities.requiredDirectGaugeCoreManifestSchema =
+        "glscheme.srdl_direct_gauge_cpu_core_manifest.v1";
+    capabilities.requiredDirectGaugeCoreReceiptSchema =
+        "glscheme.srdl_direct_gauge_cpu_core_receipt.v1";
     capabilities.requiredNativeCZInvSumContractVersion        = "srdl-native-c-zinvsum-r5-v1";
     capabilities.requiredNativeCZInverseTransformBinding      = "F_2C_inverse[d,s]=exp(-2pi*i*d*s/(2C))/(2C)";
     capabilities.requiredNativeCWContractVersion              = "srdl-native-c-w-r5-v1";
@@ -130,7 +155,15 @@ GLSRDLPacoContractCapabilities GLSRDLPacoContractBridge::GetCapabilities() {
         "artifact carried explicitly into PackY/final W, the final direct "
         "unnormalized forward-U_W standard GL output result, typed CUDA K2, the "
         "single-outer-Y/16-sigma resource-derived M4 payload-parity admission, and "
-        "the SM89-or-older resource/device-limit planner. The CUDA M4 boundary "
+        "the SM89-or-older resource/device-limit planner. The DirectGauge CPU "
+        "path additionally requires the triple-pinned exact candidate compiler, "
+        "16-bank nontrivial-only owner catalog for H64/S16, row-dependent "
+        "W-before-Z additive prefix, gauge-free product suffix with retained "
+        "terminal ConjSame recovery, and the immutable authenticated CPU "
+        "Core-DG connector that consumes and fully re-hashes the move-only "
+        "prefix artifact. The connector is not terminal recovery, grouped "
+        "synthesis, standard GL output, or bootstrap admission. The CUDA M4 "
+        "boundary "
         "does not evaluate full-device SwitchSmall or grouped M4 and does not "
         "authorize a generic multi-Y launch. These completed CPU "
         "stages must come from the external proof-carrying provider; standalone "

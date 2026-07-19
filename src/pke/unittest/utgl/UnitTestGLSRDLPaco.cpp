@@ -17,7 +17,7 @@ namespace {
 
 TEST(GLSRDLPacoContractBridge, DeclaresExternalStagesAndFailsClosedLocally) {
     const auto capabilities = GLSRDLPacoContractBridge::GetCapabilities();
-    EXPECT_EQ(capabilities.schema, "openfhe.gl.srdl_paco_contract.v12");
+    EXPECT_EQ(capabilities.schema, "openfhe.gl.srdl_paco_contract.v14");
     EXPECT_EQ(capabilities.requiredCMakeTarget, "GLScheme::glscheme");
     EXPECT_EQ(capabilities.requiredHeader, "glscheme/rns_srdl_paco.hpp");
     EXPECT_EQ(capabilities.requiredBankHeader, "glscheme/rns_srdl_bank.hpp");
@@ -49,14 +49,31 @@ TEST(GLSRDLPacoContractBridge, DeclaresExternalStagesAndFailsClosedLocally) {
     EXPECT_EQ(capabilities.requiredNativeCCudaM4BatchHeader,
               "glscheme/flashgl_srdl_native_c_cuda.hpp");
     EXPECT_EQ(capabilities.requiredSm89PlannerHeader, "glscheme/flashgl_srdl_sm89_planner.hpp");
+    EXPECT_EQ(capabilities.requiredDirectGaugeMathHeader, "glscheme/rns_srdl_direct_gauge.hpp");
+    EXPECT_EQ(capabilities.requiredDirectGaugeRowCompilerHeader,
+              "glscheme/rns_srdl_direct_gauge_row_compiler.hpp");
+    EXPECT_EQ(capabilities.requiredDirectGaugeBankHeader, "glscheme/rns_srdl_direct_gauge_bank.hpp");
+    EXPECT_EQ(capabilities.requiredDirectGaugeCpuHeader, "glscheme/rns_srdl_direct_gauge_cpu.hpp");
+    EXPECT_EQ(capabilities.requiredDirectGaugeSuffixHeader,
+              "glscheme/rns_srdl_direct_gauge_suffix.hpp");
+    EXPECT_EQ(capabilities.requiredDirectGaugeCoreHeader,
+              "glscheme/rns_srdl_direct_gauge_core.hpp");
     EXPECT_EQ(capabilities.requiredPacoSourceSpecSha256,
-              "22665294f36ea97a0dd80ed0682e1da9656d546a0a455dc7ef48d4879ac035f6");
+              "8ac58ad4d09536da488631f25f2dd777130057eb4167bef38b231dce9e3850eb");
     EXPECT_EQ(capabilities.requiredGpuSourceSpecSha256,
               "ea97a682728fe43c745551fe5546b4355c2ea2065556c25581112cdfaa788263");
     EXPECT_EQ(capabilities.requiredNativeCSourceSpecFilename, "PACO_GL_NativeC_redesign_formulation.md");
     EXPECT_EQ(capabilities.requiredNativeCSourceSpecSha256,
-              "7e54bd7792df106288fbc9025bcc5e70eff6ddb711206b97907749e9b3d539b3");
+              "b5da181b721d0991b50789ad31b52da137082aaa2314bff228eb267bb7a85df1");
     EXPECT_EQ(capabilities.requiredNativeCRevision, "5");
+    EXPECT_EQ(capabilities.requiredDirectGaugeSourceSpecFilename,
+              "PACO_GL_DirectGauge_verified_redesign.md");
+    EXPECT_EQ(capabilities.requiredDirectGaugeSourceSpecSha256,
+              "2fe843619d01cfe7f909ba6066585ddaed507ac6e81c365d59270da339345bb5");
+    EXPECT_EQ(capabilities.requiredDirectGaugeContractVersion,
+              "srdl-direct-gauge-cpu-v1");
+    EXPECT_EQ(capabilities.requiredDirectGaugeCoreContractVersion,
+              "srdl-direct-gauge-authenticated-cpu-core-v1");
     EXPECT_EQ(capabilities.requiredContractVersion, "srdl-phase0-v1");
     EXPECT_EQ(capabilities.requiredNativeCAdapterContractVersion, "srdl-native-c-r5-adapter-v1");
     EXPECT_EQ(capabilities.requiredBankCiphertextSetSchema, "glscheme.srdl_bank_ciphertext_set.v1");
@@ -102,6 +119,22 @@ TEST(GLSRDLPacoContractBridge, DeclaresExternalStagesAndFailsClosedLocally) {
               "glscheme.flashgl_srdl_native_c_cuda_m4_batch_result.v2");
     EXPECT_EQ(capabilities.requiredSm89PlannerSchema, "glscheme.flashgl_srdl_sm89_resource_plan.v1");
     EXPECT_EQ(capabilities.requiredSm89DeviceLimitQuerySchema, "glscheme.flashgl_srdl_sm89_device_limit_query.v1");
+    EXPECT_EQ(capabilities.requiredDirectGaugeReferenceSchema,
+              "glscheme.srdl_direct_gauge_reference.v1");
+    EXPECT_EQ(capabilities.requiredDirectGaugeRowCompilerSchema,
+              "glscheme.srdl_direct_gauge_row_map_compiler.v1");
+    EXPECT_EQ(capabilities.requiredDirectGaugeBankSchema,
+              "glscheme.srdl_direct_gauge_bank_set.v1");
+    EXPECT_EQ(capabilities.requiredDirectGaugeCpuPrefixSchema,
+              "glscheme.srdl_direct_gauge_cpu_prefix.v1");
+    EXPECT_EQ(capabilities.requiredDirectGaugeSuffixManifestSchema,
+              "glscheme.srdl_direct_gauge_product_suffix_manifest.v1");
+    EXPECT_EQ(capabilities.requiredDirectGaugeSuffixResultSchema,
+              "glscheme.srdl_direct_gauge_product_suffix_receipt.v1");
+    EXPECT_EQ(capabilities.requiredDirectGaugeCoreManifestSchema,
+              "glscheme.srdl_direct_gauge_cpu_core_manifest.v1");
+    EXPECT_EQ(capabilities.requiredDirectGaugeCoreReceiptSchema,
+              "glscheme.srdl_direct_gauge_cpu_core_receipt.v1");
     EXPECT_EQ(capabilities.requiredNativeCZInvSumContractVersion, "srdl-native-c-zinvsum-r5-v1");
     EXPECT_EQ(capabilities.requiredNativeCZInverseTransformBinding, "F_2C_inverse[d,s]=exp(-2pi*i*d*s/(2C))/(2C)");
     EXPECT_EQ(capabilities.requiredNativeCWContractVersion, "srdl-native-c-w-r5-v1");
@@ -177,6 +210,13 @@ TEST(GLSRDLPacoContractBridge, DeclaresExternalStagesAndFailsClosedLocally) {
     EXPECT_TRUE(capabilities.externalImmutableNativeCCudaM4BatchResultRequired);
     EXPECT_TRUE(capabilities.externalSm89PlannerRequired);
     EXPECT_TRUE(capabilities.externalSm89DeviceLimitQueryRequired);
+    EXPECT_TRUE(capabilities.externalDirectGaugeReferenceCompilerRequired);
+    EXPECT_TRUE(capabilities.externalDirectGaugeRowCompilerRequired);
+    EXPECT_TRUE(capabilities.externalDirectGaugeNontrivialBankSetRequired);
+    EXPECT_TRUE(capabilities.externalDirectGaugeCpuPrefixRequired);
+    EXPECT_TRUE(capabilities.externalDirectGaugeGaugeFreeSuffixRequired);
+    EXPECT_TRUE(capabilities.externalDirectGaugeAuthenticatedCpuCoreRequired);
+    EXPECT_TRUE(capabilities.externalImmutableDirectGaugeCpuCoreResultRequired);
     EXPECT_TRUE(capabilities.postCrossYEntryBoundaryRequired);
     EXPECT_TRUE(capabilities.sharedSwitchSmallKeyAcrossYSlicesRequired);
     EXPECT_TRUE(capabilities.normalizedZInvSumRequired);
@@ -230,6 +270,12 @@ TEST(GLSRDLPacoContractBridge, DeclaresExternalStagesAndFailsClosedLocally) {
     EXPECT_FALSE(capabilities.nativeCCudaM4FullDeviceGroupedM4);
     EXPECT_FALSE(capabilities.localSm89ResourcePlanner);
     EXPECT_FALSE(capabilities.localSm89DeviceLimitQuery);
+    EXPECT_FALSE(capabilities.localDirectGaugeReferenceCompiler);
+    EXPECT_FALSE(capabilities.localDirectGaugeRowCompiler);
+    EXPECT_FALSE(capabilities.localDirectGaugeNontrivialBankGeneration);
+    EXPECT_FALSE(capabilities.localDirectGaugeCpuPrefix);
+    EXPECT_FALSE(capabilities.localDirectGaugeGaugeFreeSuffix);
+    EXPECT_FALSE(capabilities.localDirectGaugeAuthenticatedCpuCore);
     EXPECT_FALSE(capabilities.encryptedBankGeneration);
     EXPECT_FALSE(capabilities.coefficientSlabRefresh);
     EXPECT_FALSE(capabilities.standardGLOutput);
@@ -264,6 +310,12 @@ TEST(GLSRDLPacoContractBridge, DeclaresExternalStagesAndFailsClosedLocally) {
     EXPECT_NE(capabilities.rejection.find("does not evaluate full-device SwitchSmall or grouped M4"),
               std::string::npos);
     EXPECT_NE(capabilities.rejection.find("No post-SM89 feature"), std::string::npos);
+    EXPECT_NE(capabilities.rejection.find("DirectGauge CPU path"), std::string::npos);
+    EXPECT_NE(capabilities.rejection.find("row-dependent W-before-Z additive prefix"),
+              std::string::npos);
+    EXPECT_NE(capabilities.rejection.find("immutable authenticated CPU Core-DG connector"),
+              std::string::npos);
+    EXPECT_NE(capabilities.rejection.find("not terminal recovery"), std::string::npos);
     EXPECT_NE(capabilities.rejection.find("no local Native-C, scheduler, CUDA, precision, security"),
               std::string::npos);
 
